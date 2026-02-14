@@ -1,0 +1,27 @@
+spring:
+  ai:
+    openai:
+      # ??????? DeepSeek API Key
+      api-key: ${SPRING_AI_DEEPSEEK_API_KEY}
+      # ?????DeepSeek ???
+      base-url: https://api.deepseek.com
+      chat:
+        options:
+          # DeepSeek ????? (deepseek-chat ? deepseek-reasoner)
+          model: deepseek-chat
+          # ???0-1????????????
+          temperature: 0.5
+
+langchain4j:
+  open-ai:
+    chat-model:
+      base-url: https://api.deepseek.com
+      api-key: ${SPRING_AI_DEEPSEEK_API_KEY}  # 换成你的 Key
+      model-name: deepseek-chat
+      temperature: 0.2  # 这种任务建议温度低一点，更稳定
+      log-requests: true
+      log-responses: true
+
+# 钉钉机器人配置
+dingtalk:
+  webhook: ${DING_ROBOT_URL}

@@ -1,0 +1,13 @@
+com\core\multiAgentSoftwareStudio\SoftwareStudioApplication.class
+com\core\multiAgentSoftwareStudio\agent\DeveloperAgent.class
+com\core\multiAgentSoftwareStudio\agent\ArchitectAgent.class
+com\core\multiAgentSoftwareStudio\agent\ProductManagerAgent.class
+com\core\multiAgentSoftwareStudio\Service\SoftwareStudioService.class
+com\core\multiAgentSoftwareStudio\pojo\teamCommunication\PrdDocument.class
+com\core\multiAgentSoftwareStudio\Service\SoftwareStudioServiceImpl.class
+com\core\multiAgentSoftwareStudio\pojo\teamCommunication\SourceCode.class
+com\core\multiAgentSoftwareStudio\controller\SoftwareController.class
+com\core\multiAgentSoftwareStudio\pojo\teamCommunication\ProjectStructure.class
+com\core\multiAgentSoftwareStudio\Config\AiConfig.class
+com\core\multiAgentSoftwareStudio\pojo\Result\Result.class
+com\core\multiAgentSoftwareStudio\pojo\teamCommunication\FileBlueprint.class
