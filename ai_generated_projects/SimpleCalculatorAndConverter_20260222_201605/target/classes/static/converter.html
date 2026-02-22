@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单位转换器</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding-top: 20px;
+        }
+        .converter-card {
+            max-width: 600px;
+            margin: 0 auto;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .result-box {
+            background-color: #e9ecef;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card converter-card p-4">
+            <h2 class="text-center mb-4">单位转换器</h2>
+            
+            <form id="conversionForm" th:action="@{/convert}" method="post">
+                <div class="mb-3">
+                    <label for="value" class="form-label">输入值</label>
+                    <input type="number" class="form-control" id="value" name="value" step="any" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="fromUnit" class="form-label">从</label>
+                    <select class="form-select" id="fromUnit" name="fromUnit" required>
+                        <option value="METER">米 (m)</option>
+                        <option value="KILOMETER">千米 (km)</option>
+                        <option value="MILE">英里 (mi)</option>
+                        <option value="CELSIUS">摄氏度 (°C)</option>
+                        <option value="FAHRENHEIT">华氏度 (°F)</option>
+                        <option value="GRAM">克 (g)</option>
+                        <option value="KILOGRAM">千克 (kg)</option>
+                        <option value="POUND">磅 (lb)</option>
+                        <option value="LITER">升 (L)</option>
+                        <option value="MILLILITER">毫升 (mL)</option>
+                        <option value="GALLON">加仑 (gal)</option>
+                    </select>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="toUnit" class="form-label">到</label>
+                    <select class="form-select" id="toUnit" name="toUnit" required>
+                        <option value="METER">米 (m)</option>
+                        <option value="KILOMETER">千米 (km)</option>
+                        <option value="MILE">英里 (mi)</option>
+                        <option value="CELSIUS">摄氏度 (°C)</option>
+                        <option value="FAHRENHEIT">华氏度 (°F)</option>
+                        <option value="GRAM">克 (g)</option>
+                        <option value="KILOGRAM">千克 (kg)</option>
+                        <option value="POUND">磅 (lb)</option>
+                        <option value="LITER">升 (L)</option>
+                        <option value="MILLILITER">毫升 (mL)</option>
+                        <option value="GALLON">加仑 (gal)</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn btn-primary w-100">转换</button>
+            </form>
+            
+            <div id="result" class="result-box mt-4" th:if="${result != null}">
+                <h5>转换结果</h5>
+                <p th:text="'结果: ' + ${originalValue} + ' ' + ${fromUnit} + ' = ' + ${result} + ' ' + ${toUnit}"></p>
+            </div>
+            
+            <div class="mt-3 text-center">
+                <a href="/" class="btn btn-outline-secondary">返回首页</a>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+/app/src/main/java/com/snakegame/model/GameState.java
+/app/src/main/java/com/snakegame/model/Position.java
+/app/src/main/java/com/snakegame/SnakeGameApplication.java
+/app/src/main/java/com/snakegame/model/GameConfig.java
+/app/src/main/java/com/snakegame/model/Snake.java
+/app/src/main/java/com/snakegame/exception/GameNotFoundException.java
+/app/src/main/java/com/snakegame/exception/GameException.java
+/app/src/main/java/com/snakegame/model/Direction.java
+/app/src/main/java/com/snakegame/exception/GameExceptionHandler.java
+/app/src/main/java/com/snake/game/controller/GameController.java
+/app/src/main/java/com/snakegame/service/GameService.java

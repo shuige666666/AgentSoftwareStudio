@@ -1,0 +1,25 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: web-snake-game
+  thymeleaf:
+    cache: false
+    prefix: classpath:/templates/
+    suffix: .html
+  web:
+    resources:
+      static-locations: classpath:/static/
+
+logging:
+  level:
+    com.example.snake: DEBUG
+    org.springframework.web: INFO
+
+# Game configuration
+game:
+  board-width: 20
+  board-height: 20
+  initial-speed: 150
+  speed-increment: 2

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简单计算器与转换器</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding-top: 50px;
+        }
+        .main-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+        .feature-card {
+            text-align: center;
+            padding: 30px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+            transition: transform 0.3s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+        }
+        .btn-primary {
+            width: 100%;
+            padding: 12px;
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container main-container">
+        <h1 class="text-center mb-4">简单计算器与转换器</h1>
+        <p class="text-center text-muted mb-5">提供基础数学计算和常用单位转换功能</p>
+        
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="feature-card">
+                    <div class="feature-icon">🧮</div>
+                    <h3>计算器</h3>
+                    <p class="text-muted">支持加减乘除、次方运算等基础数学计算</p>
+                    <a href="/calculator" class="btn btn-primary">开始计算</a>
+                </div>
+            </div>
+            
+            <div class="col-md-6 mb-4">
+                <div class="feature-card">
+                    <div class="feature-icon">📏</div>
+                    <h3>单位转换器</h3>
+                    <p class="text-muted">支持长度、温度、重量、体积等多种单位转换</p>
+                    <a href="/converter" class="btn btn-primary">开始转换</a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="text-center mt-5">
+            <small class="text-muted">© 2023 简单计算器与转换器 - 满足您的日常计算需求</small>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

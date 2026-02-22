@@ -1,0 +1,6 @@
+/app/src/main/java/com/snake/game/Main.java
+/app/src/main/java/com/snake/game/GameConstants.java
+/app/src/main/java/com/snake/game/GamePanel.java
+/app/src/main/java/com/snake/game/Snake.java
+/app/src/main/java/com/snake/game/Position.java
+/app/src/main/java/com/snake/game/Food.java

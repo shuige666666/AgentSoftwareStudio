@@ -1,0 +1,9 @@
+/app/src/main/java/com/example/calculator/controller/ConversionController.java
+/app/src/main/java/CalculationResult.java
+/app/src/main/java/com/example/calculator/controller/CalculationController.java
+/app/src/main/java/com/example/calculator/service/CalculationService.java
+/app/src/main/java/com/example/calculator/model/CalculationRequest.java
+/app/src/main/java/ConversionRequest.java
+/app/src/main/java/com/example/calculator/service/ConversionService.java
+/app/src/main/java/ConversionResult.java
+/app/src/main/java/com/example/calculator/CalculatorApplication.java
