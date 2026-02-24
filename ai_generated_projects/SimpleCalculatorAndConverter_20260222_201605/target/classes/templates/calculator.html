@@ -29,22 +29,22 @@
             <div class="row mb-3">
                 <div class="col-md-5">
                     <label for="num1" class="form-label">第一个数字</label>
-                    <input type="number" class="form-control" id="num1" name="num1" step="any" required>
+                    <input type="number" class="form-control" id="num1" name="num1" step="any" required th:value="${num1}">
                 </div>
                 
                 <div class="col-md-2 d-flex align-items-end">
                     <select class="form-select" id="operation" name="operation" required>
-                        <option value="+">+</option>
-                        <option value="-">-</option>
-                        <option value="*">×</option>
-                        <option value="/">÷</option>
-                        <option value="pow">x^y</option>
+                        <option value="add" th:selected="${operation == 'add'}">+</option>
+                        <option value="subtract" th:selected="${operation == 'subtract'}">-</option>
+                        <option value="multiply" th:selected="${operation == 'multiply'}">×</option>
+                        <option value="divide" th:selected="${operation == 'divide'}">÷</option>
+                        <option value="power" th:selected="${operation == 'power'}">x^y</option>
                     </select>
                 </div>
                 
                 <div class="col-md-5">
                     <label for="num2" class="form-label">第二个数字</label>
-                    <input type="number" class="form-control" id="num2" name="num2" step="any" required>
+                    <input type="number" class="form-control" id="num2" name="num2" step="any" required th:value="${num2}">
                 </div>
             </div>
             
@@ -53,9 +53,12 @@
             </div>
         </form>
         
-        <div class="result-box mt-4">
+        <div class="result-box mt-4" th:if="${result != null and result != ''}">
             <h5>计算结果:</h5>
-            <p id="result" th:text="${result}">等待输入...</p>
+            <p id="result" th:text="${result}"></p>
+        </div>
+        <div class="alert alert-danger mt-4" th:if="${error != null and error != ''}">
+            <p th:text="${error}"></p>
         </div>
         
         <div class="mt-4 text-center">
@@ -65,5 +68,6 @@
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/script.js"></script>
 </body>
 </html>

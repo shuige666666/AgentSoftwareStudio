@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单位转换器</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding-top: 20px;
+        }
+        .converter-card {
+            max-width: 600px;
+            margin: 0 auto;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .result-box {
+            background-color: #e9ecef;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card converter-card p-4">
+            <h2 class="text-center mb-4">单位转换器</h2>
+            
+            <form id="conversionForm" th:action="@{/convert}" method="post">
+                <div class="mb-3">
+                    <label for="conversionType" class="form-label">转换类型</label>
+                    <select class="form-select" id="conversionType" name="conversionType">
+                        <option value="length" th:selected="${conversionType == 'length'}">长度</option>
+                        <option value="temperature" th:selected="${conversionType == 'temperature'}">温度</option>
+                        <option value="weight" th:selected="${conversionType == 'weight'}">重量</option>
+                        <option value="volume" th:selected="${conversionType == 'volume'}">体积</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label for="inputValue" class="form-label">输入值</label>
+                    <input type="number" class="form-control" id="inputValue" name="inputValue" step="any" required th:value="${inputValue}">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="fromUnit" class="form-label">从</label>
+                    <select class="form-select" id="fromUnit" name="fromUnit" required>
+                        <option value="meter" th:selected="${fromUnit == 'meter'}">米 (m)</option>
+                        <option value="kilometer" th:selected="${fromUnit == 'kilometer'}">千米 (km)</option>
+                        <option value="mile" th:selected="${fromUnit == 'mile'}">英里 (mi)</option>
+                        <option value="celsius" th:selected="${fromUnit == 'celsius'}">摄氏度 (°C)</option>
+                        <option value="fahrenheit" th:selected="${fromUnit == 'fahrenheit'}">华氏度 (°F)</option>
+                        <option value="gram" th:selected="${fromUnit == 'gram'}">克 (g)</option>
+                        <option value="kilogram" th:selected="${fromUnit == 'kilogram'}">千克 (kg)</option>
+                        <option value="pound" th:selected="${fromUnit == 'pound'}">磅 (lb)</option>
+                        <option value="liter" th:selected="${fromUnit == 'liter'}">升 (L)</option>
+                        <option value="milliliter" th:selected="${fromUnit == 'milliliter'}">毫升 (mL)</option>
+                        <option value="gallon" th:selected="${fromUnit == 'gallon'}">加仑 (gal)</option>
+                    </select>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="toUnit" class="form-label">到</label>
+                    <select class="form-select" id="toUnit" name="toUnit" required>
+                        <option value="meter" th:selected="${toUnit == 'meter'}">米 (m)</option>
+                        <option value="kilometer" th:selected="${toUnit == 'kilometer'}">千米 (km)</option>
+                        <option value="mile" th:selected="${toUnit == 'mile'}">英里 (mi)</option>
+                        <option value="celsius" th:selected="${toUnit == 'celsius'}">摄氏度 (°C)</option>
+                        <option value="fahrenheit" th:selected="${toUnit == 'fahrenheit'}">华氏度 (°F)</option>
+                        <option value="gram" th:selected="${toUnit == 'gram'}">克 (g)</option>
+                        <option value="kilogram" th:selected="${toUnit == 'kilogram'}">千克 (kg)</option>
+                        <option value="pound" th:selected="${toUnit == 'pound'}">磅 (lb)</option>
+                        <option value="liter" th:selected="${toUnit == 'liter'}">升 (L)</option>
+                        <option value="milliliter" th:selected="${toUnit == 'milliliter'}">毫升 (mL)</option>
+                        <option value="gallon" th:selected="${toUnit == 'gallon'}">加仑 (gal)</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn btn-primary w-100">转换</button>
+            </form>
+            
+            <div id="result" class="result-box mt-4" th:if="${result != null and result != 0.0}">
+                <h5>转换结果</h5>
+                <p th:text="'结果: ' + ${inputValue} + ' ' + ${fromUnit} + ' = ' + ${result} + ' ' + ${toUnit}"></p>
+            </div>
+            <div id="error" class="alert alert-danger mt-4" th:if="${error != null}">
+                <p th:text="${error}"></p>
+            </div>
+            
+            <div class="mt-3 text-center">
+                <a href="/" class="btn btn-outline-secondary">返回首页</a>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/script.js"></script>
+    <script>
+        // Initialize unit options based on current selection or default
+        document.addEventListener('DOMContentLoaded', function() {
+            const conversionTypeSelect = document.getElementById('conversionType');
+            if(conversionTypeSelect) {
+                // Trigger change event to filter units if needed, 
+                // but since we have all units in HTML, maybe we should let the script handle it.
+                // However, the script clears and repopulates.
+                // Let's make sure the script is loaded. I added src="/js/script.js" assuming it's served there.
+                // But wait, the original file didn't have the script tag for script.js!
+                // I should check where script.js is located. It is in templates/script.js? 
+                // No, usually static resources are in static/js.
+                // The user said: "The user is currently editing the file at .../src/main/resources/templates/converter.html"
+                // and "The user has recently edited .../src/main/resources/templates/script.js"
+                // If script.js is in templates, it's not served as a static resource by default in Spring Boot unless configured.
+                // It should be in src/main/resources/static/js/script.js.
+            }
+        });
+    </script>
+</body>
+</html>

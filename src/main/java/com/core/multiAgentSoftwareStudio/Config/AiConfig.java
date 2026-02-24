@@ -8,6 +8,7 @@ import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.service.AiServices;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,12 +25,12 @@ import java.time.Duration;
 public class AiConfig {
 
     /**
-     * 配置 DeepSeek 模型
+     * 模型配置
      * （同配置文件：OpenAI 协议）
      */
     @Bean
     @Primary // 告诉 Spring：如果有多个 ChatLanguageModel，优先用我这个
-    ChatLanguageModel chatLanguageModel(@Value("${spring.ai.openai.api-key}") String apiKey, // 读取你配置文件里的 Key
+    ChatLanguageModel coderModel(@Value("${spring.ai.openai.api-key}") String apiKey, // 读取你配置文件里的 Key
                                         @Value("${spring.ai.openai.base-url}") String baseUrl // 读取你配置文件里的 BaseUrl
     ) {
 
@@ -44,13 +45,25 @@ public class AiConfig {
                 .build();
     }
 
+    @Bean
+    ChatLanguageModel logicModel(@Value("${spring.ai.openai.api-key}") String apiKey,
+                                 @Value("${spring.ai.openai.base-url}") String baseUrl) {
+        return OpenAiChatModel.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .modelName("qwen3-max") // 逻辑能力最强，适合 PM 和 架构师
+                .temperature(0.5)       // 稍微高一点，增加规划的灵活性
+                .build();
+    }
+
+
     /**
      * 创建产品经理 Agent
      */
     @Bean
-    ProductManagerAgent productManagerAgent(ChatLanguageModel chatLanguageModel) {
+    ProductManagerAgent productManagerAgent(@Qualifier("logicModel") ChatLanguageModel model) {
         return AiServices.builder(ProductManagerAgent.class)
-                .chatLanguageModel(chatLanguageModel)
+                .chatLanguageModel(model)
                 .chatMemory(MessageWindowChatMemory.withMaxMessages(10)) // 简单的短期记忆
                 .build();
     }
@@ -59,9 +72,9 @@ public class AiConfig {
      * 创建架构师 Agent
      */
     @Bean
-    ArchitectAgent architectAgent(ChatLanguageModel chatLanguageModel) {
+    ArchitectAgent architectAgent(@Qualifier("logicModel") ChatLanguageModel model) {
         return AiServices.builder(ArchitectAgent.class)
-                .chatLanguageModel(chatLanguageModel)
+                .chatLanguageModel(model)
                 .build();
     }
 
@@ -69,9 +82,9 @@ public class AiConfig {
      * 创建开发工程师 Agent
      */
     @Bean
-    DeveloperAgent developerAgent(ChatLanguageModel chatLanguageModel) {
+    DeveloperAgent developerAgent(@Qualifier("coderModel") ChatLanguageModel model) {
         return AiServices.builder(DeveloperAgent.class)
-                .chatLanguageModel(chatLanguageModel)
+                .chatLanguageModel(model)
                 .build();
     }
 
@@ -79,9 +92,9 @@ public class AiConfig {
      * 创建测试/修复工程师 Agent
      */
     @Bean
-    TesterAgent testerAgent(ChatLanguageModel chatLanguageModel){
+    TesterAgent testerAgent(@Qualifier("coderModel") ChatLanguageModel model){
         return AiServices.builder(TesterAgent.class)
-                .chatLanguageModel(chatLanguageModel)
+                .chatLanguageModel(model)
                 .build();
     }
 }

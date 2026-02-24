@@ -7,16 +7,27 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if(conversionTypeSelect) {
         conversionTypeSelect.addEventListener('change', updateUnitOptions);
+        // Initialize options on load, but try to preserve selection
+        updateUnitOptions(true);
     }
 });
 
-function updateUnitOptions() {
+function updateUnitOptions(preserveSelection = false) {
     // 获取当前选中的转换类型
-    const conversionType = document.getElementById('conversionType').value;
+    const conversionTypeSelect = document.getElementById('conversionType');
+    if (!conversionTypeSelect) return;
+    
+    const conversionType = conversionTypeSelect.value;
     
     // 获取源单位和目标单位下拉框
     const fromUnitSelect = document.getElementById('fromUnit');
     const toUnitSelect = document.getElementById('toUnit');
+    
+    if (!fromUnitSelect || !toUnitSelect) return;
+
+    // Store current selections
+    const currentFrom = fromUnitSelect.value;
+    const currentTo = toUnitSelect.value;
     
     // 清空现有的选项
     fromUnitSelect.innerHTML = '';
@@ -70,10 +81,27 @@ function updateUnitOptions() {
         toUnitSelect.appendChild(toOption);
     });
     
-    // 设置默认选中项
-    if(units.length > 0) {
-        fromUnitSelect.selectedIndex = 0;
-        toUnitSelect.selectedIndex = 1 < units.length ? 1 : 0;
+    // Restore selection if requested and valid
+    if (preserveSelection) {
+        // Check if currentFrom exists in new options
+        const fromExists = units.some(u => u.value === currentFrom);
+        if (fromExists) {
+            fromUnitSelect.value = currentFrom;
+        }
+        
+        const toExists = units.some(u => u.value === currentTo);
+        if (toExists) {
+            toUnitSelect.value = currentTo;
+        } else if (units.length > 1) {
+             // If toUnit is invalid (e.g. switched type), set default
+             toUnitSelect.selectedIndex = 1;
+        }
+    } else {
+        // Default behavior for change event
+        if(units.length > 0) {
+            fromUnitSelect.selectedIndex = 0;
+            toUnitSelect.selectedIndex = 1 < units.length ? 1 : 0;
+        }
     }
 }
 
@@ -81,7 +109,6 @@ function updateUnitOptions() {
 function validateInput(inputId, allowDecimal = true, allowNegative = true) {
     const inputElement = document.getElementById(inputId);
     if (!inputElement) {
-        console.error(`Input element with id '${inputId}' not found.`);
         return false;
     }
     
@@ -235,14 +262,14 @@ function calculate(operation) {
 // 单位转换函数
 function convertUnits() {
     // 验证输入值
-    const valueValid = validateInput('convertValue', true, true);
+    const valueValid = validateInput('inputValue', true, true);
     
     if (!valueValid) {
         return false;
     }
     
     // 获取输入值和单位
-    const value = parseFloat(document.getElementById('convertValue').value);
+    const value = parseFloat(document.getElementById('inputValue').value);
     const fromUnit = document.getElementById('fromUnit').value;
     const toUnit = document.getElementById('toUnit').value;
     const conversionType = document.getElementById('conversionType').value;

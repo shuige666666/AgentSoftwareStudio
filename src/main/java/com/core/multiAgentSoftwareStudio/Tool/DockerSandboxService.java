@@ -127,17 +127,21 @@ public class DockerSandboxService {
             // 4. 启动容器
             dockerClient.startContainerCmd(containerId).exec();
 
-            // 5. 收集日志 (与你原本代码一致)
+            // 5. 等待执行结束并获取日志
+            // 这里我们使用一个简单的 StringBuilder 来收集日志
             StringBuilder logs = new StringBuilder();
             dockerClient.logContainerCmd(containerId)
-                    .withStdOut(true)
-                    .withStdErr(true)
-                    .withFollowStream(true)
+                    .withStdOut(true)  // 捕获标准输出
+                    .withStdErr(true)  // 捕获错误输出（如编译错误）
+                    .withFollowStream(true) // 实时跟随日志流
                     .exec(new com.github.dockerjava.api.async.ResultCallback.Adapter<com.github.dockerjava.api.model.Frame>() {
+                        // 这是一个回调函数，每当容器打印一行字，这里就会被触发一次
                         @Override
                         public void onNext(com.github.dockerjava.api.model.Frame item) {
+                            // logs.append(new String(item.getPayload(), StandardCharsets.UTF_8));
                             String logLine = new String(item.getPayload(), StandardCharsets.UTF_8);
                             logs.append(logLine);
+                            // 🔥🔥🔥 关键点：直接打印到 IDEA 控制台，不再闷在 StringBuilder 里
                             System.out.print(logLine);
                         }
                     }).awaitCompletion(10, TimeUnit.MINUTES);
