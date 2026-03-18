@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 @Service
 public class SoftwareStudioServiceImpl implements SoftwareStudioService {
@@ -33,7 +34,7 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         this.workspaceService = workspaceService;
     }
 
-    public List<SourceCode> generateProject(String userRequest){
+    public List<SourceCode> generateProject(String userRequest) {
         System.out.println("🚀 1. 产品经理正在分析需求: " + userRequest);
         PrdDocument prd = pmAgent.analyzeRequirement(userRequest);
         System.out.println("✅ PRD 生成完毕: " + prd.projectName());
@@ -145,6 +146,123 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
 
         return codes;
 
+    }
+
+    /**
+     * generateProject 的"流式版本"
+     * @param userRequest
+     * @param eventListener
+     */
+    @Override
+    public void generateProjectStream(String userRequest, Consumer<String> eventListener) {
+        eventListener.accept("🚀 1. 产品经理正在分析需求: " + userRequest);
+        PrdDocument prd = pmAgent.analyzeRequirement(userRequest);
+        eventListener.accept("✅ PRD 生成完毕: " + prd.projectName());
+        eventListener.accept(prd.toString());
+        eventListener.accept("🏗️ 2. 架构师正在设计系统结构...");
+        ProjectStructure structure = architectAgent.designArchitecture(prd);
+        eventListener.accept("✅ 架构设计完毕，共 " + structure.files().size() + " 个文件。");
+        eventListener.accept(structure.toString());
+        // 代码文件列表
+        List<SourceCode> codes = new ArrayList<>();
+
+        // 并行或者串行生成代码
+        for (FileBlueprint fileBlueprint : structure.files()) {
+            eventListener.accept("👨‍💻 3. 工程师正在编写: " + fileBlueprint.fileName());
+
+            // 如果大模型没有返回 keyMethods，就给个空字符串或空数组的字面量
+            String methodsStr = (fileBlueprint.keyMethods() == null || fileBlueprint.keyMethods().isEmpty())
+                    ? "无特定方法要求"
+                    : fileBlueprint.keyMethods().toString();
+
+            SourceCode rawResult = developerAgent.writeCode(
+                    prd,
+                    fileBlueprint.fileName(),
+                    fileBlueprint.functionalityDescription(),
+                    fileBlueprint.keyMethods().toString() // List 转 String
+            );
+
+            // 2. 强制使用蓝图中的文件名，防止 AI 幻觉
+            // SourceCode 是 record，不可变，所以我们要 new 一个新的
+            SourceCode finalCode = new SourceCode(
+                    fileBlueprint.fileName(), // 强制使用正确的文件名
+                    rawResult.language(),
+                    rawResult.code()          // 只取 AI 生成的代码内容
+            );
+            codes.add(finalCode);
+
+            eventListener.accept("✅ 文件完成: " + finalCode.filename());
+        }
+
+        // 4. 持久化到本地 ---
+        Path projectPath = workspaceService.saveProjectToDisk(prd.projectName(), codes);
+
+        // ==========================================
+        // 5. 沙箱运行与自我修复循环 (The Loop)
+        // ==========================================
+        int maxRetries = 7; // 设置最大重试次数，防止无限死循环破产
+        int currentAttempt = 1;
+        boolean isSuccess = false;
+
+        eventListener.accept("🐳 进入沙箱运行与测试循环...");
+
+        while (currentAttempt <= maxRetries && !isSuccess) {
+            eventListener.accept("\n▶️ [第 " + currentAttempt + " 次尝试] 正在启动 Docker 沙箱...");
+            String executionResult = sandboxService.runCodeInSandbox(
+                    projectPath,
+                    structure.projectType(),
+                    structure.mainClassName()
+            );
+
+            eventListener.accept("💡 运行结果:");
+            eventListener.accept("--------------------------------------------------");
+            // 如果日志太长，可以只打印前/后几行，这里为了演示全打出来
+            eventListener.accept(executionResult);
+            eventListener.accept("--------------------------------------------------");
+
+            // 简单的成功/失败判断逻辑 (你可以根据实际情况优化这些正则或关键字)
+            boolean hasError = executionResult.contains("Exception") ||
+                    executionResult.contains("Error") ||
+                    executionResult.contains("failed") ||
+                    executionResult.contains("error") ||
+                    executionResult.contains("javac: file not found"); // 编译找不到文件
+
+            if (!hasError) {
+                eventListener.accept("🎉 测试通过！代码成功运行。");
+                isSuccess = true;
+            } else {
+                eventListener.accept("🐛 发现报错！正在呼叫 Tester Agent 进行分析与修复...");
+
+                // 将当前所有代码拼装成文本，给 Tester 提供上下文
+                String currentCodeContext = buildCodeContextForTester(codes);
+
+                // 调用 Tester Agent 给出修复方案
+                CodeFixResult fixResult = testerAgent.analyzeAndFix(executionResult, currentCodeContext);
+                List<CodeFix> fixes = fixResult.fixes();
+
+                if (fixes != null && !fixes.isEmpty()) {
+                    eventListener.accept("🛠️ Tester Agent 给出了 " + fixes.size() + " 个修复方案：");
+                    for (CodeFix fix : fixes) {
+                        eventListener.accept("   - 原因: " + fix.explanation());
+
+                        // 更新内存中的 codes 列表 (为了下一次循环能传给 Tester 最新的代码)
+                        updateCodesInMemory(codes, fix);
+                    }
+
+                    // 将新代码覆写到本地磁盘
+                    workspaceService.applyFixesToDisk(projectPath, fixes);
+
+                } else {
+                    eventListener.accept("⚠️ Tester Agent 未能提供修复方案，可能问题过于复杂。");
+                    break; // 跳出循环
+                }
+                currentAttempt++;
+            }
+        }
+
+        if (!isSuccess) {
+            eventListener.accept("❌ 达到最大重试次数 (" + maxRetries + ")，项目生成失败，需要人工介入。");
+        }
     }
 
     // ====== 辅助方法 ======

@@ -28,6 +28,7 @@ public class WorkspaceService {
 
     /**
      * 把项目文件写入磁盘文件夹里
+     *
      * @param projectName
      * @param sourceCodes
      * @return
@@ -49,7 +50,7 @@ public class WorkspaceService {
             for (SourceCode sc : sourceCodes) {
 
                 // 🔥 核心修改：调用智能路径解析方法
-                Path relativePath = resolveSmartPath(sc.filename(),sc.code());
+                Path relativePath = resolveSmartPath(sc.filename(), sc.code());
 
                 // 拼接完整路径
                 Path finalPath = projectDir.resolve(relativePath);
@@ -165,13 +166,7 @@ public class WorkspaceService {
      * 判断是否为资源文件
      */
     private boolean isResourceFile(String filename) {
-        return filename.endsWith(".properties") ||
-                filename.endsWith(".yml") ||
-                filename.endsWith(".yaml") ||
-                filename.endsWith(".xml") ||
-                filename.endsWith(".html") ||
-                filename.endsWith(".css") ||
-                filename.endsWith(".js");
+        return filename.endsWith(".properties") || filename.endsWith(".yml") || filename.endsWith(".yaml") || filename.endsWith(".xml") || filename.endsWith(".html") || filename.endsWith(".css") || filename.endsWith(".js");
     }
 
     /**
@@ -187,33 +182,32 @@ public class WorkspaceService {
 
         try (Stream<Path> stream = Files.walk(projectDir)) {
             stream.filter(path -> {
-                        // 1. 必须是普通文件
-                        if (!Files.isRegularFile(path)) return false;
+                // 1. 必须是普通文件
+                if (!Files.isRegularFile(path)) return false;
 
-                        String pathStr = path.toString().replace('\\', '/');
-                        // 2. 排除构建产物和隐藏目录 (例如 target, .git, .idea, bin)
-                        if (pathStr.contains("/target/") || pathStr.contains("/.git/") || pathStr.contains("/.idea/")) {
-                            return false;
-                        }
+                String pathStr = path.toString().replace('\\', '/');
+                // 2. 排除构建产物和隐藏目录 (例如 target, .git, .idea, bin)
+                if (pathStr.contains("/target/") || pathStr.contains("/.git/") || pathStr.contains("/.idea/")) {
+                    return false;
+                }
 
-                        // 3. 排除已知的二进制后缀 (比如 .class, .jar, .png)
-                        return !pathStr.endsWith(".class") && !pathStr.endsWith(".jar") && !pathStr.endsWith(".png");
-                    })
-                    .forEach(path -> {
-                        try {
-                            Path relative = projectDir.relativize(path);
-                            String filename = relative.toString().replace('\\', '/');
+                // 3. 排除已知的二进制后缀 (比如 .class, .jar, .png)
+                return !pathStr.endsWith(".class") && !pathStr.endsWith(".jar") && !pathStr.endsWith(".png");
+            }).forEach(path -> {
+                try {
+                    Path relative = projectDir.relativize(path);
+                    String filename = relative.toString().replace('\\', '/');
 
-                            // 读取内容
-                            String content = Files.readString(path, StandardCharsets.UTF_8);
-                            String language = detectLanguageFromFilename(filename);
+                    // 读取内容
+                    String content = Files.readString(path, StandardCharsets.UTF_8);
+                    String language = detectLanguageFromFilename(filename);
 
-                            result.add(new SourceCode(filename, language, content));
-                        } catch (IOException e) {
-                            // 这里可以选择跳过单个文件而不是崩溃
-                            System.err.println("❌ 无法读取文件 (可能是二进制或损坏): " + path + " | 错误: " + e.getMessage());
-                        }
-                    });
+                    result.add(new SourceCode(filename, language, content));
+                } catch (IOException e) {
+                    // 这里可以选择跳过单个文件而不是崩溃
+                    System.err.println("❌ 无法读取文件 (可能是二进制或损坏): " + path + " | 错误: " + e.getMessage());
+                }
+            });
         } catch (IOException e) {
             throw new RuntimeException("遍历项目目录失败: " + projectDir, e);
         }
@@ -241,10 +235,7 @@ public class WorkspaceService {
      */
     private Path findExistingFile(Path dir, String pureFileName) throws IOException {
         try (Stream<Path> stream = Files.walk(dir)) {
-            return stream.filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().equals(pureFileName))
-                    .findFirst()
-                    .orElse(null);
+            return stream.filter(Files::isRegularFile).filter(p -> p.getFileName().toString().equals(pureFileName)).findFirst().orElse(null);
         }
     }
 }

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Software Studio Stream Chat</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        textarea {
+            width: 100%;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            resize: vertical;
+            min-height: 100px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+            display: block;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #output {
+            margin-top: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #fafafa;
+            min-height: 200px;
+            white-space: pre-wrap;
+            font-family: 'Courier New', Courier, monospace;
+            line-height: 1.5;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Software Studio Stream Chat</h1>
+        
+        <div class="input-group">
+            <textarea id="messageInput" placeholder="Enter your project description here..."></textarea>
+        </div>
+        
+        <button id="sendBtn" onclick="startStream()">Generate Project</button>
+        
+        <div id="status" class="status"></div>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        async function startStream() {
+            const messageInput = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const outputDiv = document.getElementById('output');
+            const statusDiv = document.getElementById('status');
+            
+            const message = messageInput.value.trim();
+            if (!message) {
+                alert('Please enter a message');
+                return;
+            }
+
+            // Reset UI
+            sendBtn.disabled = true;
+            outputDiv.textContent = '';
+            statusDiv.textContent = 'Connecting...';
+
+            try {
+                const response = await fetch('/api/SoftwareStudio/stream-chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: message })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                statusDiv.textContent = 'Receiving stream...';
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    const text = decoder.decode(value, { stream: true });
+                    buffer += text;
+                    
+                    const lines = buffer.split('\n');
+                    // Keep the last line in buffer as it might be incomplete
+                    buffer = lines.pop();
+                    
+                    for (const line of lines) {
+                        if (line.trim() === '') continue;
+                        
+                        if (line.startsWith('data:')) {
+                            // Remove 'data:' prefix and trim leading space if present
+                            const data = line.substring(5);
+                            outputDiv.textContent += data + '\n';
+                        }
+                    }
+                    // Auto-scroll to bottom
+                    outputDiv.scrollTop = outputDiv.scrollHeight;
+                }
+
+                statusDiv.textContent = 'Completed';
+            } catch (error) {
+                console.error('Error:', error);
+                statusDiv.textContent = 'Error: ' + error.message;
+                outputDiv.textContent += '\n\n[Error occurred: ' + error.message + ']';
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

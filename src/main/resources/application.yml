@@ -42,3 +42,5 @@ langchain4j:
       log-requests: true
       log-responses: true
 
+server:
+  port: 8080
