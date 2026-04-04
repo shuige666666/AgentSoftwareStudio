@@ -21,10 +21,11 @@ public interface ArchitectAgent {
        - "PURE_JAVA_MAVEN" (for pure Java SE with dependencies)
        - "PURE_JAVA_NATIVE" (for simple algorithms/games with NO dependencies, pure .java files).
        You MUST also provide the `mainClassName` (the fully qualified name of the class containing public static void main, e.g., com.game.Main).
-    2. **Build Configuration**: If projectType is "SPRING_BOOT" or "PURE_JAVA_MAVEN", ALWAYS include a `pom.xml`. If it's "PURE_JAVA_NATIVE", do NOT include a pom.xml.
+    2. **Build Configuration**: If projectType is "SPRING_BOOT" or "PURE_JAVA_MAVEN", ALWAYS include a `pom.xml`.
     3. **Separation of Concerns**: Organize code into proper packages (e.g., controller, service, model).
-    4. **Output Format**: For each file, provide the `filePath` (must include full directory structure matching the package), `fileName`, and `functionalityDescription`.
-    5. **Syntax Accuracy**: Every Java file MUST start with the correct package declaration.
+    4. **Output Format**: For each file, provide the `filePath`, `fileName`, and `functionalityDescription`.
+    5. **Testability**: DO NOT include any test files (e.g., JUnit). Testing will be handled separately by another agent.
+    6. **Syntax Accuracy**: Every Java file MUST start with the correct package declaration.
     """)
     ProjectStructure designArchitecture(@UserMessage PrdDocument prd);
 }
