@@ -38,121 +38,14 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         this.workspaceService = workspaceService;
     }
 
+    /**
+     * 程序生成方法
+     * 
+     * @param userRequest
+     * @return
+     */
     public List<SourceCode> generateProject(String userRequest) {
-        System.out.println("🚀 1. 产品经理正在分析需求: " + userRequest);
-        PrdDocument prd = pmAgent.analyzeRequirement(userRequest);
-        System.out.println("✅ PRD 生成完毕: " + prd.projectName());
-        System.out.println(prd);
-        System.out.println("🏗️ 2. 架构师正在设计系统结构...");
-        ProjectStructure structure = architectAgent.designArchitecture(prd);
-        System.out.println("✅ 架构设计完毕，共 " + structure.files().size() + " 个文件。");
-        System.out.println(structure);
-        // 代码文件列表
-        List<SourceCode> codes = new ArrayList<>();
-        StringBuilder existingCode = new StringBuilder();
-
-        // 并行或者串行生成代码
-        for (FileBlueprint fileBlueprint : structure.files()) {
-            System.out.println("👨‍💻 3. 工程师正在编写: " + fileBlueprint.fileName());
-
-            // 如果大模型没有返回 keyMethods，就给个空字符串或空数组的字面量
-            String methodsStr = (fileBlueprint.keyMethods() == null || fileBlueprint.keyMethods().isEmpty())
-                    ? "无特定方法要求"
-                    : fileBlueprint.keyMethods().toString();
-
-            SourceCode rawResult = developerAgent.writeCode(
-                    prd,
-                    structure,
-                    existingCode.toString(),
-                    fileBlueprint.fileName(),
-                    fileBlueprint.functionalityDescription(),
-                    methodsStr);
-
-            // 2. 强制使用蓝图中的文件名，防止 AI 幻觉
-            SourceCode finalCode = new SourceCode(
-                    fileBlueprint.fileName(),
-                    rawResult.language(),
-                    rawResult.code());
-            codes.add(finalCode);
-
-            // 将当前生成的文件加入到后续文件的上下文
-            existingCode.append("--- File: ").append(finalCode.filename()).append(" ---\n");
-            existingCode.append(finalCode.code()).append("\n\n");
-
-            System.out.println("✅ 文件完成: " + finalCode.filename());
-        }
-
-        System.out.println("🧪 4. 测试工程师正在编写 JUnit 测试类...");
-        TestClassesResult testClassesResult = testWriterAgent.writeTests(prd, structure, existingCode.toString());
-        if (testClassesResult != null && testClassesResult.testFiles() != null) {
-            for (SourceCode testFile : testClassesResult.testFiles()) {
-                String normalizedFileName = normalizeGeneratedFilename(testFile.filename(), testFile.code());
-                System.out.println("✅ 生成测试文件: " + normalizedFileName);
-                codes.add(new SourceCode(normalizedFileName, testFile.language(), testFile.code()));
-            }
-        }
-
-        // 4. 持久化到本地 ---
-        Path projectPath = workspaceService.saveProjectToDisk(prd.projectName(), codes);
-
-        // ==========================================
-        // 5. 沙箱运行与自我修复循环 (The Loop)
-        // ==========================================
-        int maxRetries = 5; // 设置最大重试次数，防止无限死循环破产
-        int currentAttempt = 1;
-        boolean isSuccess = false;
-
-        System.out.println("🐳 进入沙箱运行与测试循环...");
-
-        while (currentAttempt <= maxRetries && !isSuccess) {
-            System.out.println("\n▶️ [第 " + currentAttempt + " 次尝试] 正在启动 Docker 沙箱进行运行测试...");
-            String executionResult = sandboxService.runCodeInSandbox(
-                    projectPath,
-                    structure.projectType(),
-                    structure.mainClassName());
-
-            System.out.println("💡 运行结果:");
-            System.out.println("--------------------------------------------------");
-            System.out.println(executionResult);
-            System.out.println("--------------------------------------------------");
-
-            boolean hasError = executionResult.contains("Exception") ||
-                    executionResult.contains("Error") ||
-                    executionResult.contains("failed") ||
-                    executionResult.contains("error") ||
-                    executionResult.contains("javac: file not found");
-
-            if (!hasError) {
-                System.out.println("✅ 代码运行成功，正在进行逻辑验证 (运行单元测试)...");
-                String testResult = sandboxService.runTestsInSandbox(projectPath, structure.projectType());
-                System.out.println("💡 测试结果:");
-                System.out.println(testResult);
-
-                if (testResult.contains("Failures: 0") && testResult.contains("Errors: 0")) {
-                    System.out.println("🎉 所有测试通过！逻辑验证成功。");
-                    isSuccess = true;
-                } else if (testResult.contains("Failures:") || testResult.contains("Errors:")) {
-                    System.out.println("❌ 逻辑验证失败！发现测试未通过。");
-                    handleFix(codes, testResult, "LOGIC ERROR (TEST FAILURE)", projectPath);
-                } else {
-                    // 如果没有测试文件或者没运行起来，我们也暂且认为成功，或者可以根据需求调整
-                    System.out.println("⚠️ 未发现有效的测试结果，暂且认为运行成功。");
-                    isSuccess = true;
-                }
-            } else {
-                String errorType = determineErrorType(executionResult);
-                handleFix(codes, executionResult, errorType, projectPath);
-            }
-            if (!isSuccess)
-                currentAttempt++;
-        }
-
-        if (!isSuccess) {
-            System.out.println("❌ 达到最大重试次数 (" + maxRetries + ")，项目生成失败，需要人工介入。");
-        }
-
-        return codes;
-
+        return generateProjectInternal(userRequest, System.out::println, 5);
     }
 
     /**
@@ -163,21 +56,37 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
      */
     @Override
     public void generateProjectStream(String userRequest, Consumer<String> eventListener) {
-        eventListener.accept("🚀 1. 产品经理正在分析需求: " + userRequest);
+        generateProjectInternal(userRequest, eventListener, 5);
+    }
+
+    /**
+     * 程序生成核心逻辑
+     * 
+     * @param userRequest
+     * @param eventListener
+     * @param maxRetries
+     * @return
+     */
+    private List<SourceCode> generateProjectInternal(String userRequest, Consumer<String> eventListener,
+            int maxRetries) {
+        Consumer<String> logger = eventListener != null ? eventListener : message -> {
+        };
+
+        logger.accept("🚀 1. 产品经理正在分析需求: " + userRequest);
         PrdDocument prd = pmAgent.analyzeRequirement(userRequest);
-        eventListener.accept("✅ PRD 生成完毕: " + prd.projectName());
-        eventListener.accept(prd.toString());
-        eventListener.accept("🏗️ 2. 架构师正在设计系统结构...");
+        logger.accept("✅ PRD 生成完毕: " + prd.projectName());
+        logger.accept(prd.toString());
+        logger.accept("🏗️ 2. 架构师正在设计系统结构...");
         ProjectStructure structure = architectAgent.designArchitecture(prd);
-        eventListener.accept("✅ 架构设计完毕，共 " + structure.files().size() + " 个文件。");
-        eventListener.accept(structure.toString());
+        logger.accept("✅ 架构设计完毕，共 " + structure.files().size() + " 个文件。");
+        logger.accept(structure.toString());
         // 代码文件列表
         List<SourceCode> codes = new ArrayList<>();
         StringBuilder existingCode = new StringBuilder();
 
         // 并行或者串行生成代码
         for (FileBlueprint fileBlueprint : structure.files()) {
-            eventListener.accept("👨‍💻 3. 工程师正在编写: " + fileBlueprint.fileName());
+            logger.accept("👨‍💻 3. 工程师正在编写: " + fileBlueprint.fileName());
 
             // 如果大模型没有返回 keyMethods，就给个空字符串或空数组的字面量
             String methodsStr = (fileBlueprint.keyMethods() == null || fileBlueprint.keyMethods().isEmpty())
@@ -203,15 +112,15 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
             existingCode.append("--- File: ").append(finalCode.filename()).append(" ---\n");
             existingCode.append(finalCode.code()).append("\n\n");
 
-            eventListener.accept("✅ 文件完成: " + finalCode.filename());
+            logger.accept("✅ 文件完成: " + finalCode.filename());
         }
 
-        eventListener.accept("🧪 4. 测试工程师正在编写 JUnit 测试类...");
+        logger.accept("🧪 4. 测试工程师正在编写 JUnit 测试类...");
         TestClassesResult testClassesResult = testWriterAgent.writeTests(prd, structure, existingCode.toString());
         if (testClassesResult != null && testClassesResult.testFiles() != null) {
             for (SourceCode testFile : testClassesResult.testFiles()) {
                 String normalizedFileName = normalizeGeneratedFilename(testFile.filename(), testFile.code());
-                eventListener.accept("✅ 生成测试文件: " + normalizedFileName);
+                logger.accept("✅ 生成测试文件: " + normalizedFileName);
                 codes.add(new SourceCode(normalizedFileName, testFile.language(), testFile.code()));
             }
         }
@@ -222,23 +131,22 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         // ==========================================
         // 5. 沙箱运行与自我修复循环 (The Loop)
         // ==========================================
-        int maxRetries = 7; // 设置最大重试次数，防止无限死循环破产
         int currentAttempt = 1;
         boolean isSuccess = false;
 
-        eventListener.accept("🐳 进入沙箱运行与测试循环...");
+        logger.accept("🐳 进入沙箱运行与测试循环...");
 
         while (currentAttempt <= maxRetries && !isSuccess) {
-            eventListener.accept("\n▶️ [第 " + currentAttempt + " 次尝试] 正在启动 Docker 沙箱进行运行测试...");
+            logger.accept("\n▶️ [第 " + currentAttempt + " 次尝试] 正在启动 Docker 沙箱进行运行测试...");
             String executionResult = sandboxService.runCodeInSandbox(
                     projectPath,
                     structure.projectType(),
                     structure.mainClassName());
 
-            eventListener.accept("💡 运行结果:");
-            eventListener.accept("--------------------------------------------------");
-            eventListener.accept(executionResult);
-            eventListener.accept("--------------------------------------------------");
+            logger.accept("💡 运行结果:");
+            logger.accept("--------------------------------------------------");
+            logger.accept(executionResult);
+            logger.accept("--------------------------------------------------");
 
             boolean hasError = executionResult.contains("Exception") ||
                     executionResult.contains("Error") ||
@@ -247,32 +155,34 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
                     executionResult.contains("javac: file not found");
 
             if (!hasError) {
-                eventListener.accept("✅ 代码运行成功，正在进行逻辑验证 (运行单元测试)...");
+                logger.accept("✅ 代码运行成功，正在进行逻辑验证 (运行单元测试)...");
                 String testResult = sandboxService.runTestsInSandbox(projectPath, structure.projectType());
-                eventListener.accept("💡 测试结果:");
-                eventListener.accept(testResult);
+                logger.accept("💡 测试结果:");
+                logger.accept(testResult);
 
                 if (testResult.contains("Failures: 0") && testResult.contains("Errors: 0")) {
-                    eventListener.accept("🎉 所有测试通过！逻辑验证成功。");
+                    logger.accept("🎉 所有测试通过！逻辑验证成功。");
                     isSuccess = true;
                 } else if (testResult.contains("Failures:") || testResult.contains("Errors:")) {
-                    eventListener.accept("❌ 逻辑验证失败！发现测试未通过。");
-                    handleFixStream(codes, testResult, "LOGIC ERROR (TEST FAILURE)", projectPath, eventListener);
+                    logger.accept("❌ 逻辑验证失败！发现测试未通过。");
+                    handleFix(codes, testResult, "LOGIC ERROR (TEST FAILURE)", projectPath, logger);
                 } else {
-                    eventListener.accept("⚠️ 未发现有效的测试结果，暂且认为运行成功。");
+                    logger.accept("⚠️ 未发现有效的测试结果，暂且认为运行成功。");
                     isSuccess = true;
                 }
             } else {
                 String errorType = determineErrorType(executionResult);
-                handleFixStream(codes, executionResult, errorType, projectPath, eventListener);
+                handleFix(codes, executionResult, errorType, projectPath, logger);
             }
             if (!isSuccess)
                 currentAttempt++;
         }
 
         if (!isSuccess) {
-            eventListener.accept("❌ 达到最大重试次数 (" + maxRetries + ")，项目生成失败，需要人工介入。");
+            logger.accept("❌ 达到最大重试次数 (" + maxRetries + ")，项目生成失败，需要人工介入。");
         }
+
+        return codes;
     }
 
     // ====== 辅助方法 ======
@@ -414,6 +324,7 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
 
     /**
      * 编译错误分类器
+     * 
      * @param errorType
      * @param executionResult
      * @param codes
@@ -499,39 +410,7 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
     /**
      * 统一处理修复逻辑
      */
-    private void handleFix(List<SourceCode> codes, String executionResult, String errorType, Path projectPath) {
-        System.out.println("🐛 发现 " + errorType + "！正在呼叫 Debugger Agent 进行分析与修复...");
-
-        // 优化上下文：根据错误类型选择性提供文件
-        String currentCodeContext = buildOptimizedCodeContext(codes, executionResult, errorType);
-        String enhancedErrorLog = buildEnhancedErrorLog(errorType, executionResult, codes);
-
-        // 调用 Debugger Agent 给出修复方案
-        CodeFixResult fixResult = debuggerAgent.analyzeAndFix(errorType, enhancedErrorLog, currentCodeContext);
-        List<CodeFix> fixes = fixResult == null ? null : fixResult.fixes();
-
-        if (fixes != null && !fixes.isEmpty()) {
-            System.out.println("🛠️ Debugger Agent 给出了 " + fixes.size() + " 个修复方案：");
-            List<CodeFix> normalizedFixes = new ArrayList<>();
-            for (CodeFix fix : fixes) {
-                String normalizedFilename = normalizeGeneratedFilename(fix.filename(), fix.newCode());
-                CodeFix normalizedFix = new CodeFix(normalizedFilename, fix.explanation(), fix.newCode());
-                System.out.println("   - 原因: " + fix.explanation());
-                // 更新内存中的 codes 列表
-                updateCodesInMemory(codes, normalizedFix);
-                normalizedFixes.add(normalizedFix);
-            }
-            // 将新代码覆写到本地磁盘
-            workspaceService.applyFixesToDisk(projectPath, normalizedFixes);
-        } else {
-            System.out.println("⚠️ Debugger Agent 未能提供修复方案，可能问题过于复杂。");
-        }
-    }
-
-    /**
-     * 统一处理修复逻辑 (流式版本)
-     */
-    private void handleFixStream(List<SourceCode> codes, String executionResult, String errorType, Path projectPath,
+    private void handleFix(List<SourceCode> codes, String executionResult, String errorType, Path projectPath,
             Consumer<String> eventListener) {
         eventListener.accept("🐛 发现 " + errorType + "！正在呼叫 Debugger Agent 进行分析与修复...");
 

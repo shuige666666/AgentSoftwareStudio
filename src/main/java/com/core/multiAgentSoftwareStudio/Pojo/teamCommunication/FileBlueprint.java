@@ -9,7 +9,8 @@ import java.util.List;
         String filePath,                // e.g., "src/main/java/com/..."
         String functionalityDescription,// 这个文件具体的职责描述
         List<String> keyMethods         // 建议包含的关键方法名
-    ) {// 在对象创建时自动执行拦截 keyMethods （这里有时候会漏写然后报错）
+    ) {
+    // 在对象创建时自动执行拦截 keyMethods （这里有时候会漏写然后报错）
     public FileBlueprint {
         if (keyMethods == null) {
             keyMethods = Collections.emptyList(); // 如果 JSON 里没这个字段，强制转换为空列表
