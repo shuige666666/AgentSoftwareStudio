@@ -109,7 +109,21 @@ public class WorkspaceService {
      * 🧠 智能路径解析：根据文件内容和类型，决定它应该放在哪里
      */
     private Path resolveSmartPath(String filenameInput, String content) {
-        String filename = filenameInput.trim();
+        String filename = filenameInput.trim().replace('\\', '/');
+
+        int testPathIndex = filename.indexOf("src/test/java/");
+        if (testPathIndex >= 0) {
+            return Paths.get(filename.substring(testPathIndex));
+        }
+
+        int mainPathIndex = filename.indexOf("src/main/java/");
+        if (mainPathIndex >= 0) {
+            return Paths.get(filename.substring(mainPathIndex));
+        }
+
+        if (filename.startsWith("src/")) {
+            return Paths.get(filename);
+        }
 
         // 1. 如果是 pom.xml，必须在根目录
         if (filename.equalsIgnoreCase("pom.xml")) {
@@ -120,14 +134,15 @@ public class WorkspaceService {
         if (filename.endsWith(".java")) {
             // 使用正则提取 package xxx.xxx.xxx;
             String packageName = extractPackageName(content);
+            String pureFileName = Paths.get(filename).getFileName().toString();
+            boolean isTestFile = isLikelyTestJavaFile(filename, content);
+            Path sourceRoot = isTestFile ? Paths.get("src", "test", "java") : Paths.get("src", "main", "java");
             if (packageName != null && !packageName.isEmpty()) {
                 // 将包名转换为路径: com.game -> com/game
                 String packagePath = packageName.replace('.', '/');
-                // 强制加上 Maven 标准头: src/main/java/com/game/Main.java
-                return Paths.get("src", "main", "java", packagePath, filename);
+                return sourceRoot.resolve(packagePath).resolve(pureFileName);
             }
-            // 如果没找到 package，至少放到 src/main/java 根下
-            return Paths.get("src", "main", "java", filename);
+            return sourceRoot.resolve(pureFileName);
         }
 
         // 3. 如果是资源文件 (properties, yml, html, css, js)
@@ -140,8 +155,8 @@ public class WorkspaceService {
             return Paths.get("src", "main", "resources", filename);
         }
 
-        // 4. 如果 AI 已经很聪明地给了全路径 (包含 src/)，那就信它
-        if (filename.startsWith("src/") || filename.contains("/")) {
+        // 4. 如果 AI 已经给了相对目录结构，那就信它
+        if (filename.contains("/")) {
             return Paths.get(filename);
         }
 
@@ -167,6 +182,13 @@ public class WorkspaceService {
      */
     private boolean isResourceFile(String filename) {
         return filename.endsWith(".properties") || filename.endsWith(".yml") || filename.endsWith(".yaml") || filename.endsWith(".xml") || filename.endsWith(".html") || filename.endsWith(".css") || filename.endsWith(".js");
+    }
+
+    private boolean isLikelyTestJavaFile(String filename, String content) {
+        return filename.contains("src/test/java/")
+                || filename.endsWith("Test.java")
+                || content.contains("org.junit.jupiter")
+                || content.contains("@Test");
     }
 
     /**
@@ -239,4 +261,3 @@ public class WorkspaceService {
         }
     }
 }
-

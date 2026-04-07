@@ -29,60 +29,72 @@ public class DockerSandboxService {
 
     private final DockerClient dockerClient;
 
-    public DockerSandboxService(){
+    public DockerSandboxService() {
         // 初始化 Docker 连接 (默认连接本地 Docker Daemon)
         // 1. 读取配置：自动寻找环境变量或默认路径（如 Linux 下的 /var/run/docker.sock）
-        DefaultDockerClientConfig config= DefaultDockerClientConfig.createDefaultConfigBuilder().build();
+        DefaultDockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
         // 2. 建立 HTTP 客户端：Docker 实际上是基于 REST API 运作的
         ApacheDockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
                 .dockerHost(config.getDockerHost())
                 .sslConfig(config.getSSLConfig())
                 .maxConnections(100)
                 .connectionTimeout(java.time.Duration.ofSeconds(60)) // 连接超时设为 60秒
-                .responseTimeout(java.time.Duration.ofSeconds(120))  // 响应超时设为 120秒
+                .responseTimeout(java.time.Duration.ofSeconds(120)) // 响应超时设为 120秒
                 .build();
         // 3. 创建操作句柄：以后所有 docker 命令都通过这个对象发出
-        this.dockerClient= DockerClientImpl.getInstance(config, httpClient);
+        this.dockerClient = DockerClientImpl.getInstance(config, httpClient);
     }
 
     /**
      * 运行指定路径下的项目代码
+     * 
      * @param projectPath 已经持久化到本地的项目根路径
-     * @param projectType 项目类型 (例如: "SPRING_BOOT", "PURE_JAVA_MAVEN", "PURE_JAVA_NATIVE")
+     * @param projectType 项目类型 (例如: "SPRING_BOOT", "PURE_JAVA_MAVEN",
+     *                    "PURE_JAVA_NATIVE")
      * @param mainClass   主类全限定名 (纯Java项目必须提供，如 "com.example.Main")
      * @return 运行日志
      */
     public String runCodeInSandbox(Path projectPath, String projectType, String mainClass) {
+        String cmd;
+        boolean needsPortBinding = false;
+
+        if ("SPRING_BOOT".equals(projectType)) {
+            cmd = "mvn spring-boot:run";
+            needsPortBinding = true;
+        } else if ("PURE_JAVA_MAVEN".equals(projectType)) {
+            cmd = "apt-get update && apt-get install -y xvfb && xvfb-run mvn compile exec:java -Dexec.mainClass=\""
+                    + mainClass + "\"";
+        } else {
+            cmd = String.format(
+                    "find . -name \"*.java\" > sources.txt && javac -d . @sources.txt && java -cp . %s",
+                    mainClass);
+        }
+        return executeInDocker(projectPath, projectType, cmd, needsPortBinding);
+    }
+
+    /**
+     * 新增：在沙箱中运行测试
+     */
+    public String runTestsInSandbox(Path projectPath, String projectType) {
+        String cmd;
+        if ("SPRING_BOOT".equals(projectType) || "PURE_JAVA_MAVEN".equals(projectType)) {
+            cmd = "mvn test";
+        } else {
+            // PURE_JAVA_NATIVE 的测试比较复杂，暂且尝试运行所有带 Test 结尾的类
+            cmd = "find . -name \"*.java\" > sources.txt && javac -d . @sources.txt && java -cp . org.junit.runner.JUnitCore $(find . -name \"*Test.class\" | sed 's/\\.\\///;s/\\.class//;s/\\//./g')";
+        }
+        return executeInDocker(projectPath, projectType, cmd, false);
+    }
+
+    private String executeInDocker(Path projectPath, String projectType, String cmd, boolean needsPortBinding) {
         // 1. 校验路径
         if (projectPath == null || !Files.exists(projectPath)) {
             return "❌ Error: 项目路径不存在: " + projectPath;
         }
 
-        // 根据不同项目类型，决定镜像和命令
-        String imageName;
-        String cmd;
-        boolean needsPortBinding = false;
-
-        if ("SPRING_BOOT".equals(projectType)) {
-            imageName = "maven:3.8.5-openjdk-17-slim";
-            cmd = "mvn spring-boot:run";
-            needsPortBinding = true;
-        } else if ("PURE_JAVA_MAVEN".equals(projectType)) {
-            // 有 pom.xml 的纯 Java 项目
-            imageName = "maven:3.8.5-openjdk-17-slim";
-            // 原本的方案由于没有连接显示器导致会报错：Cannot run GUI application in headless environment.
-            // cmd = "mvn compile exec:java -Dexec.mainClass=\"" + mainClass + "\"";
-            // 修改 cmd：先更新 apt，安装 xvfb，然后使用 xvfb-run 来执行 maven 命令
-            cmd = "apt-get update && apt-get install -y xvfb && xvfb-run mvn compile exec:java -Dexec.mainClass=\"" + mainClass + "\"";
-        } else {
-            // "PURE_JAVA_NATIVE" - 连 pom.xml 都没有，全是散落的 .java 文件
-            imageName = "eclipse-temurin:17-jdk-alpine"; // 原生 JDK 镜像更小更快
-            // 使用原生 javac 编译当前目录下所有子目录的 java 文件，然后运行
-            cmd = String.format(
-                    "find . -name \"*.java\" > sources.txt && javac -d . @sources.txt && java -cp . %s",
-                    mainClass
-            );
-        }
+        String imageName = ("SPRING_BOOT".equals(projectType) || "PURE_JAVA_MAVEN".equals(projectType))
+                ? "maven:3.8.5-openjdk-17-slim"
+                : "eclipse-temurin:17-jdk-alpine";
 
         ensureImageExists(imageName);
 
@@ -131,8 +143,8 @@ public class DockerSandboxService {
             // 这里我们使用一个简单的 StringBuilder 来收集日志
             StringBuilder logs = new StringBuilder();
             dockerClient.logContainerCmd(containerId)
-                    .withStdOut(true)  // 捕获标准输出
-                    .withStdErr(true)  // 捕获错误输出（如编译错误）
+                    .withStdOut(true) // 捕获标准输出
+                    .withStdErr(true) // 捕获错误输出（如编译错误）
                     .withFollowStream(true) // 实时跟随日志流
                     .exec(new com.github.dockerjava.api.async.ResultCallback.Adapter<com.github.dockerjava.api.model.Frame>() {
                         // 这是一个回调函数，每当容器打印一行字，这里就会被触发一次
@@ -190,7 +202,8 @@ public class DockerSandboxService {
         Files.walkFileTree(path, new java.nio.file.SimpleFileVisitor<Path>() {
             // 先删除文件
             @Override
-            public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attrs) throws IOException {
+            public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attrs)
+                    throws IOException {
                 Files.delete(file);
                 return java.nio.file.FileVisitResult.CONTINUE;
             }
