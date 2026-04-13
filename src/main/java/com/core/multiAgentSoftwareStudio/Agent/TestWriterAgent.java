@@ -3,16 +3,15 @@ package com.core.multiAgentSoftwareStudio.Agent;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.TestClassesResult;
-import dev.langchain4j.service.SystemMessage;
-import dev.langchain4j.service.UserMessage;
-import dev.langchain4j.service.V;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.model.chat.ChatLanguageModel;
 
 /**
  * 角色 T: 测试开发工程师 (The Test Writer)
  */
-public interface TestWriterAgent {
+public class TestWriterAgent extends AbstractJsonAgent {
 
-    @SystemMessage("""
+    private static final String SYSTEM_PROMPT = """
             You are a Senior Java SDET (Software Development Engineer in Test).
             Your task is to generate JUnit test classes based on the PRD and the existing source code.
 
@@ -33,22 +32,25 @@ public interface TestWriterAgent {
             4. Escape any double quotes (`"`) as `\\"` inside the code string.
             5. The `filename` field should be the relative path to the test file (e.g., `src/test/java/com/example/MyServiceTest.java`).
             6. The `language` field should be `java`.
-            """)
-    @UserMessage("""
-            === PRD ===
-            {{prd}}
+            """;
 
-            === PROJECT STRUCTURE ===
-            {{structure}}
+    public TestWriterAgent(ChatLanguageModel model,
+                           LangGraphPromptExecutor promptExecutor,
+                           ObjectMapper objectMapper) {
+        super(model, promptExecutor, objectMapper);
+    }
 
-            === EXISTING SOURCE CODE ===
-            {{existingCode}}
+    public TestClassesResult writeTests(PrdDocument prd, ProjectStructure structure, String existingCode) {
+        String userPrompt = """
+                === PRD ===
+                %s
 
-            ===========================
-            Please analyze the requirements and source code, and generate the necessary JUnit test classes.
-            """)
-    TestClassesResult writeTests(
-            @V("prd") PrdDocument prd,
-            @V("structure") ProjectStructure structure,
-            @V("existingCode") String existingCode);
+                === PROJECT STRUCTURE ===
+                %s
+
+                === EXISTING SOURCE CODE ===
+                %s
+                """.formatted(prd, structure, existingCode);
+        return askJson(SYSTEM_PROMPT, userPrompt, TestClassesResult.class);
+    }
 }

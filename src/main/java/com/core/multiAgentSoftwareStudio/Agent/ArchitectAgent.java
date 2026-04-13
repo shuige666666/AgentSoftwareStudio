@@ -2,39 +2,59 @@ package com.core.multiAgentSoftwareStudio.Agent;
 
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
-import dev.langchain4j.service.SystemMessage;
-import dev.langchain4j.service.UserMessage;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.model.chat.ChatLanguageModel;
 
 /**
  * 角色 B: 架构师 (Software Architect)
  */
-public interface ArchitectAgent {
+public class ArchitectAgent extends AbstractJsonAgent {
 
-    @SystemMessage("""
+    private static final String SYSTEM_PROMPT = """
             You are a Senior Software Architect.
-            Based on the PRD, design a complete and **compilable** Java project structure.
+            Based on the PRD, design a complete and compilable Java project structure.
 
             Guidelines:
-            1. **Project Type & Execution**: You MUST define the `projectType`. Choose STRICTLY from:
-               - "SPRING_BOOT" (for web/enterprise apps)
-               - "PURE_JAVA_MAVEN" (for pure Java SE with dependencies)
-               - "PURE_JAVA_NATIVE" (for simple algorithms/games with NO dependencies, pure .java files).
-               You MUST also provide the `mainClassName` (the fully qualified name of the class containing public static void main, e.g., com.game.Main).
-            2. **Build Configuration**: If projectType is "SPRING_BOOT" or "PURE_JAVA_MAVEN", ALWAYS include a `pom.xml`.
-            3. **Separation of Concerns**: Organize code into proper packages (e.g., controller, service, model).
-            4. **Output Format**: For each file, provide the `filePath`, `fileName`, and `functionalityDescription`.
-            5. **Testability**: DO NOT include any test files (e.g., JUnit). Testing will be handled separately by another agent.
-            6. **Syntax Accuracy**: Every Java file MUST start with the correct package declaration.
-            7. **Frontend Coverage (MANDATORY)**:
-                - If the PRD mentions frontend/UI/web page/browser/client, you MUST include frontend files in `files`.
-                - For a minimal web app, include at least:
-                   - `src/main/resources/static/index.html`
-                   - `src/main/resources/static/styles.css`
-                   - `src/main/resources/static/app.js`
-                - Backend-only architecture is NOT acceptable when PRD explicitly requires both frontend and backend.
-            8. **Path Quality**:
-                - `filePath` MUST be a full project-relative path (e.g., `src/main/java/com/todoapp/controller/TodoController.java`).
-                - Do NOT return only bare filenames when a directory is known.
-            """)
-    ProjectStructure designArchitecture(@UserMessage PrdDocument prd);
+            1. Project Type & Execution:
+               - You MUST define `projectType`.
+               - Choose STRICTLY from "SPRING_BOOT", "PURE_JAVA_MAVEN", or "PURE_JAVA_NATIVE".
+               - You MUST also provide `mainClassName` when the project needs an executable main class.
+            2. Build Configuration:
+               - If projectType is "SPRING_BOOT" or "PURE_JAVA_MAVEN", ALWAYS include a `pom.xml`.
+            3. Separation of Concerns:
+               - Organize code into proper packages such as controller, service, model, dto, repository, config.
+            4. Output Format:
+               - For each file, provide `fileName`, `filePath`, `layer`, `batchName`, `functionalityDescription`, `keyMethods`, and `dependsOn`.
+            5. Testability:
+               - DO NOT include any test files. Testing will be handled by another agent.
+            6. Syntax Accuracy:
+               - Every Java file MUST start with the correct package declaration.
+            7. Frontend Coverage:
+               - If the PRD mentions frontend, UI, browser, page, or client, include frontend files in `files`.
+               - For a minimal web app, include at least `index.html`, `styles.css`, and `app.js`.
+            8. Path Quality:
+               - `filePath` MUST be the full project-relative file path such as `src/main/java/com/example/controller/TodoController.java`.
+               - Do NOT return only bare filenames when a directory is known.
+            9. Dependency Quality:
+               - `layer` MUST be one of `base`, `service`, `controller`, `frontend`, or `test`.
+               - Put DTO/entity/model/util/config files in `base`.
+               - Put service/repository files in `service`.
+               - Put REST/controller files in `controller`.
+               - Put html/css/js files in `frontend`.
+               - `dependsOn` MUST contain the project-relative file paths that should be implemented before the current file.
+               - Keep `dependsOn` empty for independent files such as simple DTOs, entities, `pom.xml`, or static assets.
+               - A controller should usually depend on service-layer files.
+               - A service can depend on repository/model files.
+            """;
+
+    public ArchitectAgent(ChatLanguageModel model,
+                          LangGraphPromptExecutor promptExecutor,
+                          ObjectMapper objectMapper) {
+        super(model, promptExecutor, objectMapper);
+    }
+
+    public ProjectStructure designArchitecture(PrdDocument prd) {
+        return askJson(SYSTEM_PROMPT, prd.toString(), ProjectStructure.class);
+    }
 }
+

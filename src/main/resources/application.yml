@@ -32,15 +32,5 @@ spring:
           model: qwen3-coder-plus
           temperature: 0.5
 
-langchain4j:
-  open-ai:
-    chat-model:
-      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      api-key: ${ALIBABA_API_KEY} # 换成你的 Key
-      model-name: qwen3-coder-plus
-      temperature: 0.2  # 这种任务建议温度低一点，更稳定
-      log-requests: true
-      log-responses: true
-
 server:
   port: 8080

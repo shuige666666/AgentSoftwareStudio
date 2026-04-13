@@ -5,21 +5,16 @@ import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
 import com.core.multiAgentSoftwareStudio.Agent.ProductManagerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.TestWriterAgent;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import com.core.multiAgentSoftwareStudio.Agent.LangGraphPromptExecutor;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
-import dev.langchain4j.model.openai.OpenAiChatModelName;
-import dev.langchain4j.model.chat.request.ResponseFormat;
-import dev.langchain4j.model.chat.request.ResponseFormatType;
-import dev.langchain4j.service.AiServices;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 
-import java.net.InetSocketAddress;
-import java.net.Proxy;
 import java.time.Duration;
 
 /**
@@ -66,50 +61,49 @@ public class AiConfig {
          * 创建产品经理 Agent
          */
         @Bean
-        ProductManagerAgent productManagerAgent(@Qualifier("logicModel") ChatLanguageModel model) {
-                return AiServices.builder(ProductManagerAgent.class)
-                                .chatLanguageModel(model)
-                                .chatMemory(MessageWindowChatMemory.withMaxMessages(10)) // 简单的短期记忆
-                                .build();
+        ProductManagerAgent productManagerAgent(@Qualifier("logicModel") ChatLanguageModel model,
+                        LangGraphPromptExecutor promptExecutor,
+                        ObjectMapper objectMapper) {
+                return new ProductManagerAgent(model, promptExecutor, objectMapper);
         }
 
         /**
          * 创建架构师 Agent
          */
         @Bean
-        ArchitectAgent architectAgent(@Qualifier("logicModel") ChatLanguageModel model) {
-                return AiServices.builder(ArchitectAgent.class)
-                                .chatLanguageModel(model)
-                                .build();
+        ArchitectAgent architectAgent(@Qualifier("logicModel") ChatLanguageModel model,
+                        LangGraphPromptExecutor promptExecutor,
+                        ObjectMapper objectMapper) {
+                return new ArchitectAgent(model, promptExecutor, objectMapper);
         }
 
         /**
          * 创建开发工程师 Agent
          */
         @Bean
-        DeveloperAgent developerAgent(@Qualifier("coderModel") ChatLanguageModel model) {
-                return AiServices.builder(DeveloperAgent.class)
-                                .chatLanguageModel(model)
-                                .build();
+        DeveloperAgent developerAgent(@Qualifier("coderModel") ChatLanguageModel model,
+                        LangGraphPromptExecutor promptExecutor,
+                        ObjectMapper objectMapper) {
+                return new DeveloperAgent(model, promptExecutor, objectMapper);
         }
 
         /**
          * 创建测试用例编写 Agent
          */
         @Bean
-        TestWriterAgent testWriterAgent(@Qualifier("coderModel") ChatLanguageModel model) {
-                return AiServices.builder(TestWriterAgent.class)
-                                .chatLanguageModel(model)
-                                .build();
+        TestWriterAgent testWriterAgent(@Qualifier("coderModel") ChatLanguageModel model,
+                        LangGraphPromptExecutor promptExecutor,
+                        ObjectMapper objectMapper) {
+                return new TestWriterAgent(model, promptExecutor, objectMapper);
         }
 
         /**
          * 创建测试/修复工程师 Agent
          */
         @Bean
-        DebuggerAgent debuggerAgent(@Qualifier("coderModel") ChatLanguageModel model) {
-                return AiServices.builder(DebuggerAgent.class)
-                                .chatLanguageModel(model)
-                                .build();
+        DebuggerAgent debuggerAgent(@Qualifier("coderModel") ChatLanguageModel model,
+                        LangGraphPromptExecutor promptExecutor,
+                        ObjectMapper objectMapper) {
+                return new DebuggerAgent(model, promptExecutor, objectMapper);
         }
 }

@@ -205,7 +205,9 @@ public class WorkspaceService {
         try (Stream<Path> stream = Files.walk(projectDir)) {
             stream.filter(path -> {
                 // 1. 必须是普通文件
-                if (!Files.isRegularFile(path)) return false;
+                if (!Files.isRegularFile(path)) {
+                    return false;
+                }
 
                 String pathStr = path.toString().replace('\\', '/');
                 // 2. 排除构建产物和隐藏目录 (例如 target, .git, .idea, bin)
