@@ -19,6 +19,9 @@ public class ContractValidationService {
     private static final Pattern PACKAGE_PATTERN = Pattern.compile("^\\s*package\\s+([a-zA-Z0-9_.]+)\\s*;", Pattern.MULTILINE);
     private static final Pattern PUBLIC_TYPE_PATTERN = Pattern.compile("\\bpublic\\s+(class|interface|record|enum)\\s+([A-Za-z0-9_]+)");
 
+    /**
+     * 对当前批次生成结果做轻量契约校验
+     */
     public List<String> validateBatch(GenerationBatch batch, List<SourceCode> generatedFiles) {
         List<String> warnings = new ArrayList<>();
         if (batch == null || batch.files().isEmpty()) {
@@ -55,6 +58,9 @@ public class ContractValidationService {
         return warnings;
     }
 
+    /**
+     * 根据目标路径在生成结果中查找对应文件
+     */
     private SourceCode findMatchingFile(Map<String, SourceCode> fileIndex, String expectedPath) {
         // 先按完整路径匹配，匹配不到再退回到纯文件名。
         // 这是为了兼容模型偶尔只返回类名、不返回完整路径的情况。
@@ -70,6 +76,9 @@ public class ContractValidationService {
                 .orElse(null);
     }
 
+    /**
+     * 校验 Java 文件的 package 声明是否与路径一致
+     */
     private void validatePackage(String filename, String code, List<String> warnings) {
         // Java 文件如果 package 和目录不一致，后面编译阶段通常会直接炸。
         // 这里提前拦一下，成本比进沙箱再发现低很多。
@@ -94,6 +103,9 @@ public class ContractValidationService {
         }
     }
 
+    /**
+     * 校验 public 类型名称是否与文件名一致
+     */
     private void validatePublicType(String filename, String code, List<String> warnings) {
         // 最常见的文件级错误之一：文件名和 public 类型名不一致。
         Matcher matcher = PUBLIC_TYPE_PATTERN.matcher(code);
@@ -109,6 +121,9 @@ public class ContractValidationService {
         }
     }
 
+    /**
+     * 根据层级约定检查常见注解是否缺失
+     */
     private void validateLayerHints(FileBlueprint blueprint, String filename, String code, List<String> warnings) {
         // 这里放的是“层级习惯检查”，不是硬规则。
         // 目的是在真正编译之前，尽早发现一些明显偏离预期的生成结果。
@@ -121,11 +136,17 @@ public class ContractValidationService {
         }
     }
 
+    /**
+     * 判断代码中是否仍然包含明显的占位实现
+     */
     private boolean containsPlaceholder(String code) {
         // 占位实现一旦漏进最终编译阶段，通常会带来更多噪音错误。
         return code.contains("TODO") || code.contains("implement logic") || code.contains("placeholder");
     }
 
+    /**
+     * 规范化路径字符串，便于统一比较
+     */
     private String normalize(String path) {
         return path == null ? "unknown" : path.trim().replace("\\", "/");
     }

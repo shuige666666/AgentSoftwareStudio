@@ -28,6 +28,9 @@ public class BatchPlanningService {
             "frontend", 40,
             "test", 50);
 
+    /**
+     * 根据架构蓝图生成可执行的批次计划
+     */
     public GenerationPlan createPlan(ProjectStructure structure) {
         if (structure == null || structure.files() == null || structure.files().isEmpty()) {
             return new GenerationPlan(List.of());
@@ -66,6 +69,9 @@ public class BatchPlanningService {
         return new GenerationPlan(batches);
     }
 
+    /**
+     * 在单个批次内部按照依赖关系做稳定排序
+     */
     private List<FileBlueprint> sortWithinBatch(List<FileBlueprint> files) {
         // 同一批次内部，再做一层轻量依赖排序。
         // 目的是尽量让“基础文件在前，依赖它们的文件在后”，
@@ -123,11 +129,17 @@ public class BatchPlanningService {
         return ordered;
     }
 
+    /**
+     * 计算层级优先级，数值越小越优先生成
+     */
     private int layerPriority(String layer) {
         // 数字越小越先生成。
         return LAYER_PRIORITY.getOrDefault(layer == null ? "base" : layer.trim().toLowerCase(), 99);
     }
 
+    /**
+     * 规范化路径表示，便于做分组和依赖匹配
+     */
     private String normalize(String path) {
         if (path == null || path.isBlank()) {
             return "unknown";

@@ -30,6 +30,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 import static org.bsc.langgraph4j.StateGraph.END;
@@ -38,6 +40,7 @@ import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
 @Service
 public class SoftwareStudioServiceImpl implements SoftwareStudioService {
+    private static final int MAX_BATCH_LLM_CONCURRENCY = 2;
 
     private final ProductManagerAgent pmAgent;
     private final ArchitectAgent architectAgent;
@@ -49,15 +52,18 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
     private final BatchPlanningService batchPlanningService;
     private final ContractValidationService contractValidationService;
 
+    /**
+     * 注入软件工坊工作流所需的全部组件
+     */
     public SoftwareStudioServiceImpl(ProductManagerAgent pmAgent,
-                                     ArchitectAgent architectAgent,
-                                     DeveloperAgent developerAgent,
-                                     TestWriterAgent testWriterAgent,
-                                     DebuggerAgent debuggerAgent,
-                                     DockerSandboxService sandboxService,
-                                     WorkspaceService workspaceService,
-                                     BatchPlanningService batchPlanningService,
-                                     ContractValidationService contractValidationService) {
+            ArchitectAgent architectAgent,
+            DeveloperAgent developerAgent,
+            TestWriterAgent testWriterAgent,
+            DebuggerAgent debuggerAgent,
+            DockerSandboxService sandboxService,
+            WorkspaceService workspaceService,
+            BatchPlanningService batchPlanningService,
+            ContractValidationService contractValidationService) {
         this.pmAgent = pmAgent;
         this.architectAgent = architectAgent;
         this.developerAgent = developerAgent;
@@ -69,17 +75,27 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         this.contractValidationService = contractValidationService;
     }
 
+    /**
+     * 同步执行项目生成流程并返回最终代码结果
+     */
     @Override
     public List<SourceCode> generateProject(String userRequest) {
         return generateProjectInternal(userRequest, System.out::println, 5);
     }
 
+    /**
+     * 以流式日志回调的方式执行项目生成流程
+     */
     @Override
     public void generateProjectStream(String userRequest, Consumer<String> eventListener) {
         generateProjectInternal(userRequest, eventListener, 5);
     }
 
-    private List<SourceCode> generateProjectInternal(String userRequest, Consumer<String> eventListener, int maxRetries) {
+    /**
+     * 启动完整的项目生成工作流
+     */
+    private List<SourceCode> generateProjectInternal(String userRequest, Consumer<String> eventListener,
+            int maxRetries) {
         Consumer<String> logger = eventListener != null ? eventListener : message -> {
         };
         WorkflowData initialData = new WorkflowData(userRequest, maxRetries);
@@ -90,20 +106,33 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return finalData.codes;
     }
 
+    /**
+     * 使用 LangGraph4j 编排整个多节点工作流
+     */
     private WorkflowData runWorkflowGraph(WorkflowData initialData, Consumer<String> logger) {
         // 这里刻意让每个节点都“接收完整状态、返回完整状态”。
         // 这样真正驱动流程的是 LangGraph 的状态流转，而不是方法外部的共享可变变量。
         // 后面如果你想继续扩展更多节点、增加分支条件，这个形态会更容易维护。
-        NodeAction<WorkflowGraphState> pmNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executePm(state.workflowData(), logger));
-        NodeAction<WorkflowGraphState> architectNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executeArchitect(state.workflowData(), logger));
-        NodeAction<WorkflowGraphState> planNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executePlanBatches(state.workflowData(), logger));
-        NodeAction<WorkflowGraphState> generateBatchNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executeGenerateBatch(state.workflowData(), logger));
-        NodeAction<WorkflowGraphState> validateBatchNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executeValidateBatch(state.workflowData(), logger));
-        NodeAction<WorkflowGraphState> generateTestsNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executeGenerateTests(state.workflowData(), logger));
-        NodeAction<WorkflowGraphState> persistNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executePersist(state.workflowData(), logger));
-        NodeAction<WorkflowGraphState> runNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executeRun(state.workflowData(), logger));
-        NodeAction<WorkflowGraphState> evaluateNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executeEvaluate(state.workflowData(), logger));
-        NodeAction<WorkflowGraphState> fixNode = state -> Map.of(WorkflowGraphState.DATA_KEY, executeFix(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> pmNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executePm(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> architectNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executeArchitect(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> planNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executePlanBatches(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> generateBatchNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executeGenerateBatch(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> validateBatchNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executeValidateBatch(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> generateTestsNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executeGenerateTests(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> persistNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executePersist(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> runNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executeRun(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> evaluateNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executeEvaluate(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> fixNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executeFix(state.workflowData(), logger));
 
         try {
             // 整体图的职责：
@@ -129,7 +158,8 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
                     .addEdge("generate_batch", "validate_batch")
                     .addConditionalEdges(
                             "validate_batch",
-                            state -> CompletableFuture.completedFuture(state.workflowData().hasMoreBatches() ? "NEXT_BATCH" : "GENERATE_TESTS"),
+                            state -> CompletableFuture.completedFuture(
+                                    state.workflowData().hasMoreBatches() ? "NEXT_BATCH" : "GENERATE_TESTS"),
                             Map.of("NEXT_BATCH", "generate_batch", "GENERATE_TESTS", "generate_tests"))
                     .addEdge("generate_tests", "persist")
                     .addEdge("persist", "run")
@@ -140,6 +170,11 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
                             Map.of("FIX", "fix", "END", END))
                     .addEdge("fix", "run")
                     .compile();
+
+            // LangGraph4j 默认最大迭代数较小（25），
+            // 我们这个工作流包含“按批次循环 + 可选修复循环”，正常情况下也可能超过默认值。
+            // 这里提高上限以避免误判为死循环，同时仍保留兜底保护。
+            graph.setMaxIterations(calculateMaxIterations(initialData));
 
             WorkflowData lastData = initialData;
             for (var output : graph.stream(Map.of(WorkflowGraphState.DATA_KEY, initialData))) {
@@ -153,6 +188,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         }
     }
 
+    /**
+     * 执行产品经理节点，生成结构化 PRD
+     */
     private WorkflowData executePm(WorkflowData data, Consumer<String> logger) {
         logger.accept("1. Product manager is analyzing the request.");
         data.prd = pmAgent.analyzeRequirement(data.userRequest);
@@ -160,6 +198,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return data;
     }
 
+    /**
+     * 执行架构设计节点，产出项目结构蓝图
+     */
     private WorkflowData executeArchitect(WorkflowData data, Consumer<String> logger) {
         logger.accept("2. Architect is designing the project structure.");
         data.structure = architectAgent.designArchitecture(data.prd);
@@ -168,6 +209,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return data;
     }
 
+    /**
+     * 根据架构蓝图生成分批执行计划
+     */
     private WorkflowData executePlanBatches(WorkflowData data, Consumer<String> logger) {
         // 这个节点把“架构蓝图”转换成“可执行计划”。
         // 也就是把文件从静态描述，变成真正的生成批次序列。
@@ -176,18 +220,23 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         logger.accept("3. Batch plan created with " + data.generationPlan.batches().size() + " batches.");
         for (int i = 0; i < data.generationPlan.batches().size(); i++) {
             GenerationBatch batch = data.generationPlan.batches().get(i);
-            logger.accept("   Batch " + (i + 1) + ": " + batch.name() + " [" + batch.layer() + "] -> " + batch.files().size() + " files");
+            logger.accept("   Batch " + (i + 1) + ": " + batch.name() + " [" + batch.layer() + "] -> "
+                    + batch.files().size() + " files");
         }
         return data;
     }
 
+    /**
+     * 生成当前批次内的全部源文件
+     */
     private WorkflowData executeGenerateBatch(WorkflowData data, Consumer<String> logger) {
         GenerationBatch batch = data.currentBatch();
         if (batch == null) {
             return data;
         }
 
-        logger.accept("4." + (data.currentBatchIndex + 1) + " Generating batch `" + batch.name() + "` (" + batch.layer() + ").");
+        logger.accept("4." + (data.currentBatchIndex + 1) + " Generating batch `" + batch.name() + "` (" + batch.layer()
+                + ").");
         String existingCodeContext = buildCodeContextForTester(data.codes);
         String batchContext = describeBatch(batch);
 
@@ -197,20 +246,32 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         List<FileBlueprint> batchFiles = batch.files().stream()
                 .sorted(Comparator.comparing(FileBlueprint::targetPath))
                 .toList();
-        List<CompletableFuture<SourceCode>> futures = batchFiles.stream()
-                .map(fileBlueprint -> CompletableFuture.supplyAsync(
-                        () -> generateSourceFile(data.prd, data.structure, existingCodeContext, batchContext, fileBlueprint)))
-                .toList();
+        int concurrency = Math.max(1, Math.min(MAX_BATCH_LLM_CONCURRENCY, batchFiles.size()));
+        ExecutorService batchExecutor = Executors.newFixedThreadPool(concurrency);
+        try {
+            logger.accept("   Batch LLM concurrency: " + concurrency);
+            List<CompletableFuture<SourceCode>> futures = batchFiles.stream()
+                    .map(fileBlueprint -> CompletableFuture.supplyAsync(
+                            () -> generateSourceFile(data.prd, data.structure, existingCodeContext, batchContext,
+                                    fileBlueprint),
+                            batchExecutor))
+                    .toList();
 
-        for (int i = 0; i < batchFiles.size(); i++) {
-            FileBlueprint blueprint = batchFiles.get(i);
-            SourceCode generatedFile = futures.get(i).join();
-            upsertCode(data.codes, generatedFile);
-            logger.accept("   Generated: " + blueprint.targetPath());
+            for (int i = 0; i < batchFiles.size(); i++) {
+                FileBlueprint blueprint = batchFiles.get(i);
+                SourceCode generatedFile = futures.get(i).join();
+                upsertCode(data.codes, generatedFile);
+                logger.accept("   Generated: " + blueprint.targetPath());
+            }
+        } finally {
+            batchExecutor.shutdown();
         }
         return data;
     }
 
+    /**
+     * 对当前批次结果执行轻量契约校验
+     */
     private WorkflowData executeValidateBatch(WorkflowData data, Consumer<String> logger) {
         GenerationBatch batch = data.currentBatch();
         if (batch == null) {
@@ -229,7 +290,8 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         if (warnings.isEmpty()) {
             logger.accept("   Lightweight contract validation passed for batch `" + batch.name() + "`.");
         } else {
-            logger.accept("   Lightweight contract validation found " + warnings.size() + " warnings in batch `" + batch.name() + "`.");
+            logger.accept("   Lightweight contract validation found " + warnings.size() + " warnings in batch `"
+                    + batch.name() + "`.");
             warnings.forEach(warning -> logger.accept("   - " + warning));
             data.validationWarnings.addAll(warnings);
         }
@@ -237,6 +299,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return data;
     }
 
+    /**
+     * 在生产代码全部生成后统一生成测试代码
+     */
     private WorkflowData executeGenerateTests(WorkflowData data, Consumer<String> logger) {
         // 测试统一放到所有生产代码生成完之后再做。
         // 这样测试 Agent 能看到更完整的上下文，也能避免每层都重复生成测试。
@@ -248,13 +313,17 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         if (testClassesResult != null && testClassesResult.testFiles() != null) {
             for (SourceCode testFile : testClassesResult.testFiles()) {
                 String normalizedFileName = normalizeGeneratedFilename(testFile.filename(), testFile.code());
-                upsertCode(data.codes, new SourceCode(normalizedFileName, detectLanguageFromFilename(normalizedFileName), testFile.code()));
+                upsertCode(data.codes, new SourceCode(normalizedFileName,
+                        detectLanguageFromFilename(normalizedFileName), testFile.code()));
                 logger.accept("   Generated test: " + normalizedFileName);
             }
         }
         return data;
     }
 
+    /**
+     * 将当前生成结果统一写入本地工作区
+     */
     private WorkflowData executePersist(WorkflowData data, Consumer<String> logger) {
         // 到这里才统一落盘，而不是每个批次都写一次磁盘。
         // 这样可以减少中间态文件干扰，也让最终修复更集中。
@@ -265,10 +334,14 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return data;
     }
 
+    /**
+     * 在 Docker 沙箱中执行最终编译和运行验证
+     */
     private WorkflowData executeRun(WorkflowData data, Consumer<String> logger) {
         // 真正的编译/运行检查放在这里统一做。
         // 前面阶段只做轻量约束，避免每一层都进入昂贵的沙箱执行。
-        logger.accept("7. Running final compile/runtime verification in the sandbox. Attempt " + data.currentAttempt + ".");
+        logger.accept(
+                "7. Running final compile/runtime verification in the sandbox. Attempt " + data.currentAttempt + ".");
         data.executionResult = sandboxService.runCodeInSandbox(
                 Path.of(data.projectPath),
                 data.structure.projectType(),
@@ -281,6 +354,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return data;
     }
 
+    /**
+     * 评估运行与测试结果，并决定是否进入修复流程
+     */
     private WorkflowData executeEvaluate(WorkflowData data, Consumer<String> logger) {
         // 这个节点只负责“判断下一步该怎么走”：
         // - 成功：结束
@@ -331,6 +407,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return data;
     }
 
+    /**
+     * 执行最终修复节点并将修复结果写回工作区
+     */
     private WorkflowData executeFix(WorkflowData data, Consumer<String> logger) {
         if (!data.shouldFix || data.pendingFixLog == null || data.pendingErrorType == null) {
             return data;
@@ -349,16 +428,20 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return data;
     }
 
+    /**
+     * 按蓝图为单个目标文件生成源码
+     */
     private SourceCode generateSourceFile(PrdDocument prd,
-                                          ProjectStructure structure,
-                                          String existingCodeContext,
-                                          String batchContext,
-                                          FileBlueprint blueprint) {
+            ProjectStructure structure,
+            String existingCodeContext,
+            String batchContext,
+            FileBlueprint blueprint) {
         // 这里对 DeveloperAgent 的输入做了一层统一包装：
         // 当前文件路径、文件职责、方法要求、批次上下文、已有代码上下文都会一起给过去。
         // 这样单文件生成时，模型仍然能感知自己处在整个项目的哪一层。
         String targetPath = blueprint.targetPath();
-        String methods = blueprint.keyMethods().isEmpty() ? "No specific methods provided." : blueprint.keyMethods().toString();
+        String methods = blueprint.keyMethods().isEmpty() ? "No specific methods provided."
+                : blueprint.keyMethods().toString();
 
         SourceCode rawResult = developerAgent.writeCode(
                 prd,
@@ -376,6 +459,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return new SourceCode(targetPath, language, code);
     }
 
+    /**
+     * 构建当前批次的文字描述，供代码生成节点参考
+     */
     private String describeBatch(GenerationBatch batch) {
         // 给模型一段“当前批次说明”，帮助它理解这次为什么轮到这些文件。
         // 这对同层并行生成时维持一致性有帮助。
@@ -393,6 +479,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return builder.toString();
     }
 
+    /**
+     * 将新生成代码写入内存，如已存在则覆盖
+     */
     private void upsertCode(List<SourceCode> codes, SourceCode candidate) {
         // 同一路径的文件如果已经生成过，就直接覆盖内存中的旧版本。
         // 这样后续上下文、落盘、修复，看到的都是最新内容。
@@ -400,13 +489,18 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         for (int i = 0; i < codes.size(); i++) {
             String normalizedExisting = normalizeGeneratedFilename(codes.get(i).filename(), codes.get(i).code());
             if (normalizedExisting.equals(normalizedCandidate)) {
-                codes.set(i, new SourceCode(normalizedCandidate, detectLanguageFromFilename(normalizedCandidate), candidate.code()));
+                codes.set(i, new SourceCode(normalizedCandidate, detectLanguageFromFilename(normalizedCandidate),
+                        candidate.code()));
                 return;
             }
         }
-        codes.add(new SourceCode(normalizedCandidate, detectLanguageFromFilename(normalizedCandidate), candidate.code()));
+        codes.add(
+                new SourceCode(normalizedCandidate, detectLanguageFromFilename(normalizedCandidate), candidate.code()));
     }
 
+    /**
+     * 根据运行日志判断错误的大致类型
+     */
     private String determineErrorType(String executionResult) {
         // 这里不是做非常精确的错误分类，而是为了决定后续 prompt 应该偏向哪种修复思路。
         if (executionResult.contains("javac:") || executionResult.contains("Compilation failure")) {
@@ -420,6 +514,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return "RUNTIME ERROR";
     }
 
+    /**
+     * 将当前全部代码拼接成完整上下文文本
+     */
     private String buildCodeContextForTester(List<SourceCode> codes) {
         // 全量上下文主要给测试生成和某些需要“全局视角”的修复场景使用。
         StringBuilder builder = new StringBuilder();
@@ -430,12 +527,15 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return builder.toString();
     }
 
+    /**
+     * 调用调试代理分析并应用修复结果
+     */
     private void handleFix(List<SourceCode> codes,
-                           String executionResult,
-                           String errorType,
-                           Path projectPath,
-                           List<String> validationWarnings,
-                           Consumer<String> logger) {
+            String executionResult,
+            String errorType,
+            Path projectPath,
+            List<String> validationWarnings,
+            Consumer<String> logger) {
         // 修复阶段会把三类信息拼在一起：
         // 1. 当前代码上下文
         // 2. 编译/运行/测试日志
@@ -466,6 +566,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         workspaceService.applyFixesToDisk(projectPath, normalizedFixes);
     }
 
+    /**
+     * 为修复阶段构建尽量精简但足够有效的代码上下文
+     */
     private String buildOptimizedCodeContext(List<SourceCode> codes, String executionResult, String errorType) {
         // 优先只给“报错关联文件”的完整代码，其他文件给摘要。
         // 如果是逻辑错误/测试失败，则直接退回全量上下文，因为这类问题经常跨文件。
@@ -495,6 +598,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return builder.toString();
     }
 
+    /**
+     * 从完整源码中提取简要摘要，压缩修复上下文
+     */
     private String extractSummary(String code) {
         // 摘要策略尽量简单：只保留 package、public 类型声明、public 方法签名。
         // 目标不是完全还原代码，而是让修复阶段知道项目大致轮廓。
@@ -518,6 +624,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return summary.toString();
     }
 
+    /**
+     * 用修复后的代码更新内存中的文件列表
+     */
     private void updateCodesInMemory(List<SourceCode> codes, CodeFix fix) {
         // debugger 返回修复结果后，先更新内存，再落盘。
         // 后续重跑时用到的是修复后的最新版本，而不是旧代码。
@@ -541,10 +650,14 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         }
 
         if (!found) {
-            codes.add(new SourceCode(normalizedFixFilename, detectLanguageFromFilename(normalizedFixFilename), fix.newCode()));
+            codes.add(new SourceCode(normalizedFixFilename, detectLanguageFromFilename(normalizedFixFilename),
+                    fix.newCode()));
         }
     }
 
+    /**
+     * 规范化模型返回的文件名和项目内路径
+     */
     private String normalizeGeneratedFilename(String filename, String code) {
         // 模型返回的文件名有时只写类名，有时写完整路径。
         // 这里统一收敛成项目内相对路径，方便去重、覆盖和落盘。
@@ -569,10 +682,13 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return normalized;
     }
 
+    /**
+     * 组合原始错误日志、分类提示和轻量校验告警
+     */
     private String buildEnhancedErrorLog(String errorType,
-                                         String executionResult,
-                                         List<SourceCode> codes,
-                                         List<String> validationWarnings) {
+            String executionResult,
+            List<SourceCode> codes,
+            List<String> validationWarnings) {
         // 编译错误除了原始日志，还会额外拼接一层“启发式提示”。
         // 同时把中间轻量校验发现的问题一起给 debugger，减少来回试错。
         StringBuilder builder = new StringBuilder(executionResult == null ? "" : executionResult);
@@ -591,6 +707,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return builder.toString();
     }
 
+    /**
+     * 对常见编译错误给出启发式分类提示
+     */
     private String classifyCompilationErrors(String executionResult, List<SourceCode> codes) {
         // 这里不是严格的编译器分析器，只是把项目里高频出现的错误模式做成提示。
         List<String> hints = new ArrayList<>();
@@ -602,7 +721,8 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         if (hasJUnitMissing) {
             List<String> misplacedTests = findMisplacedTestFiles(codes);
             if (!misplacedTests.isEmpty()) {
-                hints.add("Tests appear to be under src/main/java instead of src/test/java: " + String.join(", ", misplacedTests));
+                hints.add("Tests appear to be under src/main/java instead of src/test/java: "
+                        + String.join(", ", misplacedTests));
             } else {
                 hints.add("Test dependency issue detected. Check whether test classes are under src/test/java.");
             }
@@ -618,24 +738,31 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
 
         boolean missingList = executionResult.contains("symbol:   class List")
                 || executionResult.contains("symbol: class List")
-                || executionResult.contains("cannot find symbol") && (executionResult.contains(" List ") || executionResult.contains("List<"));
+                || executionResult.contains("cannot find symbol")
+                        && (executionResult.contains(" List ") || executionResult.contains("List<"));
         if (missingList) {
             hints.add("Missing import likely: import java.util.List;");
         }
 
-        if (executionResult.contains("symbol:   class ResponseEntity") || executionResult.contains("symbol: class ResponseEntity")) {
+        if (executionResult.contains("symbol:   class ResponseEntity")
+                || executionResult.contains("symbol: class ResponseEntity")) {
             hints.add("Missing import likely: import org.springframework.http.ResponseEntity;");
         }
-        if (executionResult.contains("symbol:   class RequestParam") || executionResult.contains("symbol: class RequestParam")) {
+        if (executionResult.contains("symbol:   class RequestParam")
+                || executionResult.contains("symbol: class RequestParam")) {
             hints.add("Missing import likely: import org.springframework.web.bind.annotation.RequestParam;");
         }
-        if (executionResult.contains("symbol:   class PathVariable") || executionResult.contains("symbol: class PathVariable")) {
+        if (executionResult.contains("symbol:   class PathVariable")
+                || executionResult.contains("symbol: class PathVariable")) {
             hints.add("Missing import likely: import org.springframework.web.bind.annotation.PathVariable;");
         }
 
         return String.join("\n", hints);
     }
 
+    /**
+     * 找出被错误放入主源码目录的测试文件
+     */
     private List<String> findMisplacedTestFiles(List<SourceCode> codes) {
         // 一些测试文件被错误放进 src/main/java 时，会引发一串看起来很乱的依赖错误。
         // 这里提前把这种模式抽出来，方便修复 prompt 更精准。
@@ -643,7 +770,8 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         for (SourceCode code : codes) {
             String normalizedFilename = normalizeGeneratedFilename(code.filename(), code.code()).replace("\\", "/");
             boolean looksLikeTest = normalizedFilename.endsWith("Test.java")
-                    || (code.code() != null && (code.code().contains("org.junit.jupiter") || code.code().contains("@Test")));
+                    || (code.code() != null
+                            && (code.code().contains("org.junit.jupiter") || code.code().contains("@Test")));
             if (looksLikeTest && normalizedFilename.startsWith("src/main/java/")) {
                 misplacedFiles.add(normalizedFilename);
             }
@@ -651,6 +779,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return misplacedFiles;
     }
 
+    /**
+     * 根据文件名后缀推断源码语言类型
+     */
     private String detectLanguageFromFilename(String filename) {
         String lower = filename == null ? "text" : filename.toLowerCase();
         if (lower.endsWith(".java")) {
@@ -682,10 +813,16 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         static final Map<String, Channel<?>> SCHEMA = Map.of(
                 DATA_KEY, Channels.base(() -> new WorkflowData()));
 
+        /**
+         * 使用初始化数据创建工作流图状态对象
+         */
         public WorkflowGraphState(Map<String, Object> initData) {
             super(initData);
         }
 
+        /**
+         * 读取图状态中共享的工作流数据
+         */
         public WorkflowData workflowData() {
             return this.<WorkflowData>value(DATA_KEY).orElseGet(WorkflowData::new);
         }
@@ -714,14 +851,23 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         boolean shouldFix;
         int currentAttempt = 1;
 
+        /**
+         * 创建默认的空工作流状态
+         */
         WorkflowData() {
         }
 
+        /**
+         * 使用用户请求和最大重试次数初始化工作流状态
+         */
         WorkflowData(String userRequest, int maxRetries) {
             this.userRequest = userRequest;
             this.maxRetries = maxRetries;
         }
 
+        /**
+         * 判断是否还有未处理的代码生成批次
+         */
         boolean hasMoreBatches() {
             // 是否还有下一批待生成文件，供条件边决定要不要继续回到 generate_batch。
             return generationPlan != null
@@ -729,6 +875,9 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
                     && currentBatchIndex < generationPlan.batches().size();
         }
 
+        /**
+         * 获取当前游标所指向的生成批次
+         */
         GenerationBatch currentBatch() {
             // 读取当前批次时不额外推进索引，索引推进统一放在 validate_batch 后面。
             if (!hasMoreBatches()) {
@@ -738,7 +887,29 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         }
     }
 
+    /**
+     * 在值为空时返回兜底文本
+     */
     private String safeValue(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    /**
+     * 估算一次完整流程的最大节点步数，避免默认 25 次迭代过早触发。
+     */
+    private int calculateMaxIterations(WorkflowData data) {
+        // 在 architect 完成前批次数未知，给一个保守基础值。
+        int estimatedBatchCount = 20;
+        if (data != null && data.generationPlan != null && data.generationPlan.batches() != null
+                && !data.generationPlan.batches().isEmpty()) {
+            estimatedBatchCount = data.generationPlan.batches().size();
+        }
+
+        int retries = data == null ? 5 : Math.max(1, data.maxRetries);
+        // 基础节点（pm/architect/plan/tests/persist/run/evaluate）约 8 步；
+        // 每批次有 generate+validate 两步；
+        // 每次修复回环有 fix+run+evaluate 三步。
+        int estimated = 8 + estimatedBatchCount * 2 + retries * 3;
+        return Math.max(estimated, 200);
     }
 }

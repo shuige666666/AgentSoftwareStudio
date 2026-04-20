@@ -36,9 +36,9 @@ public class AiConfig {
                 return OpenAiChatModel.builder()
                                 .baseUrl(baseUrl) // DeepSeek 官方 API 地址
                                 .apiKey(apiKey)
-                                .modelName("qwen3-coder-flash") // 模型名称
+                                .modelName("qwen3-coder-plus-2025-09-23") // 模型名称
                                 .temperature(0.1) // 写代码通常需要严谨，温度设低一点
-                                .timeout(Duration.ofMinutes(3)) // 关键！生成代码通常很慢，默认超时可能不够
+                                .timeout(Duration.ofMinutes(8)) // 代码生成和修复较慢，给更宽松的超时窗口
                                 .maxTokens(8192) // 供应商限制最大 8192，避免 invalid_parameter_error
                                 .logRequests(true) // 测试阶段开启日志，方便看它发了什么
                                 .logResponses(true) // 测试阶段开启日志，方便看它回了什么
@@ -53,6 +53,7 @@ public class AiConfig {
                                 .apiKey(apiKey)
                                 .modelName("qwen3-max") // 逻辑能力最强，适合 PM 和 架构师
                                 .temperature(0.5) // 稍微高一点，增加规划的灵活性
+                                .timeout(Duration.ofMinutes(5)) // PM/架构阶段也可能因为长提示词或供应商排队触发默认超时
                                 .maxTokens(8192)
                                 .build();
         }
