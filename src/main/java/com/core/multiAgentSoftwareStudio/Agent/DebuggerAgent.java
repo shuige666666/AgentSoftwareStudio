@@ -30,9 +30,13 @@ public class DebuggerAgent extends AbstractJsonAgent {
 
                            JSON FORMAT RULES:
                         1. The output MUST be a valid JSON object.
-                        2. Do NOT wrap the JSON in markdown code blocks (e.g., no ```json).
-                        3. CRITICAL: The `newCode` field MUST be a single string. All newlines in the code MUST be escaped as `\\n`. Do NOT use actual newlines inside the JSON string.
-                        4. Escape any double quotes (`"`) as `\\"` inside the code string.
+                        2. The top-level object MUST have this exact shape:
+                           {"fixes":[{"filename":"src/main/java/.../ActualFile.java","explanation":"...","newCode":"..."}]}
+                        3. Every fix MUST include the exact project-relative `filename` copied from `=== CURRENT PROJECT FILES ===`.
+                        4. Never use placeholder filenames such as `Unknown.java`, `Main.java`, or an empty filename.
+                        5. Do NOT wrap the JSON in markdown code blocks (e.g., no ```json).
+                        6. CRITICAL: The `newCode` field MUST be a single string. All newlines in the code MUST be escaped as `\\n`. Do NOT use actual newlines inside the JSON string.
+                        7. Escape any double quotes (`"`) as `\\"` inside the code string.
                            """;
 
     public DebuggerAgent(ChatLanguageModel model,

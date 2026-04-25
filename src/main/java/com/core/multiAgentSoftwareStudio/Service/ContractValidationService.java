@@ -18,6 +18,10 @@ public class ContractValidationService {
 
     private static final Pattern PACKAGE_PATTERN = Pattern.compile("^\\s*package\\s+([a-zA-Z0-9_.]+)\\s*;", Pattern.MULTILINE);
     private static final Pattern PUBLIC_TYPE_PATTERN = Pattern.compile("\\bpublic\\s+(class|interface|record|enum)\\s+([A-Za-z0-9_]+)");
+    private static final Pattern IMPORT_PATTERN = Pattern.compile("^\\s*import\\s+([a-zA-Z0-9_.]+)\\s*;", Pattern.MULTILINE);
+    private static final Pattern MVC_VIEW_RETURN_PATTERN = Pattern.compile("\\breturn\\s+\"([A-Za-z0-9_./-]+)\"\\s*;");
+    private static final Pattern REQUEST_MAPPING_PATTERN = Pattern.compile("@(?:RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\\s*(?:\\(\\s*)?(?:value\\s*=\\s*)?\"([^\"]+)\"");
+    private static final Pattern FRONTEND_REQUEST_PATTERN = Pattern.compile("\\b(?:fetch|axios\\.(?:get|post|put|delete|patch))\\s*\\(\\s*['\"]([^'\"]+)['\"]");
 
     /**
      * 对当前批次生成结果做轻量契约校验
@@ -61,6 +65,53 @@ public class ContractValidationService {
     /**
      * 根据目标路径在生成结果中查找对应文件
      */
+    /**
+     * 对完整项目做跨文件契约校验，补上单个生成批次里看不到的问题。
+     */
+    public List<String> validateProject(List<SourceCode> generatedFiles) {
+        List<String> warnings = new ArrayList<>();
+        if (generatedFiles == null || generatedFiles.isEmpty()) {
+            return warnings;
+        }
+
+        Map<String, SourceCode> javaTypes = new LinkedHashMap<>();
+        List<SourceCode> mainJavaFiles = new ArrayList<>();
+        List<SourceCode> frontendFiles = new ArrayList<>();
+        List<String> templateNames = new ArrayList<>();
+        List<String> backendEndpoints = new ArrayList<>();
+
+        for (SourceCode file : generatedFiles) {
+            String filename = normalize(file.filename());
+            if (filename.startsWith("src/main/resources/templates/") && filename.endsWith(".html")) {
+                templateNames.add(Path.of(filename).getFileName().toString().replaceFirst("\\.html$", ""));
+            }
+        }
+
+        for (SourceCode file : generatedFiles) {
+            String filename = normalize(file.filename());
+            String code = file.code() == null ? "" : file.code();
+
+            if (filename.endsWith(".java")) {
+                validatePackage(filename, code, warnings);
+                validatePublicType(filename, code, warnings);
+                indexJavaType(filename, code, javaTypes);
+                if (filename.startsWith("src/main/java/")) {
+                    mainJavaFiles.add(file);
+                    collectControllerEndpoints(code, backendEndpoints);
+                    validateMissingMvcTemplates(filename, code, templateNames, warnings);
+                }
+            }
+
+            if (isFrontendAsset(filename)) {
+                frontendFiles.add(file);
+            }
+        }
+
+        validateMainDoesNotDependOnTest(mainJavaFiles, javaTypes, warnings);
+        validateFrontendRequests(frontendFiles, backendEndpoints, warnings);
+        return warnings;
+    }
+
     private SourceCode findMatchingFile(Map<String, SourceCode> fileIndex, String expectedPath) {
         // 先按完整路径匹配，匹配不到再退回到纯文件名。
         // 这是为了兼容模型偶尔只返回类名、不返回完整路径的情况。
@@ -92,12 +143,12 @@ public class ContractValidationService {
         String normalized = normalize(filename);
         if (normalized.startsWith("src/main/java/")) {
             String expectedPath = normalized.substring("src/main/java/".length());
-            if (!expectedPath.startsWith(declaredPackage)) {
+            if (!expectedPath.equals(declaredPackage + "/" + Path.of(normalized).getFileName())) {
                 warnings.add("Package/path mismatch in " + filename + ": package " + matcher.group(1));
             }
         } else if (normalized.startsWith("src/test/java/")) {
             String expectedPath = normalized.substring("src/test/java/".length());
-            if (!expectedPath.startsWith(declaredPackage)) {
+            if (!expectedPath.equals(declaredPackage + "/" + Path.of(normalized).getFileName())) {
                 warnings.add("Package/path mismatch in " + filename + ": package " + matcher.group(1));
             }
         }
@@ -147,6 +198,138 @@ public class ContractValidationService {
     /**
      * 规范化路径字符串，便于统一比较
      */
+    private void indexJavaType(String filename, String code, Map<String, SourceCode> javaTypes) {
+        Matcher packageMatcher = PACKAGE_PATTERN.matcher(code);
+        Matcher typeMatcher = PUBLIC_TYPE_PATTERN.matcher(code);
+        if (packageMatcher.find() && typeMatcher.find()) {
+            javaTypes.put(packageMatcher.group(1) + "." + typeMatcher.group(2),
+                    new SourceCode(filename, "java", code));
+        }
+    }
+
+    private void validateMainDoesNotDependOnTest(List<SourceCode> mainJavaFiles,
+            Map<String, SourceCode> javaTypes,
+            List<String> warnings) {
+        for (SourceCode mainFile : mainJavaFiles) {
+            String code = mainFile.code() == null ? "" : mainFile.code();
+            Matcher importMatcher = IMPORT_PATTERN.matcher(code);
+            while (importMatcher.find()) {
+                SourceCode importedType = javaTypes.get(importMatcher.group(1));
+                if (importedType != null && normalize(importedType.filename()).startsWith("src/test/java/")) {
+                    warnings.add("Main source file " + mainFile.filename()
+                            + " imports production-looking type from test source set: " + importedType.filename()
+                            + ". Move that type to src/main/java or stop using it from main code.");
+                }
+            }
+        }
+    }
+
+    private void validateMissingMvcTemplates(String filename, String code, List<String> templateNames,
+            List<String> warnings) {
+        if (!code.contains("@Controller") || code.contains("@RestController")) {
+            return;
+        }
+
+        Matcher matcher = MVC_VIEW_RETURN_PATTERN.matcher(code);
+        while (matcher.find()) {
+            String viewName = matcher.group(1);
+            if (viewName.startsWith("redirect:") || viewName.startsWith("forward:") || viewName.contains("/")) {
+                continue;
+            }
+            if (!templateNames.contains(viewName)) {
+                warnings.add("MVC controller " + filename + " returns view `" + viewName
+                        + "` but src/main/resources/templates/" + viewName + ".html is missing.");
+            }
+        }
+    }
+
+    private void collectControllerEndpoints(String code, List<String> backendEndpoints) {
+        if (!code.contains("@Controller") && !code.contains("@RestController")) {
+            return;
+        }
+
+        List<String> classMappings = new ArrayList<>();
+        List<String> methodMappings = new ArrayList<>();
+        int classDeclarationIndex = code.indexOf(" class ");
+        Matcher matcher = REQUEST_MAPPING_PATTERN.matcher(code);
+        while (matcher.find()) {
+            String endpoint = normalizeEndpoint(matcher.group(1));
+            if (classDeclarationIndex >= 0 && matcher.start() < classDeclarationIndex) {
+                classMappings.add(endpoint);
+            } else {
+                methodMappings.add(endpoint);
+            }
+        }
+
+        if (classMappings.isEmpty()) {
+            backendEndpoints.addAll(methodMappings);
+            return;
+        }
+
+        String classPrefix = classMappings.get(0);
+        backendEndpoints.add(classPrefix);
+        for (String methodMapping : methodMappings) {
+            backendEndpoints.add(joinEndpoint(classPrefix, methodMapping));
+        }
+    }
+
+    private void validateFrontendRequests(List<SourceCode> frontendFiles, List<String> backendEndpoints,
+            List<String> warnings) {
+        if (frontendFiles.isEmpty() || backendEndpoints.isEmpty()) {
+            return;
+        }
+
+        for (SourceCode frontendFile : frontendFiles) {
+            Matcher matcher = FRONTEND_REQUEST_PATTERN.matcher(frontendFile.code() == null ? "" : frontendFile.code());
+            while (matcher.find()) {
+                String requestPath = normalizeEndpoint(matcher.group(1));
+                if (isExternalUrl(requestPath) || requestPath.contains("${") || requestPath.contains("+")) {
+                    continue;
+                }
+                boolean matched = backendEndpoints.stream().anyMatch(endpoint -> endpoint.equals(requestPath));
+                if (!matched) {
+                    warnings.add("Frontend file " + frontendFile.filename() + " calls `" + requestPath
+                            + "` but no matching controller mapping was found. Known backend endpoints: "
+                            + String.join(", ", backendEndpoints));
+                }
+            }
+        }
+    }
+
+    private boolean isFrontendAsset(String filename) {
+        String normalized = normalize(filename);
+        return normalized.endsWith(".html") || normalized.endsWith(".css") || normalized.endsWith(".js");
+    }
+
+    private boolean isExternalUrl(String path) {
+        return path.startsWith("http://") || path.startsWith("https://") || path.startsWith("//");
+    }
+
+    private String normalizeEndpoint(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "/";
+        }
+        String path = raw.trim();
+        int queryIndex = path.indexOf('?');
+        if (queryIndex >= 0) {
+            path = path.substring(0, queryIndex);
+        }
+        if (!path.startsWith("/")) {
+            path = "/" + path;
+        }
+        return path.replaceAll("/{2,}", "/").replaceFirst("/$", "");
+    }
+
+    private String joinEndpoint(String prefix, String suffix) {
+        if ("/".equals(prefix)) {
+            return normalizeEndpoint(suffix);
+        }
+        if ("/".equals(suffix)) {
+            return normalizeEndpoint(prefix);
+        }
+        return normalizeEndpoint(prefix + "/" + suffix);
+    }
+
     private String normalize(String path) {
         return path == null ? "unknown" : path.trim().replace("\\", "/");
     }

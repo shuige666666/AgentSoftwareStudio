@@ -33,6 +33,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.bsc.langgraph4j.StateGraph.END;
 import static org.bsc.langgraph4j.StateGraph.START;
@@ -327,6 +329,13 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
     private WorkflowData executePersist(WorkflowData data, Consumer<String> logger) {
         // 到这里才统一落盘，而不是每个批次都写一次磁盘。
         // 这样可以减少中间态文件干扰，也让最终修复更集中。
+        List<String> projectWarnings = contractValidationService.validateProject(data.codes);
+        if (!projectWarnings.isEmpty()) {
+            logger.accept("   Project contract validation found " + projectWarnings.size() + " warnings.");
+            projectWarnings.forEach(warning -> logger.accept("   - " + warning));
+            data.validationWarnings.addAll(projectWarnings);
+        }
+
         data.projectPath = workspaceService.saveProjectToDisk(
                 safeValue(data.prd == null ? null : data.prd.projectName(), "GeneratedProject"),
                 data.codes).toString();
@@ -661,8 +670,10 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
     private String normalizeGeneratedFilename(String filename, String code) {
         // 模型返回的文件名有时只写类名，有时写完整路径。
         // 这里统一收敛成项目内相对路径，方便去重、覆盖和落盘。
-        if (filename == null || filename.isBlank()) {
-            return "Unknown.java";
+        boolean isLikelyTest = isLikelyTestFile(filename, code);
+        if (isMissingFilename(filename)) {
+            String inferredPath = inferJavaPathFromCode(code, isLikelyTest);
+            return inferredPath == null ? "GeneratedFile.java" : inferredPath;
         }
         String normalized = filename.trim().replace("\\", "/");
         int testPathIndex = normalized.indexOf("src/test/java/");
@@ -674,12 +685,52 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
                 normalized = normalized.substring(mainPathIndex);
             }
         }
-        boolean isLikelyTest = normalized.endsWith("Test.java")
-                || (code != null && (code.contains("org.junit.jupiter") || code.contains("@Test")));
         if (isLikelyTest && normalized.startsWith("src/main/java/")) {
             normalized = "src/test/java/" + normalized.substring("src/main/java/".length());
         }
         return normalized;
+    }
+
+    private boolean isMissingFilename(String filename) {
+        if (filename == null || filename.isBlank()) {
+            return true;
+        }
+        String pureName = Path.of(filename.trim().replace("\\", "/")).getFileName().toString();
+        return pureName.equalsIgnoreCase("Unknown.java")
+                || pureName.equalsIgnoreCase("Unknown")
+                || pureName.equalsIgnoreCase("GeneratedFile.java");
+    }
+
+    private boolean isLikelyTestFile(String filename, String code) {
+        String normalized = filename == null ? "" : filename.replace("\\", "/");
+        return normalized.endsWith("Test.java")
+                || normalized.contains("src/test/java/")
+                || (code != null && (code.contains("org.junit.jupiter") || code.contains("@Test")));
+    }
+
+    private String inferJavaPathFromCode(String code, boolean isLikelyTest) {
+        if (code == null || code.isBlank()) {
+            return null;
+        }
+        Matcher typeMatcher = Pattern.compile(
+                "(?m)^\\s*(?:public\\s+)?(?:abstract\\s+|final\\s+|sealed\\s+|non-sealed\\s+)*"
+                        + "(class|interface|record|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)")
+                .matcher(code);
+        if (!typeMatcher.find()) {
+            return null;
+        }
+
+        String packageName = null;
+        Matcher packageMatcher = Pattern.compile("(?m)^\\s*package\\s+([a-zA-Z0-9_.]+)\\s*;").matcher(code);
+        if (packageMatcher.find()) {
+            packageName = packageMatcher.group(1);
+        }
+
+        Path sourceRoot = isLikelyTest ? Path.of("src", "test", "java") : Path.of("src", "main", "java");
+        Path packagePath = packageName == null || packageName.isBlank()
+                ? Path.of("")
+                : Path.of(packageName.replace('.', '/'));
+        return sourceRoot.resolve(packagePath).resolve(typeMatcher.group(2) + ".java").toString().replace("\\", "/");
     }
 
     /**

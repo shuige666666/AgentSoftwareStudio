@@ -26,6 +26,40 @@ public class WorkspaceService {
     // 设定一个固定的工作区根目录
     private static final String WORKSPACE_ROOT = "ai_generated_projects";
 
+    private String normalizeFixFilename(String filename, String content) {
+        if (!isMissingFilename(filename)) {
+            return filename.trim().replace('\\', '/');
+        }
+        if (content == null || content.isBlank()) {
+            return "GeneratedFile.java";
+        }
+
+        String typeName = extractJavaTypeName(content);
+        if (typeName == null || typeName.isBlank()) {
+            return "GeneratedFile.java";
+        }
+
+        String packageName = extractPackageName(content);
+        Path sourceRoot = isLikelyTestJavaFile(typeName + ".java", content)
+                ? Paths.get("src", "test", "java")
+                : Paths.get("src", "main", "java");
+        if (packageName == null || packageName.isBlank()) {
+            return sourceRoot.resolve(typeName + ".java").toString().replace('\\', '/');
+        }
+        return sourceRoot.resolve(packageName.replace('.', '/')).resolve(typeName + ".java").toString()
+                .replace('\\', '/');
+    }
+
+    private boolean isMissingFilename(String filename) {
+        if (filename == null || filename.isBlank()) {
+            return true;
+        }
+        String pureName = Paths.get(filename.trim().replace('\\', '/')).getFileName().toString();
+        return pureName.equalsIgnoreCase("Unknown.java")
+                || pureName.equalsIgnoreCase("Unknown")
+                || pureName.equalsIgnoreCase("GeneratedFile.java");
+    }
+
     /**
      * 把项目文件写入磁盘文件夹里
      *
@@ -78,19 +112,23 @@ public class WorkspaceService {
     public void applyFixesToDisk(Path projectDir, List<CodeFix> fixes) {
         try {
             for (CodeFix fix : fixes) {
-                String pureFileName = Paths.get(fix.filename()).getFileName().toString();
+                String normalizedFilename = normalizeFixFilename(fix.filename(), fix.newCode());
+                Path relativePath = resolveSmartPath(normalizedFilename, fix.newCode());
+                Path exactPath = projectDir.resolve(relativePath).normalize();
+                String pureFileName = exactPath.getFileName().toString();
 
                 // 🕵️ 增强防御：先在项目目录里寻找这个文件原来的位置
                 Path existingFilePath = findExistingFile(projectDir, pureFileName);
                 Path targetPath;
 
-                if (existingFilePath != null) {
+                if (Files.exists(exactPath)) {
+                    targetPath = exactPath;
+                } else if (existingFilePath != null) {
                     // 如果找到了原文件，直接使用原文件的绝对路径覆盖！不管 AI 有没有写 package
                     targetPath = existingFilePath;
                 } else {
                     // 只有当这是一个全新的文件时，才去根据内容智能解析路径
-                    Path relativePath = resolveSmartPath(pureFileName, fix.newCode());
-                    targetPath = projectDir.resolve(relativePath);
+                    targetPath = exactPath;
                 }
 
                 if (targetPath.getParent() != null) {
@@ -180,6 +218,17 @@ public class WorkspaceService {
     /**
      * 判断是否为资源文件
      */
+    private String extractJavaTypeName(String code) {
+        Pattern pattern = Pattern.compile(
+                "^\\s*(?:public\\s+)?(?:abstract\\s+|final\\s+|sealed\\s+|non-sealed\\s+)*(class|interface|record|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+                Pattern.MULTILINE);
+        Matcher matcher = pattern.matcher(code);
+        if (matcher.find()) {
+            return matcher.group(2);
+        }
+        return null;
+    }
+
     private boolean isResourceFile(String filename) {
         return filename.endsWith(".properties") || filename.endsWith(".yml") || filename.endsWith(".yaml") || filename.endsWith(".xml") || filename.endsWith(".html") || filename.endsWith(".css") || filename.endsWith(".js");
     }
