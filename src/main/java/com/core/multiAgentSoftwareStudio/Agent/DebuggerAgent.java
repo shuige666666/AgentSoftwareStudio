@@ -1,18 +1,15 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFix;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFixResult;
-import dev.langchain4j.service.SystemMessage;
-import dev.langchain4j.service.UserMessage;
-import dev.langchain4j.service.V;
-import java.util.List;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.model.chat.ChatLanguageModel;
 
 /**
  * 角色 D: 测试/修复工程师 (The Tester/Fixer)
  */
-public interface DebuggerAgent {
+public class DebuggerAgent extends AbstractJsonAgent {
 
-        @SystemMessage("""
+    private static final String SYSTEM_PROMPT = """
                            You are an Expert Java Debugger and Tester.
                            Your task is to analyze errors and fix the provided source code.
 
@@ -33,25 +30,32 @@ public interface DebuggerAgent {
 
                            JSON FORMAT RULES:
                         1. The output MUST be a valid JSON object.
-                        2. Do NOT wrap the JSON in markdown code blocks (e.g., no ```json).
-                        3. CRITICAL: The `newCode` field MUST be a single string. All newlines in the code MUST be escaped as `\\n`. Do NOT use actual newlines inside the JSON string.
-                        4. Escape any double quotes (`"`) as `\\"` inside the code string.
-                           """)
-        @UserMessage("""
-                        === ERROR TYPE ===
-                        {{errorType}}
+                        2. The top-level object MUST have this exact shape:
+                           {"fixes":[{"filename":"src/main/java/.../ActualFile.java","explanation":"...","newCode":"..."}]}
+                        3. Every fix MUST include the exact project-relative `filename` copied from `=== CURRENT PROJECT FILES ===`.
+                        4. Never use placeholder filenames such as `Unknown.java`, `Main.java`, or an empty filename.
+                        5. Do NOT wrap the JSON in markdown code blocks (e.g., no ```json).
+                        6. CRITICAL: The `newCode` field MUST be a single string. All newlines in the code MUST be escaped as `\\n`. Do NOT use actual newlines inside the JSON string.
+                        7. Escape any double quotes (`"`) as `\\"` inside the code string.
+                           """;
 
-                        === CURRENT PROJECT FILES ===
-                        {{currentCode}}
+    public DebuggerAgent(ChatLanguageModel model,
+                         LangGraphPromptExecutor promptExecutor,
+                         ObjectMapper objectMapper) {
+        super(model, promptExecutor, objectMapper);
+    }
 
-                        === EXECUTION ERROR LOG ===
-                        {{errorLog}}
+    public CodeFixResult analyzeAndFix(String errorType, String errorLog, String currentCodeContext) {
+        String userPrompt = """
+                === ERROR TYPE ===
+                %s
 
-                        ===========================
-                        Please analyze the error and provide the necessary code fixes.
-                        """)
-        CodeFixResult analyzeAndFix(
-                        @V("errorType") String errorType,
-                        @V("errorLog") String errorLog,
-                        @V("currentCode") String currentCodeContext);
+                === CURRENT PROJECT FILES ===
+                %s
+
+                === EXECUTION ERROR LOG ===
+                %s
+                """.formatted(errorType, currentCodeContext, errorLog);
+        return askJson(SYSTEM_PROMPT, userPrompt, CodeFixResult.class);
+    }
 }

@@ -43,6 +43,7 @@ public class SoftwareController {
 
         executor.execute(() -> {
             try {
+                emitter.send(SseEmitter.event().data("Workflow started."));
                 softwareStudioService.generateProjectStream(message, (log) -> {
                     try {
                         emitter.send(SseEmitter.event().data(log));
@@ -53,6 +54,8 @@ public class SoftwareController {
                 emitter.complete();
             } catch (Exception e) {
                 emitter.completeWithError(e);
+            } finally {
+                executor.shutdown();
             }
         });
 

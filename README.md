@@ -19,11 +19,6 @@ spring:
       # API Key
       api-key: ${ALIBABA_API_KEY}
 
-langchain4j:
-  open-ai:
-    chat-model:
-      api-key: ${ALIBABA_API_KEY} 
-
 server:
   port: 8080
 ```
