@@ -1,8 +1,10 @@
 package com.core.multiAgentSoftwareStudio.Service;
 
 import com.core.multiAgentSoftwareStudio.Agent.ArchitectAgent;
+import com.core.multiAgentSoftwareStudio.Agent.ContractAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
+import com.core.multiAgentSoftwareStudio.Agent.FrontendReviewAgent;
 import com.core.multiAgentSoftwareStudio.Agent.ProductManagerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.TestWriterAgent;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFix;
@@ -11,6 +13,7 @@ import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationPlan;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
+import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.TestClassesResult;
@@ -25,10 +28,15 @@ import org.springframework.stereotype.Service;
 
 import java.io.Serializable;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,35 +54,44 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
 
     private final ProductManagerAgent pmAgent;
     private final ArchitectAgent architectAgent;
+    private final ContractAgent contractAgent;
     private final DeveloperAgent developerAgent;
+    private final FrontendReviewAgent frontendReviewAgent;
     private final TestWriterAgent testWriterAgent;
     private final DebuggerAgent debuggerAgent;
     private final DockerSandboxService sandboxService;
     private final WorkspaceService workspaceService;
     private final BatchPlanningService batchPlanningService;
     private final ContractValidationService contractValidationService;
+    private final ProjectContractMergeService projectContractMergeService;
 
     /**
      * 注入软件工坊工作流所需的全部组件
      */
     public SoftwareStudioServiceImpl(ProductManagerAgent pmAgent,
             ArchitectAgent architectAgent,
+            ContractAgent contractAgent,
             DeveloperAgent developerAgent,
+            FrontendReviewAgent frontendReviewAgent,
             TestWriterAgent testWriterAgent,
             DebuggerAgent debuggerAgent,
             DockerSandboxService sandboxService,
             WorkspaceService workspaceService,
             BatchPlanningService batchPlanningService,
-            ContractValidationService contractValidationService) {
+            ContractValidationService contractValidationService,
+            ProjectContractMergeService projectContractMergeService) {
         this.pmAgent = pmAgent;
         this.architectAgent = architectAgent;
+        this.contractAgent = contractAgent;
         this.developerAgent = developerAgent;
+        this.frontendReviewAgent = frontendReviewAgent;
         this.testWriterAgent = testWriterAgent;
         this.debuggerAgent = debuggerAgent;
         this.sandboxService = sandboxService;
         this.workspaceService = workspaceService;
         this.batchPlanningService = batchPlanningService;
         this.contractValidationService = contractValidationService;
+        this.projectContractMergeService = projectContractMergeService;
     }
 
     /**
@@ -119,6 +136,8 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
                 executePm(state.workflowData(), logger));
         NodeAction<WorkflowGraphState> architectNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
                 executeArchitect(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> contractNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executeContract(state.workflowData(), logger));
         NodeAction<WorkflowGraphState> planNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
                 executePlanBatches(state.workflowData(), logger));
         NodeAction<WorkflowGraphState> generateBatchNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
@@ -127,6 +146,8 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
                 executeValidateBatch(state.workflowData(), logger));
         NodeAction<WorkflowGraphState> generateTestsNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
                 executeGenerateTests(state.workflowData(), logger));
+        NodeAction<WorkflowGraphState> frontendReviewNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
+                executeFrontendReview(state.workflowData(), logger));
         NodeAction<WorkflowGraphState> persistNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
                 executePersist(state.workflowData(), logger));
         NodeAction<WorkflowGraphState> runNode = state -> Map.of(WorkflowGraphState.DATA_KEY,
@@ -145,17 +166,20 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
             var graph = new StateGraph<>(WorkflowGraphState.SCHEMA, WorkflowGraphState::new)
                     .addNode("pm", node_async(pmNode))
                     .addNode("architect", node_async(architectNode))
+                    .addNode("contract", node_async(contractNode))
                     .addNode("plan_batches", node_async(planNode))
                     .addNode("generate_batch", node_async(generateBatchNode))
                     .addNode("validate_batch", node_async(validateBatchNode))
                     .addNode("generate_tests", node_async(generateTestsNode))
+                    .addNode("frontend_review", node_async(frontendReviewNode))
                     .addNode("persist", node_async(persistNode))
                     .addNode("run", node_async(runNode))
                     .addNode("evaluate", node_async(evaluateNode))
                     .addNode("fix", node_async(fixNode))
                     .addEdge(START, "pm")
                     .addEdge("pm", "architect")
-                    .addEdge("architect", "plan_batches")
+                    .addEdge("architect", "contract")
+                    .addEdge("contract", "plan_batches")
                     .addEdge("plan_batches", "generate_batch")
                     .addEdge("generate_batch", "validate_batch")
                     .addConditionalEdges(
@@ -163,7 +187,8 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
                             state -> CompletableFuture.completedFuture(
                                     state.workflowData().hasMoreBatches() ? "NEXT_BATCH" : "GENERATE_TESTS"),
                             Map.of("NEXT_BATCH", "generate_batch", "GENERATE_TESTS", "generate_tests"))
-                    .addEdge("generate_tests", "persist")
+                    .addEdge("generate_tests", "frontend_review")
+                    .addEdge("frontend_review", "persist")
                     .addEdge("persist", "run")
                     .addEdge("run", "evaluate")
                     .addConditionalEdges(
@@ -214,6 +239,22 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
     /**
      * 根据架构蓝图生成分批执行计划
      */
+    /**
+     * 执行接口契约规划节点，生成接口文档并补齐契约要求的文件蓝图
+     */
+    private WorkflowData executeContract(WorkflowData data, Consumer<String> logger) {
+        logger.accept("2.5. Contract planner is designing API, view, and frontend interaction contracts.");
+        data.contract = contractAgent.designContract(data.prd, data.structure);
+        data.structure = projectContractMergeService.merge(data.structure, data.contract);
+        int endpointCount = data.contract == null || data.contract.endpoints() == null ? 0
+                : data.contract.endpoints().size();
+        int extraFileCount = data.contract == null || data.contract.additionalFiles() == null ? 0
+                : data.contract.additionalFiles().size();
+        logger.accept("Contract ready with " + endpointCount + " endpoints and " + extraFileCount
+                + " supplemental files.");
+        return data;
+    }
+
     private WorkflowData executePlanBatches(WorkflowData data, Consumer<String> logger) {
         // 这个节点把“架构蓝图”转换成“可执行计划”。
         // 也就是把文件从静态描述，变成真正的生成批次序列。
@@ -239,7 +280,6 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
 
         logger.accept("4." + (data.currentBatchIndex + 1) + " Generating batch `" + batch.name() + "` (" + batch.layer()
                 + ").");
-        String existingCodeContext = buildCodeContextForTester(data.codes);
         String batchContext = describeBatch(batch);
 
         // 同一批次内的文件，默认认为依赖关系已经足够松，可以并发生成。
@@ -252,16 +292,25 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         ExecutorService batchExecutor = Executors.newFixedThreadPool(concurrency);
         try {
             logger.accept("   Batch LLM concurrency: " + concurrency);
+            List<SourceCode> codeSnapshot = new ArrayList<>(data.codes);
             List<CompletableFuture<SourceCode>> futures = batchFiles.stream()
                     .map(fileBlueprint -> CompletableFuture.supplyAsync(
-                            () -> generateSourceFile(data.prd, data.structure, existingCodeContext, batchContext,
-                                    fileBlueprint),
+                            () -> {
+                                String relevantCodeContext = buildRelevantCodeContext(
+                                        codeSnapshot, data.structure, fileBlueprint);
+                                return generateSourceFile(data.prd, data.structure, relevantCodeContext, batchContext,
+                                        fileBlueprint, data.contract);
+                            },
                             batchExecutor))
+                    .toList();
+
+            List<SourceCode> generatedFiles = futures.stream()
+                    .map(CompletableFuture::join)
                     .toList();
 
             for (int i = 0; i < batchFiles.size(); i++) {
                 FileBlueprint blueprint = batchFiles.get(i);
-                SourceCode generatedFile = futures.get(i).join();
+                SourceCode generatedFile = generatedFiles.get(i);
                 upsertCode(data.codes, generatedFile);
                 logger.accept("   Generated: " + blueprint.targetPath());
             }
@@ -311,6 +360,7 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         TestClassesResult testClassesResult = testWriterAgent.writeTests(
                 data.prd,
                 data.structure,
+                data.contract,
                 buildCodeContextForTester(data.codes));
         if (testClassesResult != null && testClassesResult.testFiles() != null) {
             for (SourceCode testFile : testClassesResult.testFiles()) {
@@ -323,13 +373,41 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         return data;
     }
 
+
     /**
-     * 将当前生成结果统一写入本地工作区
+     * 执行前端专项审查修复，重点处理 HTML/CSS/JS 之间的交互一致性
      */
+    private WorkflowData executeFrontendReview(WorkflowData data, Consumer<String> logger) {
+        String frontendContext = buildFrontendContext(data.codes);
+        if (frontendContext.isBlank()) {
+            logger.accept("5.5. No frontend files detected, skipping frontend review.");
+            return data;
+        }
+
+        logger.accept("5.5. Frontend reviewer is checking DOM, events, visibility states, and fetch calls.");
+        CodeFixResult reviewResult = frontendReviewAgent.reviewAndFix(data.contract, frontendContext);
+        List<CodeFix> fixes = reviewResult == null ? null : reviewResult.fixes();
+        if (fixes == null || fixes.isEmpty()) {
+            logger.accept("   Frontend reviewer found no concrete fixes.");
+            return data;
+        }
+
+        logger.accept("   Frontend reviewer returned " + fixes.size() + " fixes.");
+        for (CodeFix fix : fixes) {
+            CodeFix normalizedFix = new CodeFix(
+                    normalizeGeneratedFilename(fix.filename(), fix.newCode()),
+                    fix.explanation(),
+                    fix.newCode());
+            logger.accept("   - " + safeValue(fix.explanation(), "No explanation provided"));
+            updateCodesInMemory(data.codes, normalizedFix);
+        }
+        return data;
+    }
+
     private WorkflowData executePersist(WorkflowData data, Consumer<String> logger) {
         // 到这里才统一落盘，而不是每个批次都写一次磁盘。
         // 这样可以减少中间态文件干扰，也让最终修复更集中。
-        List<String> projectWarnings = contractValidationService.validateProject(data.codes);
+        List<String> projectWarnings = contractValidationService.validateProject(data.codes, data.contract);
         if (!projectWarnings.isEmpty()) {
             logger.accept("   Project contract validation found " + projectWarnings.size() + " warnings.");
             projectWarnings.forEach(warning -> logger.accept("   - " + warning));
@@ -430,6 +508,7 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
                 data.codes,
                 data.pendingFixLog,
                 data.pendingErrorType,
+                data.contract,
                 Path.of(data.projectPath),
                 data.validationWarnings,
                 logger);
@@ -444,7 +523,8 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
             ProjectStructure structure,
             String existingCodeContext,
             String batchContext,
-            FileBlueprint blueprint) {
+            FileBlueprint blueprint,
+            ProjectContract contract) {
         // 这里对 DeveloperAgent 的输入做了一层统一包装：
         // 当前文件路径、文件职责、方法要求、批次上下文、已有代码上下文都会一起给过去。
         // 这样单文件生成时，模型仍然能感知自己处在整个项目的哪一层。
@@ -455,6 +535,7 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         SourceCode rawResult = developerAgent.writeCode(
                 prd,
                 structure,
+                contract,
                 existingCodeContext,
                 targetPath,
                 blueprint.functionalityDescription(),
@@ -537,11 +618,162 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
     }
 
     /**
-     * 调用调试代理分析并应用修复结果
+     * 为单个开发任务构建依赖相关的已实现代码上下文，避免把无关文件全部塞进 DeveloperAgent。
      */
+    private String buildRelevantCodeContext(List<SourceCode> codes, ProjectStructure structure, FileBlueprint blueprint) {
+        if (codes == null || codes.isEmpty() || blueprint == null) {
+            return "No implemented dependency files are available yet.";
+        }
+
+        // 第一步：根据架构蓝图递归收集当前文件的直接和间接依赖路径。
+        Set<String> dependencyPaths = collectDependencyClosure(structure, blueprint);
+        if (dependencyPaths.isEmpty()) {
+            return "This file has no implemented dependency files yet.";
+        }
+
+        // 第二步：从已经生成的代码中挑出依赖闭包命中的文件，按依赖发现顺序拼接。
+        StringBuilder builder = new StringBuilder();
+        for (String dependencyPath : dependencyPaths) {
+            SourceCode dependencyCode = findGeneratedCodeByPath(codes, dependencyPath);
+            if (dependencyCode == null) {
+                continue;
+            }
+            builder.append("--- File: ").append(normalizeDependencyPath(dependencyCode.filename())).append(" ---\n");
+            builder.append(dependencyCode.code()).append("\n\n");
+        }
+
+        if (builder.isEmpty()) {
+            return "Declared dependency files exist in the blueprint, but none have been implemented yet.";
+        }
+        return builder.toString();
+    }
+
+    /**
+     * 递归收集当前文件依赖的完整闭包，让后续文件能看到前置文件以及前置文件依赖的基础类型。
+     */
+    private Set<String> collectDependencyClosure(ProjectStructure structure, FileBlueprint blueprint) {
+        Map<String, FileBlueprint> blueprintIndex = buildBlueprintIndex(structure);
+        Set<String> visited = new LinkedHashSet<>();
+        Queue<String> pending = new ArrayDeque<>(blueprint.dependsOn());
+
+        while (!pending.isEmpty()) {
+            String dependencyPath = normalizeDependencyPath(pending.poll());
+            if (dependencyPath.isBlank() || visited.contains(dependencyPath)) {
+                continue;
+            }
+            visited.add(dependencyPath);
+
+            // 如果依赖本身也有 dependsOn，继续向下展开，形成依赖闭包。
+            FileBlueprint dependencyBlueprint = blueprintIndex.get(dependencyPath);
+            if (dependencyBlueprint == null) {
+                dependencyBlueprint = blueprintIndex.get(fileNameOnly(dependencyPath));
+            }
+            if (dependencyBlueprint != null) {
+                for (String nestedDependency : dependencyBlueprint.dependsOn()) {
+                    String normalizedNestedDependency = normalizeDependencyPath(nestedDependency);
+                    if (!visited.contains(normalizedNestedDependency)) {
+                        pending.offer(normalizedNestedDependency);
+                    }
+                }
+            }
+        }
+        return visited;
+    }
+
+    /**
+     * 构建文件蓝图索引，支持用完整项目路径或单独文件名匹配 dependsOn 中的依赖声明。
+     */
+    private Map<String, FileBlueprint> buildBlueprintIndex(ProjectStructure structure) {
+        Map<String, FileBlueprint> index = new LinkedHashMap<>();
+        if (structure == null || structure.files() == null) {
+            return index;
+        }
+
+        for (FileBlueprint file : structure.files()) {
+            String targetPath = normalizeDependencyPath(file.targetPath());
+            index.putIfAbsent(targetPath, file);
+            index.putIfAbsent(fileNameOnly(targetPath), file);
+        }
+        return index;
+    }
+
+    /**
+     * 按依赖路径查找已经生成的源码，优先完整路径匹配，兜底使用文件名匹配。
+     */
+    private SourceCode findGeneratedCodeByPath(List<SourceCode> codes, String dependencyPath) {
+        String normalizedDependency = normalizeDependencyPath(dependencyPath);
+        String dependencyFileName = fileNameOnly(normalizedDependency);
+
+        for (SourceCode code : codes) {
+            String normalizedFilename = normalizeDependencyPath(normalizeGeneratedFilename(code.filename(), code.code()));
+            if (normalizedFilename.equals(normalizedDependency)) {
+                return code;
+            }
+        }
+
+        // 有些架构蓝图里的 dependsOn 可能只写类名或文件名，这里做一次宽松匹配。
+        for (SourceCode code : codes) {
+            String normalizedFilename = normalizeDependencyPath(normalizeGeneratedFilename(code.filename(), code.code()));
+            if (fileNameOnly(normalizedFilename).equals(dependencyFileName)) {
+                return code;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 统一依赖路径格式，便于蓝图路径和生成结果路径之间做稳定匹配。
+     */
+    private String normalizeDependencyPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        return path.trim().replace("\\", "/");
+    }
+
+    /**
+     * 提取路径中的文件名，用作 dependsOn 没有写完整路径时的兜底匹配键。
+     */
+    private String fileNameOnly(String path) {
+        String normalized = normalizeDependencyPath(path);
+        if (normalized.isBlank()) {
+            return "";
+        }
+        int lastSlash = normalized.lastIndexOf('/');
+        return lastSlash >= 0 ? normalized.substring(lastSlash + 1) : normalized;
+    }
+
+    private String buildFrontendContext(List<SourceCode> codes) {
+        StringBuilder builder = new StringBuilder();
+        for (SourceCode code : codes) {
+            if (!isFrontendFile(code.filename())) {
+                continue;
+            }
+            builder.append("--- File: ").append(code.filename()).append(" ---\n");
+            builder.append(code.code()).append("\n\n");
+        }
+        return builder.toString();
+    }
+
+    /**
+     * 判断文件是否属于前端资源
+     */
+    private boolean isFrontendFile(String filename) {
+        String lower = filename == null ? "" : filename.toLowerCase();
+        return lower.endsWith(".html") || lower.endsWith(".css") || lower.endsWith(".js");
+    }
+
+    private String buildContractContext(ProjectContract contract) {
+        if (contract == null) {
+            return "";
+        }
+        return "=== PROJECT CONTRACT ===\n" + contract + "\n\n";
+    }
+
     private void handleFix(List<SourceCode> codes,
             String executionResult,
             String errorType,
+            ProjectContract contract,
             Path projectPath,
             List<String> validationWarnings,
             Consumer<String> logger) {
@@ -552,7 +784,7 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         // 这样 debuggerAgent 能同时看到“硬错误”和“软约束”。
         logger.accept("9. Invoking debugger agent for final repair.");
 
-        String currentCodeContext = buildOptimizedCodeContext(codes, executionResult, errorType);
+        String currentCodeContext = buildContractContext(contract) + buildOptimizedCodeContext(codes, executionResult, errorType);
         String enhancedErrorLog = buildEnhancedErrorLog(errorType, executionResult, codes, validationWarnings);
 
         CodeFixResult fixResult = debuggerAgent.analyzeAndFix(errorType, enhancedErrorLog, currentCodeContext);
@@ -890,6 +1122,7 @@ public class SoftwareStudioServiceImpl implements SoftwareStudioService {
         List<String> validationWarnings = new ArrayList<>();
         PrdDocument prd;
         ProjectStructure structure;
+        ProjectContract contract;
         GenerationPlan generationPlan = new GenerationPlan(List.of());
         int currentBatchIndex;
         // 这里放进 LangGraph state 的对象都会被序列化，路径统一存字符串更稳妥。

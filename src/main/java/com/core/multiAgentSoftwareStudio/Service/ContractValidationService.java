@@ -1,8 +1,12 @@
 package com.core.multiAgentSoftwareStudio.Service;
 
+import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ApiEndpointContract;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
+import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FrontendCallContract;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
+import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ViewContract;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -13,6 +17,9 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * 校验生成代码中的路径、后端接口、视图模板和前后端调用契约
+ */
 @Service
 public class ContractValidationService {
 
@@ -20,11 +27,11 @@ public class ContractValidationService {
     private static final Pattern PUBLIC_TYPE_PATTERN = Pattern.compile("\\bpublic\\s+(class|interface|record|enum)\\s+([A-Za-z0-9_]+)");
     private static final Pattern IMPORT_PATTERN = Pattern.compile("^\\s*import\\s+([a-zA-Z0-9_.]+)\\s*;", Pattern.MULTILINE);
     private static final Pattern MVC_VIEW_RETURN_PATTERN = Pattern.compile("\\breturn\\s+\"([A-Za-z0-9_./-]+)\"\\s*;");
-    private static final Pattern REQUEST_MAPPING_PATTERN = Pattern.compile("@(?:RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\\s*(?:\\(\\s*)?(?:value\\s*=\\s*)?\"([^\"]+)\"");
+    private static final Pattern REQUEST_MAPPING_PATTERN = Pattern.compile("@(?:RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\\s*(?:\\(\\s*)?(?:(?:value|path)\\s*=\\s*)?\"([^\"]+)\"");
     private static final Pattern FRONTEND_REQUEST_PATTERN = Pattern.compile("\\b(?:fetch|axios\\.(?:get|post|put|delete|patch))\\s*\\(\\s*['\"]([^'\"]+)['\"]");
 
     /**
-     * 对当前批次生成结果做轻量契约校验
+     * 对当前批次的生成结果做轻量契约校验
      */
     public List<String> validateBatch(GenerationBatch batch, List<SourceCode> generatedFiles) {
         List<String> warnings = new ArrayList<>();
@@ -32,16 +39,13 @@ public class ContractValidationService {
             return warnings;
         }
 
-        // 这个校验器的定位很明确：它只是批次之间的“护栏”，不是最终裁判。
-        // 这里只做局部、快速、无需启动沙箱的检查。
         Map<String, SourceCode> fileIndex = new LinkedHashMap<>();
         for (SourceCode generatedFile : generatedFiles) {
             fileIndex.put(normalize(generatedFile.filename()), generatedFile);
         }
 
         for (FileBlueprint blueprint : batch.files()) {
-            String expectedPath = normalize(blueprint.targetPath());
-            SourceCode generated = findMatchingFile(fileIndex, expectedPath);
+            SourceCode generated = findMatchingFile(fileIndex, normalize(blueprint.targetPath()));
             if (generated == null) {
                 warnings.add("Missing generated file for blueprint: " + blueprint.targetPath());
                 continue;
@@ -58,17 +62,13 @@ public class ContractValidationService {
                 validateLayerHints(blueprint, generated.filename(), code, warnings);
             }
         }
-
         return warnings;
     }
 
     /**
-     * 根据目标路径在生成结果中查找对应文件
+     * 对完整项目做跨文件契约校验，补上单个生成批次看不到的问题
      */
-    /**
-     * 对完整项目做跨文件契约校验，补上单个生成批次里看不到的问题。
-     */
-    public List<String> validateProject(List<SourceCode> generatedFiles) {
+    public List<String> validateProject(List<SourceCode> generatedFiles, ProjectContract contract) {
         List<String> warnings = new ArrayList<>();
         if (generatedFiles == null || generatedFiles.isEmpty()) {
             return warnings;
@@ -77,15 +77,8 @@ public class ContractValidationService {
         Map<String, SourceCode> javaTypes = new LinkedHashMap<>();
         List<SourceCode> mainJavaFiles = new ArrayList<>();
         List<SourceCode> frontendFiles = new ArrayList<>();
-        List<String> templateNames = new ArrayList<>();
+        List<String> templateNames = collectTemplateNames(generatedFiles);
         List<String> backendEndpoints = new ArrayList<>();
-
-        for (SourceCode file : generatedFiles) {
-            String filename = normalize(file.filename());
-            if (filename.startsWith("src/main/resources/templates/") && filename.endsWith(".html")) {
-                templateNames.add(Path.of(filename).getFileName().toString().replaceFirst("\\.html$", ""));
-            }
-        }
 
         for (SourceCode file : generatedFiles) {
             String filename = normalize(file.filename());
@@ -109,12 +102,14 @@ public class ContractValidationService {
 
         validateMainDoesNotDependOnTest(mainJavaFiles, javaTypes, warnings);
         validateFrontendRequests(frontendFiles, backendEndpoints, warnings);
+        validateProjectContract(contract, generatedFiles, templateNames, backendEndpoints, warnings);
         return warnings;
     }
 
+    /**
+     * 根据目标路径在生成结果中查找对应文件
+     */
     private SourceCode findMatchingFile(Map<String, SourceCode> fileIndex, String expectedPath) {
-        // 先按完整路径匹配，匹配不到再退回到纯文件名。
-        // 这是为了兼容模型偶尔只返回类名、不返回完整路径的情况。
         SourceCode directMatch = fileIndex.get(expectedPath);
         if (directMatch != null) {
             return directMatch;
@@ -128,29 +123,36 @@ public class ContractValidationService {
     }
 
     /**
-     * 校验 Java 文件的 package 声明是否与路径一致
+     * 校验 Java 文件的 package 声明是否与文件路径严格一致
      */
     private void validatePackage(String filename, String code, List<String> warnings) {
-        // Java 文件如果 package 和目录不一致，后面编译阶段通常会直接炸。
-        // 这里提前拦一下，成本比进沙箱再发现低很多。
         Matcher matcher = PACKAGE_PATTERN.matcher(code);
         if (!matcher.find()) {
             warnings.add("Missing package declaration in " + filename);
             return;
         }
 
-        String declaredPackage = matcher.group(1).replace('.', '/');
+        String declaredPackagePath = matcher.group(1).replace('.', '/');
         String normalized = normalize(filename);
         if (normalized.startsWith("src/main/java/")) {
-            String expectedPath = normalized.substring("src/main/java/".length());
-            if (!expectedPath.equals(declaredPackage + "/" + Path.of(normalized).getFileName())) {
-                warnings.add("Package/path mismatch in " + filename + ": package " + matcher.group(1));
-            }
+            validatePackageAgainstSourceRoot(normalized, "src/main/java/", declaredPackagePath, matcher.group(1), warnings);
         } else if (normalized.startsWith("src/test/java/")) {
-            String expectedPath = normalized.substring("src/test/java/".length());
-            if (!expectedPath.equals(declaredPackage + "/" + Path.of(normalized).getFileName())) {
-                warnings.add("Package/path mismatch in " + filename + ": package " + matcher.group(1));
-            }
+            validatePackageAgainstSourceRoot(normalized, "src/test/java/", declaredPackagePath, matcher.group(1), warnings);
+        }
+    }
+
+    /**
+     * 校验指定源码根目录下的 package 路径是否和实际目录一致
+     */
+    private void validatePackageAgainstSourceRoot(String filename,
+            String sourceRoot,
+            String declaredPackagePath,
+            String declaredPackage,
+            List<String> warnings) {
+        String expectedPath = filename.substring(sourceRoot.length());
+        String expectedFullPath = declaredPackagePath + "/" + Path.of(filename).getFileName();
+        if (!expectedPath.equals(expectedFullPath)) {
+            warnings.add("Package/path mismatch in " + filename + ": package " + declaredPackage);
         }
     }
 
@@ -158,7 +160,6 @@ public class ContractValidationService {
      * 校验 public 类型名称是否与文件名一致
      */
     private void validatePublicType(String filename, String code, List<String> warnings) {
-        // 最常见的文件级错误之一：文件名和 public 类型名不一致。
         Matcher matcher = PUBLIC_TYPE_PATTERN.matcher(code);
         if (!matcher.find()) {
             warnings.add("No public type declaration found in " + filename);
@@ -173,11 +174,9 @@ public class ContractValidationService {
     }
 
     /**
-     * 根据层级约定检查常见注解是否缺失
+     * 根据文件层级检查常见 Spring 注解是否缺失
      */
     private void validateLayerHints(FileBlueprint blueprint, String filename, String code, List<String> warnings) {
-        // 这里放的是“层级习惯检查”，不是硬规则。
-        // 目的是在真正编译之前，尽早发现一些明显偏离预期的生成结果。
         String layer = blueprint.effectiveLayer();
         if ("controller".equals(layer) && !code.contains("@RestController") && !code.contains("@Controller")) {
             warnings.add("Controller layer file missing controller annotation: " + filename);
@@ -191,12 +190,25 @@ public class ContractValidationService {
      * 判断代码中是否仍然包含明显的占位实现
      */
     private boolean containsPlaceholder(String code) {
-        // 占位实现一旦漏进最终编译阶段，通常会带来更多噪音错误。
         return code.contains("TODO") || code.contains("implement logic") || code.contains("placeholder");
     }
 
     /**
-     * 规范化路径字符串，便于统一比较
+     * 收集模板目录下已有的视图名称
+     */
+    private List<String> collectTemplateNames(List<SourceCode> generatedFiles) {
+        List<String> templateNames = new ArrayList<>();
+        for (SourceCode file : generatedFiles) {
+            String filename = normalize(file.filename());
+            if (filename.startsWith("src/main/resources/templates/") && filename.endsWith(".html")) {
+                templateNames.add(Path.of(filename).getFileName().toString().replaceFirst("\\.html$", ""));
+            }
+        }
+        return templateNames;
+    }
+
+    /**
+     * 建立 Java 全限定类名到源码文件的索引
      */
     private void indexJavaType(String filename, String code, Map<String, SourceCode> javaTypes) {
         Matcher packageMatcher = PACKAGE_PATTERN.matcher(code);
@@ -207,12 +219,14 @@ public class ContractValidationService {
         }
     }
 
+    /**
+     * 校验主源码是否错误依赖了测试源码中的类型
+     */
     private void validateMainDoesNotDependOnTest(List<SourceCode> mainJavaFiles,
             Map<String, SourceCode> javaTypes,
             List<String> warnings) {
         for (SourceCode mainFile : mainJavaFiles) {
-            String code = mainFile.code() == null ? "" : mainFile.code();
-            Matcher importMatcher = IMPORT_PATTERN.matcher(code);
+            Matcher importMatcher = IMPORT_PATTERN.matcher(mainFile.code() == null ? "" : mainFile.code());
             while (importMatcher.find()) {
                 SourceCode importedType = javaTypes.get(importMatcher.group(1));
                 if (importedType != null && normalize(importedType.filename()).startsWith("src/test/java/")) {
@@ -224,6 +238,9 @@ public class ContractValidationService {
         }
     }
 
+    /**
+     * 校验 MVC Controller 返回的视图名是否存在对应模板
+     */
     private void validateMissingMvcTemplates(String filename, String code, List<String> templateNames,
             List<String> warnings) {
         if (!code.contains("@Controller") || code.contains("@RestController")) {
@@ -243,6 +260,9 @@ public class ContractValidationService {
         }
     }
 
+    /**
+     * 从 Controller 注解中收集后端接口路径
+     */
     private void collectControllerEndpoints(String code, List<String> backendEndpoints) {
         if (!code.contains("@Controller") && !code.contains("@RestController")) {
             return;
@@ -273,6 +293,9 @@ public class ContractValidationService {
         }
     }
 
+    /**
+     * 校验前端 fetch 或 axios 调用是否能匹配到后端接口
+     */
     private void validateFrontendRequests(List<SourceCode> frontendFiles, List<String> backendEndpoints,
             List<String> warnings) {
         if (frontendFiles.isEmpty() || backendEndpoints.isEmpty()) {
@@ -296,15 +319,110 @@ public class ContractValidationService {
         }
     }
 
+    /**
+     * 根据结构化接口文档校验端点、视图模板和前端调用是否真正落到代码里
+     */
+    private void validateProjectContract(ProjectContract contract,
+            List<SourceCode> generatedFiles,
+            List<String> templateNames,
+            List<String> backendEndpoints,
+            List<String> warnings) {
+        if (contract == null) {
+            return;
+        }
+
+        validateContractEndpoints(contract.endpoints(), backendEndpoints, warnings);
+        validateContractViews(contract.views(), generatedFiles, templateNames, warnings);
+        validateContractFrontendCalls(contract.frontendCalls(), generatedFiles, backendEndpoints, warnings);
+    }
+
+    /**
+     * 校验契约中声明的后端接口是否能在 Controller 映射中找到
+     */
+    private void validateContractEndpoints(List<ApiEndpointContract> endpoints,
+            List<String> backendEndpoints,
+            List<String> warnings) {
+        for (ApiEndpointContract endpoint : endpoints) {
+            String expectedPath = normalizeEndpoint(endpoint.path());
+            boolean found = backendEndpoints.stream().anyMatch(actualPath -> actualPath.equals(expectedPath));
+            if (!found) {
+                warnings.add("Contract endpoint `" + endpoint.method() + " " + expectedPath
+                        + "` is declared but no matching controller mapping was found.");
+            }
+        }
+    }
+
+    /**
+     * 校验契约中声明的 MVC 视图是否存在对应模板文件
+     */
+    private void validateContractViews(List<ViewContract> views,
+            List<SourceCode> generatedFiles,
+            List<String> templateNames,
+            List<String> warnings) {
+        for (ViewContract view : views) {
+            String templatePath = normalize(view.templatePath());
+            String viewName = view.name() == null || view.name().isBlank()
+                    ? Path.of(templatePath).getFileName().toString().replaceFirst("\\.html$", "")
+                    : view.name();
+            boolean templateExists = generatedFiles.stream()
+                    .map(file -> normalize(file.filename()))
+                    .anyMatch(filename -> filename.equals(templatePath));
+            if (!templateExists && !templateNames.contains(viewName)) {
+                warnings.add("Contract view `" + viewName + "` expects template `" + templatePath
+                        + "` but the template file was not generated.");
+            }
+        }
+    }
+
+    /**
+     * 校验契约中声明的前端调用是否能匹配到后端接口和实际前端文件
+     */
+    private void validateContractFrontendCalls(List<FrontendCallContract> frontendCalls,
+            List<SourceCode> generatedFiles,
+            List<String> backendEndpoints,
+            List<String> warnings) {
+        for (FrontendCallContract call : frontendCalls) {
+            String callPath = normalizeEndpoint(call.path());
+            boolean endpointExists = backendEndpoints.stream().anyMatch(endpoint -> endpoint.equals(callPath));
+            if (!endpointExists) {
+                warnings.add("Contract frontend call `" + call.sourceFile() + " -> " + call.method() + " " + callPath
+                        + "` has no matching backend endpoint.");
+            }
+
+            if (!call.sourceFile().isBlank() && !containsFile(generatedFiles, call.sourceFile())) {
+                warnings.add("Contract frontend call source file is missing: " + call.sourceFile());
+            }
+        }
+    }
+
+    /**
+     * 判断生成结果中是否包含指定项目相对路径的文件
+     */
+    private boolean containsFile(List<SourceCode> generatedFiles, String expectedPath) {
+        String normalizedExpectedPath = normalize(expectedPath);
+        return generatedFiles.stream()
+                .map(file -> normalize(file.filename()))
+                .anyMatch(filename -> filename.equals(normalizedExpectedPath));
+    }
+
+    /**
+     * 判断文件是否属于前端资源
+     */
     private boolean isFrontendAsset(String filename) {
         String normalized = normalize(filename);
         return normalized.endsWith(".html") || normalized.endsWith(".css") || normalized.endsWith(".js");
     }
 
+    /**
+     * 判断请求路径是否为外部 URL
+     */
     private boolean isExternalUrl(String path) {
         return path.startsWith("http://") || path.startsWith("https://") || path.startsWith("//");
     }
 
+    /**
+     * 规范化接口路径，去掉查询参数和多余斜杠
+     */
     private String normalizeEndpoint(String raw) {
         if (raw == null || raw.isBlank()) {
             return "/";
@@ -320,6 +438,9 @@ public class ContractValidationService {
         return path.replaceAll("/{2,}", "/").replaceFirst("/$", "");
     }
 
+    /**
+     * 拼接 Controller 类级路径和方法级路径
+     */
     private String joinEndpoint(String prefix, String suffix) {
         if ("/".equals(prefix)) {
             return normalizeEndpoint(suffix);
@@ -330,6 +451,9 @@ public class ContractValidationService {
         return normalizeEndpoint(prefix + "/" + suffix);
     }
 
+    /**
+     * 规范化项目内文件路径
+     */
     private String normalize(String path) {
         return path == null ? "unknown" : path.trim().replace("\\", "/");
     }

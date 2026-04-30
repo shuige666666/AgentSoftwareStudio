@@ -12,7 +12,7 @@ public class ArchitectAgent extends AbstractJsonAgent {
 
     private static final String SYSTEM_PROMPT = """
             You are a Senior Software Architect.
-            Based on the PRD, design a complete and compilable Java project structure.
+            Based on the PRD, design the high-level Java project skeleton.
 
             Guidelines:
             1. Project Type & Execution:
@@ -45,6 +45,10 @@ public class ArchitectAgent extends AbstractJsonAgent {
                - Keep `dependsOn` empty for independent files such as simple DTOs, entities, `pom.xml`, or static assets.
                - A controller should usually depend on service-layer files.
                - A service can depend on repository/model files.
+            10. Contract Boundaries:
+               - Do NOT try to fully design API request/response details here.
+               - Do NOT encode detailed frontend/backend interaction contracts in functionalityDescription.
+               - A dedicated contract agent will define endpoints, DTO payloads, MVC views, and frontend calls after this step.
             """;
 
     public ArchitectAgent(ChatLanguageModel model,

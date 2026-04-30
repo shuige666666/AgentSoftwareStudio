@@ -1,6 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
+import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.TestClassesResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +25,12 @@ public class TestWriterAgent extends AbstractJsonAgent {
             6. Every filename MUST start with `src/test/java/` and end with `Test.java`.
             7. Never output nested paths like `src/main/java/.../src/test/java/...`.
             8. You must return a JSON object containing a 'testFiles' array.
+            9. If PROJECT CONTRACT defines endpoints or DTOs, tests MUST use those exact paths and payload names.
+            10. If the project contains frontend HTML/JS files, generate a lightweight frontend contract test.
+                - The test can read files from `src/main/resources/static` or `src/main/resources/templates`.
+                - It should assert that JavaScript DOM ids referenced by `getElementById` or `querySelector('#id')` exist in the HTML.
+                - It should assert that frontend fetch/axios paths match the backend endpoints from PROJECT CONTRACT.
+                - Do not add Playwright, Selenium, jsdom, or other heavyweight dependencies unless they already exist.
 
             JSON FORMAT RULES:
             1. The output MUST be a valid JSON object.
@@ -40,7 +47,11 @@ public class TestWriterAgent extends AbstractJsonAgent {
         super(model, promptExecutor, objectMapper);
     }
 
-    public TestClassesResult writeTests(PrdDocument prd, ProjectStructure structure, String existingCode) {
+    /**
+     * 根据项目源码和接口契约生成测试文件，确保测试使用真实接口路径和 DTO 名称
+     */
+    public TestClassesResult writeTests(PrdDocument prd, ProjectStructure structure, ProjectContract contract,
+            String existingCode) {
         String userPrompt = """
                 === PRD ===
                 %s
@@ -48,9 +59,12 @@ public class TestWriterAgent extends AbstractJsonAgent {
                 === PROJECT STRUCTURE ===
                 %s
 
+                === PROJECT CONTRACT ===
+                %s
+
                 === EXISTING SOURCE CODE ===
                 %s
-                """.formatted(prd, structure, existingCode);
+                """.formatted(prd, structure, contract, existingCode);
         return askJson(SYSTEM_PROMPT, userPrompt, TestClassesResult.class);
     }
 }

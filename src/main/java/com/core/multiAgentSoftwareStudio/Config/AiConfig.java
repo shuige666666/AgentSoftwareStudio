@@ -1,7 +1,9 @@
 package com.core.multiAgentSoftwareStudio.Config;
 
 import com.core.multiAgentSoftwareStudio.Agent.ArchitectAgent;
+import com.core.multiAgentSoftwareStudio.Agent.ContractAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
+import com.core.multiAgentSoftwareStudio.Agent.FrontendReviewAgent;
 import com.core.multiAgentSoftwareStudio.Agent.ProductManagerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.TestWriterAgent;
@@ -36,7 +38,7 @@ public class AiConfig {
                 return OpenAiChatModel.builder()
                                 .baseUrl(baseUrl) // DeepSeek 官方 API 地址
                                 .apiKey(apiKey)
-                                .modelName("qwen-coder-plus-latest") // 模型名称
+                                .modelName("deepseek-v4-flash") // 模型名称
                                 .temperature(0.1) // 写代码通常需要严谨，温度设低一点
                                 .timeout(Duration.ofMinutes(8)) // 代码生成和修复较慢，给更宽松的超时窗口
                                 .maxTokens(8192) // 供应商限制最大 8192，避免 invalid_parameter_error
@@ -51,7 +53,7 @@ public class AiConfig {
                 return OpenAiChatModel.builder()
                                 .baseUrl(baseUrl)
                                 .apiKey(apiKey)
-                                .modelName("qwen3-max") // 逻辑能力最强，适合 PM 和 架构师
+                                .modelName("deepseek-v4-flash") // 逻辑能力最强，适合 PM 和 架构师
                                 .temperature(0.5) // 稍微高一点，增加规划的灵活性
                                 .timeout(Duration.ofMinutes(5)) // PM/架构阶段也可能因为长提示词或供应商排队触发默认超时
                                 .maxTokens(8192)
@@ -81,6 +83,16 @@ public class AiConfig {
         /**
          * 创建开发工程师 Agent
          */
+        /**
+         * 创建接口契约 Agent
+         */
+        @Bean
+        ContractAgent contractAgent(@Qualifier("logicModel") ChatLanguageModel model,
+                        LangGraphPromptExecutor promptExecutor,
+                        ObjectMapper objectMapper) {
+                return new ContractAgent(model, promptExecutor, objectMapper);
+        }
+
         @Bean
         DeveloperAgent developerAgent(@Qualifier("coderModel") ChatLanguageModel model,
                         LangGraphPromptExecutor promptExecutor,
@@ -96,6 +108,16 @@ public class AiConfig {
                         LangGraphPromptExecutor promptExecutor,
                         ObjectMapper objectMapper) {
                 return new TestWriterAgent(model, promptExecutor, objectMapper);
+        }
+
+        /**
+         * 创建前端审查修复 Agent
+         */
+        @Bean
+        FrontendReviewAgent frontendReviewAgent(@Qualifier("coderModel") ChatLanguageModel model,
+                        LangGraphPromptExecutor promptExecutor,
+                        ObjectMapper objectMapper) {
+                return new FrontendReviewAgent(model, promptExecutor, objectMapper);
         }
 
         /**

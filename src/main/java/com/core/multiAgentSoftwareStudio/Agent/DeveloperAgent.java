@@ -1,6 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
+import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +25,10 @@ public class DeveloperAgent extends AbstractJsonAgent {
                            - Controller endpoints MUST match what the Frontend expects.
                            - Service methods MUST match what the Controller calls.
                            - Field names in DTOs/Models MUST be consistent across the project.
+                        6. If PROJECT CONTRACT defines endpoints, DTOs, MVC views, or frontend calls related to this file, follow it exactly.
+                        7. For frontend files, every DOM id referenced by JavaScript (`getElementById`, `querySelector('#id')`) MUST exist in the generated HTML.
+                        8. For interactive screens, wire button/event handlers end-to-end so user actions trigger the intended fetch or UI transition.
+                        9. If using visibility classes such as `d-none`, always implement both show and hide transitions consistently.
 
                         CRITICAL RULES:
                         1. You must ONLY implement the code for the 'Current Target File'.
@@ -43,8 +48,12 @@ public class DeveloperAgent extends AbstractJsonAgent {
         super(model, promptExecutor, objectMapper);
     }
 
+    /**
+     * 根据 PRD、项目骨架、接口契约和当前文件蓝图生成单个源码文件
+     */
     public SourceCode writeCode(PrdDocument prd,
                                 ProjectStructure structure,
+                                ProjectContract contract,
                                 String existingCode,
                                 String fileName,
                                 String description,
@@ -55,6 +64,9 @@ public class DeveloperAgent extends AbstractJsonAgent {
                 %s
 
                 === PROJECT STRUCTURE (Reference Only) ===
+                %s
+
+                === PROJECT CONTRACT (Must Follow) ===
                 %s
 
                 === CURRENT GENERATION BATCH ===
@@ -69,7 +81,7 @@ public class DeveloperAgent extends AbstractJsonAgent {
                 Description: %s
                 Required Methods: %s
                 =======================================
-                """.formatted(prd, structure, batchContext, existingCode, fileName, description, methods);
+                """.formatted(prd, structure, contract, batchContext, existingCode, fileName, description, methods);
         return askJson(SYSTEM_PROMPT, userPrompt, SourceCode.class);
     }
 }
