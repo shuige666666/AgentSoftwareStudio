@@ -7,41 +7,55 @@
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 800px;
+            max-width: 1180px;
             margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
+            padding: 28px;
+            background: #080d18;
+            color: #dbeafe;
         }
         .container {
-            background-color: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            background: #111827;
+            padding: 28px;
+            border: 1px solid #243044;
+            border-radius: 8px;
+            box-shadow: 0 18px 45px rgba(0,0,0,0.32);
         }
         h1 {
-            color: #333;
-            text-align: center;
-            margin-bottom: 30px;
+            color: #e5edf9;
+            text-align: left;
+            margin: 0 0 24px;
+            font-size: 28px;
+            font-weight: 650;
         }
         .input-group {
-            margin-bottom: 20px;
+            margin-bottom: 16px;
         }
         textarea {
             width: 100%;
             padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
+            border: 1px solid #334155;
+            border-radius: 6px;
             resize: vertical;
-            min-height: 100px;
+            min-height: 120px;
             font-size: 16px;
             box-sizing: border-box;
+            background: #0b1220;
+            color: #e5edf9;
+            outline: none;
+        }
+        textarea:focus {
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16);
+        }
+        textarea::placeholder {
+            color: #64748b;
         }
         button {
-            background-color: #4CAF50;
-            color: white;
+            background-color: #2563eb;
+            color: #ffffff;
             padding: 12px 24px;
             border: none;
-            border-radius: 5px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 16px;
             transition: background-color 0.3s;
@@ -49,30 +63,192 @@
             width: 100%;
         }
         button:hover {
-            background-color: #45a049;
+            background-color: #1d4ed8;
         }
         button:disabled {
-            background-color: #cccccc;
+            background-color: #475569;
+            color: #cbd5e1;
             cursor: not-allowed;
         }
         #output {
-            margin-top: 30px;
-            padding: 20px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            background-color: #fafafa;
-            min-height: 200px;
-            white-space: pre-wrap;
+            margin-top: 24px;
+            border: 1px solid #263449;
+            border-radius: 8px;
+            background-color: #0f172a;
+            min-height: 360px;
             font-family: 'Courier New', Courier, monospace;
             line-height: 1.5;
-            max-height: 500px;
+            max-height: 680px;
             overflow-y: auto;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+        #output::-webkit-scrollbar {
+            width: 10px;
+        }
+        #output::-webkit-scrollbar-track {
+            background: #111827;
+        }
+        #output::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 6px;
+        }
+        #output::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        .log-line {
+            display: grid;
+            grid-template-columns: 78px minmax(0, 1fr);
+            gap: 10px;
+            align-items: start;
+            padding: 7px 8px;
+            border-left: 3px solid transparent;
+            border-radius: 4px;
+            color: #d6deeb;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .log-line + .log-line {
+            margin-top: 3px;
+        }
+        .log-badge {
+            color: #94a3b8;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            line-height: 20px;
+            text-align: center;
+            text-transform: uppercase;
+            border-radius: 3px;
+            background: rgba(148, 163, 184, 0.14);
+        }
+        .log-message {
+            min-width: 0;
+        }
+        .log-step {
+            border-left-color: #60a5fa;
+            background: rgba(96, 165, 250, 0.08);
+        }
+        .log-step .log-badge {
+            color: #bfdbfe;
+            background: rgba(59, 130, 246, 0.22);
+        }
+        .log-success {
+            border-left-color: #22c55e;
+            background: rgba(34, 197, 94, 0.09);
+        }
+        .log-success .log-badge {
+            color: #bbf7d0;
+            background: rgba(34, 197, 94, 0.20);
+        }
+        .log-warning {
+            border-left-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.11);
+        }
+        .log-warning .log-badge {
+            color: #fde68a;
+            background: rgba(245, 158, 11, 0.22);
+        }
+        .log-error {
+            border-left-color: #ef4444;
+            background: rgba(239, 68, 68, 0.12);
+        }
+        .log-error .log-badge {
+            color: #fecaca;
+            background: rgba(239, 68, 68, 0.24);
+        }
+        .log-file {
+            border-left-color: #818cf8;
+            background: rgba(129, 140, 248, 0.055);
+        }
+        .log-file .log-badge {
+            color: #c7d2fe;
+            background: rgba(129, 140, 248, 0.18);
+        }
+        .log-system {
+            border-left-color: #38bdf8;
+            background: rgba(56, 189, 248, 0.08);
+        }
+        .log-system .log-badge {
+            color: #bae6fd;
+            background: rgba(56, 189, 248, 0.20);
+        }
+        .log-docker {
+            border-left-color: #14b8a6;
+            background: rgba(20, 184, 166, 0.08);
+        }
+        .log-docker .log-badge {
+            color: #99f6e4;
+            background: rgba(20, 184, 166, 0.20);
+        }
+        .log-persistence {
+            border-left-color: #f97316;
+            background: rgba(249, 115, 22, 0.08);
+        }
+        .log-persistence .log-badge {
+            color: #fed7aa;
+            background: rgba(249, 115, 22, 0.20);
+        }
+        .log-repair {
+            border-left-color: #ec4899;
+            background: rgba(236, 72, 153, 0.08);
+        }
+        .log-repair .log-badge {
+            color: #fbcfe8;
+            background: rgba(236, 72, 153, 0.20);
+        }
+        .log-test {
+            border-left-color: #84cc16;
+            background: rgba(132, 204, 22, 0.08);
+        }
+        .log-test .log-badge {
+            color: #d9f99d;
+            background: rgba(132, 204, 22, 0.20);
+        }
+        .mark-error {
+            color: #fca5a5;
+            font-weight: 700;
+        }
+        .mark-warning {
+            color: #fcd34d;
+            font-weight: 700;
+        }
+        .mark-success {
+            color: #86efac;
+            font-weight: 700;
+        }
+        .mark-path {
+            color: #d8b4fe;
+            font-weight: 650;
+            background: rgba(168, 85, 247, 0.12);
+            border-radius: 3px;
+            padding: 0 3px;
+        }
+        .mark-prefix {
+            color: #94a3b8;
+        }
+        .empty-output {
+            color: #94a3b8;
+            padding: 8px;
         }
         .status {
             margin-top: 10px;
             font-style: italic;
-            color: #666;
+            color: #94a3b8;
             text-align: right;
+        }
+        @media (max-width: 720px) {
+            body {
+                padding: 14px;
+            }
+            .container {
+                padding: 18px;
+            }
+            .log-line {
+                grid-template-columns: 62px minmax(0, 1fr);
+                gap: 8px;
+            }
         }
     </style>
 </head>
@@ -105,7 +281,7 @@
 
             // Reset UI
             sendBtn.disabled = true;
-            outputDiv.textContent = '';
+            outputDiv.innerHTML = '<div class="empty-output">Waiting for workflow output...</div>';
             statusDiv.textContent = 'Connecting...';
 
             try {
@@ -144,7 +320,7 @@
                         if (line.startsWith('data:')) {
                             // Remove 'data:' prefix and trim leading space if present
                             const data = line.substring(5);
-                            outputDiv.textContent += data + '\n';
+                            appendLogLine(outputDiv, data);
                         }
                     }
                     // Auto-scroll to bottom
@@ -155,10 +331,75 @@
             } catch (error) {
                 console.error('Error:', error);
                 statusDiv.textContent = 'Error: ' + error.message;
-                outputDiv.textContent += '\n\n[Error occurred: ' + error.message + ']';
+                appendLogLine(outputDiv, '[Error occurred: ' + error.message + ']');
             } finally {
                 sendBtn.disabled = false;
             }
+        }
+
+        function appendLogLine(outputDiv, rawText) {
+            const placeholder = outputDiv.querySelector('.empty-output');
+            if (placeholder) {
+                placeholder.remove();
+            }
+
+            const text = rawText.replace(/^\s/, '');
+            const meta = classifyLogLine(text);
+            const row = document.createElement('div');
+            row.className = 'log-line ' + meta.className;
+
+            const badge = document.createElement('span');
+            badge.className = 'log-badge';
+            badge.textContent = meta.label;
+
+            const message = document.createElement('span');
+            message.className = 'log-message';
+            message.innerHTML = highlightLogText(text);
+
+            row.appendChild(badge);
+            row.appendChild(message);
+            outputDiv.appendChild(row);
+        }
+
+        function classifyLogLine(text) {
+            const lower = text.toLowerCase();
+            if (/(exception|error|failed|failure|无法|失败|错误|not found)/i.test(text)) {
+                return { label: 'error', className: 'log-error' };
+            }
+            if (/(warning|warn|告警|警告|reached the repair limit|skipping)/i.test(text)) {
+                return { label: 'warn', className: 'log-warning' };
+            }
+            if (/(passed|success|completed|ready|persisted|所有测试通过|成功)/i.test(text)) {
+                return { label: 'ok', className: 'log-success' };
+            }
+            if (/^(\d+(?:\.\d+)?\.|workflow started|product manager|architect|contract planner|generating|running|invoking|runtime\/compile)/i.test(text)) {
+                return { label: 'step', className: 'log-step' };
+            }
+            if (/(generated|写入文件|覆盖修复文件|file:|src\/|pom\.xml)/i.test(text)) {
+                return { label: 'file', className: 'log-file' };
+            }
+            if (/^-{5,}$|execution result|test result/i.test(text)) {
+                return { label: 'system', className: 'log-system' };
+            }
+            return { label: 'log', className: '' };
+        }
+
+        function highlightLogText(text) {
+            return escapeHtml(text)
+                .replace(/^(Generated:|写入文件:|已覆盖修复文件:)/i, '<span class="mark-prefix">$1</span>')
+                .replace(/(exception|error|failed|failure|not found|无法|失败|错误)/gi, '<span class="mark-error">$1</span>')
+                .replace(/(warning|warn|告警|警告|skipping)/gi, '<span class="mark-warning">$1</span>')
+                .replace(/(passed|success|completed|ready|persisted|成功)/gi, '<span class="mark-success">$1</span>')
+                .replace(/((?:src\/|ai_generated_projects\/|[A-Za-z]:\\)[^\\s`]+|pom\.xml|[A-Za-z0-9_./-]+\.(?:java|xml|properties|css|js|html|yml|yaml))/g, '<span class="mark-path">$1</span>');
+        }
+
+        function escapeHtml(value) {
+            return value
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
         }
     </script>
 </body>

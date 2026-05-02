@@ -1,4 +1,4 @@
-package com.core.multiAgentSoftwareStudio.Service;
+package com.core.multiAgentSoftwareStudio.Service.Generation;
 
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
@@ -18,15 +18,32 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * 批次规划
+ */
 @Service
 public class BatchPlanningService {
 
-    private static final Map<String, Integer> LAYER_PRIORITY = Map.of(
-            "base", 10,
-            "service", 20,
-            "controller", 30,
-            "frontend", 40,
-            "test", 50);
+    private static final Map<String, Integer> LAYER_PRIORITY = Map.ofEntries(
+            Map.entry("application", 10),
+            Map.entry("base", 10),
+            Map.entry("model", 10),
+            Map.entry("entity", 10),
+            Map.entry("dto", 10),
+            Map.entry("vo", 10),
+            Map.entry("constant", 10),
+            Map.entry("common", 10),
+
+            Map.entry("config", 15),
+            Map.entry("configuration", 15),
+
+            Map.entry("repository", 30),
+            Map.entry("mapper", 30),
+            Map.entry("service", 40),
+            Map.entry("controller", 50),
+            Map.entry("frontend", 60),
+            Map.entry("test", 70)
+    );
 
     /**
      * 根据架构蓝图生成可执行的批次计划

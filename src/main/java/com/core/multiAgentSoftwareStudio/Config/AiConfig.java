@@ -53,7 +53,7 @@ public class AiConfig {
                 return OpenAiChatModel.builder()
                                 .baseUrl(baseUrl)
                                 .apiKey(apiKey)
-                                .modelName("deepseek-v4-flash") // 逻辑能力最强，适合 PM 和 架构师
+                                .modelName("deepseek-v4-pro") // 逻辑能力最强，适合 PM 和 架构师
                                 .temperature(0.5) // 稍微高一点，增加规划的灵活性
                                 .timeout(Duration.ofMinutes(5)) // PM/架构阶段也可能因为长提示词或供应商排队触发默认超时
                                 .maxTokens(8192)

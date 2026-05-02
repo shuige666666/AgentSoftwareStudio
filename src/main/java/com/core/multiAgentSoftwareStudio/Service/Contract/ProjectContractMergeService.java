@@ -1,4 +1,4 @@
-package com.core.multiAgentSoftwareStudio.Service;
+package com.core.multiAgentSoftwareStudio.Service.Contract;
 
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;

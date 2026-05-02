@@ -1,4 +1,4 @@
-package com.core.multiAgentSoftwareStudio.Service;
+package com.core.multiAgentSoftwareStudio.Service.Workspace;
 
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFix;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
@@ -13,10 +13,14 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+/**
+ * 文件持久化以及文件名、文件路径服务
+ */
 @Service
 public class WorkspaceService {
 
@@ -26,6 +30,15 @@ public class WorkspaceService {
      * 将本轮生成出来的所有源码文件保存到一个带时间戳的本地项目目录中。
      */
     public Path saveProjectToDisk(String projectName, List<SourceCode> sourceCodes) {
+        return saveProjectToDisk(projectName, sourceCodes, System.out::println);
+    }
+
+    /**
+     * 将本轮生成出来的所有源码文件保存到一个带时间戳的本地项目目录中，并通过统一日志回调输出过程信息。
+     */
+    public Path saveProjectToDisk(String projectName, List<SourceCode> sourceCodes, Consumer<String> logger) {
+        Consumer<String> safeLogger = logger == null ? message -> {
+        } : logger;
         try {
             // 1. 创建本次生成任务独立的项目目录，避免覆盖历史生成结果。
             String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
@@ -33,14 +46,14 @@ public class WorkspaceService {
             Path projectDir = Paths.get(WORKSPACE_ROOT, safeProjectName + "_" + timestamp);
             Files.createDirectories(projectDir);
 
-            System.out.println("💾 开始持久化代码到: " + projectDir.toAbsolutePath());
+            safeLogger.accept("💾 开始持久化代码到: " + projectDir.toAbsolutePath());
 
             // 2. 逐个写入生成文件；对空记录、空文件名、空代码内容做防御性处理。
             List<SourceCode> safeSourceCodes = sourceCodes == null ? List.of() : sourceCodes;
             for (int i = 0; i < safeSourceCodes.size(); i++) {
                 SourceCode sourceCode = safeSourceCodes.get(i);
                 if (sourceCode == null) {
-                    System.out.println("   └── 跳过空文件记录: index=" + i);
+                    safeLogger.accept("   └── 跳过空文件记录: index=" + i);
                     continue;
                 }
 
@@ -61,7 +74,7 @@ public class WorkspaceService {
                     }
 
                     Files.writeString(finalPath, code, StandardCharsets.UTF_8);
-                    System.out.println("   └── 写入文件: " + relativePath + " (原名: " + sourceCode.filename() + ")");
+                    safeLogger.accept("   └── 写入文件: " + relativePath + " (原名: " + sourceCode.filename() + ")");
                 } catch (Exception e) {
                     throw new RuntimeException("保存第 " + (i + 1) + " 个生成文件失败: filename="
                             + sourceCode.filename() + ", codeIsNull=" + (sourceCode.code() == null), e);
@@ -78,13 +91,22 @@ public class WorkspaceService {
      * 将 DebuggerAgent 或 FrontendReviewAgent 返回的整文件修复结果覆盖到磁盘项目中。
      */
     public void applyFixesToDisk(Path projectDir, List<CodeFix> fixes) {
+        applyFixesToDisk(projectDir, fixes, System.out::println);
+    }
+
+    /**
+     * 将 DebuggerAgent 或 FrontendReviewAgent 返回的整文件修复结果覆盖到磁盘项目中，并通过统一日志回调输出过程信息。
+     */
+    public void applyFixesToDisk(Path projectDir, List<CodeFix> fixes, Consumer<String> logger) {
+        Consumer<String> safeLogger = logger == null ? message -> {
+        } : logger;
         try {
             // 1. 修复结果可能为空；这里统一转为空列表，避免外层流程因为空集合中断。
             List<CodeFix> safeFixes = fixes == null ? List.of() : fixes;
             for (int i = 0; i < safeFixes.size(); i++) {
                 CodeFix fix = safeFixes.get(i);
                 if (fix == null) {
-                    System.out.println("   跳过空修复记录: index=" + i);
+                    safeLogger.accept("   跳过空修复记录: index=" + i);
                     continue;
                 }
 
@@ -115,7 +137,7 @@ public class WorkspaceService {
                 }
 
                 Files.writeString(targetPath, fix.newCode() == null ? "" : fix.newCode(), StandardCharsets.UTF_8);
-                System.out.println("   🔧 已覆盖修复文件: " + targetPath + " (AI原输出名: " + fix.filename() + ")");
+                safeLogger.accept("   🔧 已覆盖修复文件: " + targetPath + " (AI原输出名: " + fix.filename() + ")");
             }
         } catch (IOException e) {
             throw new RuntimeException("应用代码修复失败", e);
@@ -269,10 +291,19 @@ public class WorkspaceService {
      * 从已经落盘的项目目录中重新读取源码文件，重建内存中的 SourceCode 列表。
      */
     public List<SourceCode> loadProjectFromDisk(Path projectDir) {
+        return loadProjectFromDisk(projectDir, System.out::println);
+    }
+
+    /**
+     * 从已经落盘的项目目录中重新读取源码文件，重建内存中的 SourceCode 列表，并通过统一日志回调输出异常信息。
+     */
+    public List<SourceCode> loadProjectFromDisk(Path projectDir, Consumer<String> logger) {
+        Consumer<String> safeLogger = logger == null ? message -> {
+        } : logger;
         List<SourceCode> result = new ArrayList<>();
 
         if (projectDir == null || !Files.exists(projectDir)) {
-            System.out.println("指定的项目路径不存在: " + projectDir);
+            safeLogger.accept("指定的项目路径不存在: " + projectDir);
             return result;
         }
 
@@ -298,7 +329,7 @@ public class WorkspaceService {
                     String language = detectLanguageFromFilename(filename);
                     result.add(new SourceCode(filename, language, content));
                 } catch (IOException e) {
-                    System.err.println("无法读取文件: " + path + " | 错误: " + e.getMessage());
+                    safeLogger.accept("无法读取文件: " + path + " | 错误: " + e.getMessage());
                 }
             });
         } catch (IOException e) {

@@ -5,7 +5,7 @@ import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
 import com.core.multiAgentSoftwareStudio.Agent.ProductManagerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.*;
-import com.core.multiAgentSoftwareStudio.Service.WorkspaceService;
+import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
