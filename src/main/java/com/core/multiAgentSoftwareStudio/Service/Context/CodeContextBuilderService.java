@@ -155,7 +155,7 @@ public class CodeContextBuilderService {
         if (path == null || path.isBlank()) {
             return "";
         }
-        return path.trim().replace("\\", "/");
+        return sourceCodePathService.normalizePath(path);
     }
 
     /**
@@ -173,21 +173,13 @@ public class CodeContextBuilderService {
     public String buildFrontendContext(List<SourceCode> codes) {
         StringBuilder builder = new StringBuilder();
         for (SourceCode code : codes) {
-            if (!isFrontendFile(code.filename())) {
+            if (!sourceCodePathService.isFrontendFile(code.filename())) {
                 continue;
             }
             builder.append("--- File: ").append(code.filename()).append(" ---\n");
             builder.append(code.code()).append("\n\n");
         }
         return builder.toString();
-    }
-
-    /**
-     * 判断文件是否属于前端资源
-     */
-    private boolean isFrontendFile(String filename) {
-        String lower = filename == null ? "" : filename.toLowerCase();
-        return lower.endsWith(".html") || lower.endsWith(".css") || lower.endsWith(".js");
     }
 
     public String buildContractContext(ProjectContract contract) {

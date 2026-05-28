@@ -2,6 +2,7 @@ package com.core.multiAgentSoftwareStudio.Service.Workspace;
 
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFix;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -14,8 +15,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -25,6 +24,12 @@ import java.util.stream.Stream;
 public class WorkspaceService {
 
     private static final String WORKSPACE_ROOT = "ai_generated_projects";
+
+    private final SourceCodePathService sourceCodePathService;
+
+    public WorkspaceService(SourceCodePathService sourceCodePathService) {
+        this.sourceCodePathService = sourceCodePathService;
+    }
 
     /**
      * 将本轮生成出来的所有源码文件保存到一个带时间戳的本地项目目录中。
@@ -59,7 +64,7 @@ public class WorkspaceService {
 
                 try {
                     // 3. 规范化文件名并解析最终相对路径，必要时从 Java 代码内容推断路径。
-                    String filename = normalizeFixFilename(sourceCode.filename(), sourceCode.code());
+                    String filename = sourceCodePathService.normalizeGeneratedFilename(sourceCode.filename(), sourceCode.code());
                     String code = sourceCode.code() == null ? "" : sourceCode.code();
                     Path relativePath = resolveSmartPath(filename, code);
                     Path finalPath = projectDir.resolve(relativePath).normalize();
@@ -110,7 +115,7 @@ public class WorkspaceService {
                     continue;
                 }
 
-                String normalizedFilename = normalizeFixFilename(fix.filename(), fix.newCode());
+                String normalizedFilename = sourceCodePathService.normalizeGeneratedFilename(fix.filename(), fix.newCode());
                 Path relativePath = resolveSmartPath(normalizedFilename, fix.newCode());
                 Path exactPath = projectDir.resolve(relativePath).normalize();
                 String pureFileName = exactPath.getFileName().toString();
@@ -148,7 +153,7 @@ public class WorkspaceService {
      * 根据模型返回的文件名和代码内容，推断文件应该落到项目内的哪个相对路径。
      */
     private Path resolveSmartPath(String filenameInput, String content) {
-        String filename = normalizeFixFilename(filenameInput, content);
+        String filename = sourceCodePathService.normalizeGeneratedFilename(filenameInput, content);
         String safeContent = content == null ? "" : content;
 
         // 1. 如果模型已经给出标准源码目录，直接截取并信任项目内路径。
@@ -172,9 +177,9 @@ public class WorkspaceService {
 
         // 2. Java 文件优先根据 package 语句决定 main/test 下的包路径。
         if (filename.endsWith(".java")) {
-            String packageName = extractPackageName(safeContent);
+            String packageName = sourceCodePathService.extractPackageName(safeContent);
             String pureFileName = Paths.get(filename).getFileName().toString();
-            boolean isTestFile = isLikelyTestJavaFile(filename, safeContent);
+            boolean isTestFile = sourceCodePathService.isLikelyTestFile(filename, safeContent);
             Path sourceRoot = isTestFile ? Paths.get("src", "test", "java") : Paths.get("src", "main", "java");
             if (packageName != null && !packageName.isEmpty()) {
                 return sourceRoot.resolve(packageName.replace('.', '/')).resolve(pureFileName);
@@ -198,70 +203,6 @@ public class WorkspaceService {
     }
 
     /**
-     * 规范化模型返回的文件名；当文件名缺失时，尝试从 Java 类型和 package 中反推出路径。
-     */
-    private String normalizeFixFilename(String filename, String content) {
-        if (!isMissingFilename(filename)) {
-            return filename.trim().replace('\\', '/');
-        }
-
-        String safeContent = content == null ? "" : content;
-        String typeName = extractJavaTypeName(safeContent);
-        if (typeName == null || typeName.isBlank()) {
-            return "GeneratedFile.java";
-        }
-
-        String packageName = extractPackageName(safeContent);
-        Path sourceRoot = isLikelyTestJavaFile(typeName + ".java", safeContent)
-                ? Paths.get("src", "test", "java")
-                : Paths.get("src", "main", "java");
-        if (packageName == null || packageName.isBlank()) {
-            return sourceRoot.resolve(typeName + ".java").toString().replace('\\', '/');
-        }
-        return sourceRoot.resolve(packageName.replace('.', '/')).resolve(typeName + ".java").toString()
-                .replace('\\', '/');
-    }
-
-    /**
-     * 判断模型返回的文件名是否缺失或属于占位文件名。
-     */
-    private boolean isMissingFilename(String filename) {
-        if (filename == null || filename.isBlank()) {
-            return true;
-        }
-        String pureName = Paths.get(filename.trim().replace('\\', '/')).getFileName().toString();
-        return pureName.equalsIgnoreCase("Unknown.java")
-                || pureName.equalsIgnoreCase("Unknown")
-                || pureName.equalsIgnoreCase("GeneratedFile.java");
-    }
-
-    /**
-     * 从 Java 源码中提取 package 名，用于推断文件所在包路径。
-     */
-    private String extractPackageName(String code) {
-        if (code == null || code.isBlank()) {
-            return null;
-        }
-        Pattern pattern = Pattern.compile("^\\s*package\\s+([a-zA-Z0-9_.]+)\\s*;", Pattern.MULTILINE);
-        Matcher matcher = pattern.matcher(code);
-        return matcher.find() ? matcher.group(1) : null;
-    }
-
-    /**
-     * 从 Java 源码中提取顶层类型名，用于在文件名缺失时推断文件名。
-     */
-    private String extractJavaTypeName(String code) {
-        if (code == null || code.isBlank()) {
-            return null;
-        }
-        Pattern pattern = Pattern.compile(
-                "^\\s*(?:public\\s+)?(?:abstract\\s+|final\\s+|sealed\\s+|non-sealed\\s+)*(class|interface|record|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
-                Pattern.MULTILINE);
-        Matcher matcher = pattern.matcher(code);
-        return matcher.find() ? matcher.group(2) : null;
-    }
-
-    /**
      * 判断文件名是否属于 Spring Boot 项目中的资源文件。
      */
     private boolean isResourceFile(String filename) {
@@ -273,18 +214,6 @@ public class WorkspaceService {
                 || lower.endsWith(".html")
                 || lower.endsWith(".css")
                 || lower.endsWith(".js");
-    }
-
-    /**
-     * 根据路径和代码内容判断一个 Java 文件是否更像测试文件。
-     */
-    private boolean isLikelyTestJavaFile(String filename, String content) {
-        String safeFilename = filename == null ? "" : filename;
-        String safeContent = content == null ? "" : content;
-        return safeFilename.contains("src/test/java/")
-                || safeFilename.endsWith("Test.java")
-                || safeContent.contains("org.junit.jupiter")
-                || safeContent.contains("@Test");
     }
 
     /**
@@ -326,7 +255,7 @@ public class WorkspaceService {
                     Path relative = projectDir.relativize(path);
                     String filename = relative.toString().replace('\\', '/');
                     String content = Files.readString(path, StandardCharsets.UTF_8);
-                    String language = detectLanguageFromFilename(filename);
+                    String language = sourceCodePathService.detectLanguageFromFilename(filename);
                     result.add(new SourceCode(filename, language, content));
                 } catch (IOException e) {
                     safeLogger.accept("无法读取文件: " + path + " | 错误: " + e.getMessage());
@@ -337,21 +266,6 @@ public class WorkspaceService {
         }
 
         return result;
-    }
-
-    /**
-     * 根据文件扩展名推断 SourceCode 的语言类型。
-     */
-    private String detectLanguageFromFilename(String filename) {
-        String lower = filename == null ? "" : filename.toLowerCase();
-        if (lower.endsWith(".java")) return "java";
-        if (lower.endsWith(".xml")) return "xml";
-        if (lower.endsWith(".yml") || lower.endsWith(".yaml")) return "yaml";
-        if (lower.endsWith(".properties")) return "properties";
-        if (lower.endsWith(".html")) return "html";
-        if (lower.endsWith(".css")) return "css";
-        if (lower.endsWith(".js")) return "js";
-        return "text";
     }
 
     /**

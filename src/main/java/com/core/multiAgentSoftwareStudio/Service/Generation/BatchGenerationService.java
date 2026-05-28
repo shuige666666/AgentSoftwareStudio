@@ -84,7 +84,7 @@ public class BatchGenerationService {
             for (int i = 0; i < batchFiles.size(); i++) {
                 FileBlueprint blueprint = batchFiles.get(i);
                 SourceCode generatedFile = generatedFiles.get(i);
-                upsertCode(data.codes, generatedFile);
+                sourceCodePathService.upsertSourceCode(data.codes, generatedFile.filename(), generatedFile.code());
                 logger.accept("   Generated: " + blueprint.targetPath());
             }
         } finally {
@@ -143,24 +143,5 @@ public class BatchGenerationService {
             builder.append('\n');
         }
         return builder.toString();
-    }
-
-    /**
-     * 将新生成代码写入内存，如已存在则覆盖
-     */
-    private void upsertCode(List<SourceCode> codes, SourceCode candidate) {
-        // 同一路径的文件如果已经生成过，就直接覆盖内存中的旧版本。
-        // 这样后续上下文、落盘、修复，看到的都是最新内容。
-        String normalizedCandidate = sourceCodePathService.normalizeGeneratedFilename(candidate.filename(), candidate.code());
-        for (int i = 0; i < codes.size(); i++) {
-            String normalizedExisting = sourceCodePathService.normalizeGeneratedFilename(codes.get(i).filename(), codes.get(i).code());
-            if (normalizedExisting.equals(normalizedCandidate)) {
-                codes.set(i, new SourceCode(normalizedCandidate, sourceCodePathService.detectLanguageFromFilename(normalizedCandidate),
-                        candidate.code()));
-                return;
-            }
-        }
-        codes.add(
-                new SourceCode(normalizedCandidate, sourceCodePathService.detectLanguageFromFilename(normalizedCandidate), candidate.code()));
     }
 }

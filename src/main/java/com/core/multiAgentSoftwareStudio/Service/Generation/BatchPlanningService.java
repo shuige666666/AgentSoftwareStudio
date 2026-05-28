@@ -4,6 +4,7 @@ import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationPlan;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
+import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -23,6 +24,12 @@ import java.util.stream.Collectors;
  */
 @Service
 public class BatchPlanningService {
+
+    private final SourceCodePathService sourceCodePathService;
+
+    public BatchPlanningService(SourceCodePathService sourceCodePathService) {
+        this.sourceCodePathService = sourceCodePathService;
+    }
 
     private static final Map<String, Integer> LAYER_PRIORITY = Map.ofEntries(
             Map.entry("application", 10),
@@ -94,15 +101,15 @@ public class BatchPlanningService {
         // 目的是尽量让“基础文件在前，依赖它们的文件在后”，
         // 即使最终这批文件会并发生成，也能让批次描述更合理。
         Map<String, FileBlueprint> byPath = files.stream()
-                .collect(Collectors.toMap(file -> normalize(file.targetPath()), file -> file, (left, right) -> left, LinkedHashMap::new));
+                .collect(Collectors.toMap(file -> sourceCodePathService.normalizePath(file.targetPath()), file -> file, (left, right) -> left, LinkedHashMap::new));
         Map<String, Integer> indegree = new HashMap<>();
         Map<String, List<String>> adjacency = new HashMap<>();
 
         for (FileBlueprint file : files) {
-            String current = normalize(file.targetPath());
+            String current = sourceCodePathService.normalizePath(file.targetPath());
             indegree.putIfAbsent(current, 0);
             for (String dependency : file.dependsOn()) {
-                String normalizedDependency = normalize(dependency);
+                String normalizedDependency = sourceCodePathService.normalizePath(dependency);
                 if (byPath.containsKey(normalizedDependency)) {
                     adjacency.computeIfAbsent(normalizedDependency, key -> new ArrayList<>()).add(current);
                     indegree.merge(current, 1, Integer::sum);
@@ -138,10 +145,10 @@ public class BatchPlanningService {
         // 如果依赖信息不完整，或者出现环，直接退回到稳定顺序。
         // 这里宁愿“保守可运行”，也不要因为规划阶段过严导致整个流程中断。
         Set<String> emitted = ordered.stream()
-                .map(file -> normalize(file.targetPath()))
+                .map(file -> sourceCodePathService.normalizePath(file.targetPath()))
                 .collect(Collectors.toSet());
         files.stream()
-                .filter(file -> !emitted.contains(normalize(file.targetPath())))
+                .filter(file -> !emitted.contains(sourceCodePathService.normalizePath(file.targetPath())))
                 .forEach(ordered::add);
         return ordered;
     }
@@ -152,19 +159,5 @@ public class BatchPlanningService {
     private int layerPriority(String layer) {
         // 数字越小越先生成。
         return LAYER_PRIORITY.getOrDefault(layer == null ? "base" : layer.trim().toLowerCase(), 99);
-    }
-
-    /**
-     * 规范化路径表示，便于做分组和依赖匹配
-     */
-    private String normalize(String path) {
-        if (path == null || path.isBlank()) {
-            return "unknown";
-        }
-        String normalized = path.trim().replace("\\", "/");
-        if (normalized.contains("/")) {
-            return normalized;
-        }
-        return Path.of(normalized).getFileName().toString().replace("\\", "/");
     }
 }

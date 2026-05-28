@@ -6,6 +6,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.function.Consumer;
 
+import static com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService.safeValue;
+
 /**
  * 负责执行需求分析节点，调用产品经理 Agent 生成结构化 PRD。
  */
@@ -29,12 +31,5 @@ public class RequirementNodeService {
         data.prd = pmAgent.analyzeRequirement(data.userRequest);
         logger.accept("PRD created: " + safeValue(data.prd == null ? null : data.prd.projectName(), "Unnamed Project"));
         return data;
-    }
-
-    /**
-     * 在值为空时返回兜底文本
-     */
-    private String safeValue(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
     }
 }

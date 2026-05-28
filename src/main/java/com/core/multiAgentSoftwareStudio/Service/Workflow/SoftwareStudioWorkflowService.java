@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 import static org.bsc.langgraph4j.StateGraph.END;
@@ -90,36 +91,39 @@ public class SoftwareStudioWorkflowService {
     }
 
     /**
+     * 根据业务动作和日志监听器构建一个 LangGraph4j 节点动作。
+     * 将通用的 BiFunction 风格节点逻辑适配为 NodeAction 接口，
+     * 内部从工作流图状态中提取数据，执行业务动作后，将结果以 DATA_KEY 写回状态 Map。
+     *
+     * @param action 接收工作流数据和日志监听器，返回更新后的工作流数据
+     * @param logger 用于输出节点执行过程中的日志信息
+     * @return 适配后的 NodeAction，可直接注册到 StateGraph 中
+     */
+    private NodeAction<SoftwareStudioWorkflowGraphState> createNodeAction(
+            BiFunction<SoftwareStudioWorkflowData, Consumer<String>, SoftwareStudioWorkflowData> action,
+            Consumer<String> logger) {
+        return state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY, action.apply(state.workflowData(), logger));
+    }
+
+    /**
      * 使用 LangGraph4j 编排整个多节点工作流
      */
     private SoftwareStudioWorkflowData runWorkflowGraph(SoftwareStudioWorkflowData initialData, Consumer<String> logger) {
         // 这里刻意让每个节点都“接收完整状态、返回完整状态”。
         // 这样真正驱动流程的是 LangGraph 的状态流转，而不是方法外部的共享可变变量。
         // 后面如果你想继续扩展更多节点、增加分支条件，这个形态会更容易维护。
-        NodeAction<SoftwareStudioWorkflowGraphState> pmNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                requirementNodeService.execute(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> architectNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                architectureNodeService.execute(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> contractNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                contractNodeService.execute(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> planNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                batchPlanNodeService.execute(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> generateBatchNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                executeGenerateBatch(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> validateBatchNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                batchValidationNodeService.execute(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> generateTestsNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                testGenerationNodeService.execute(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> frontendReviewNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                frontendReviewNodeService.execute(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> persistNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                persistenceNodeService.execute(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> runNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                verificationNodeService.run(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> evaluateNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                evaluationNodeService.execute(state.workflowData(), logger));
-        NodeAction<SoftwareStudioWorkflowGraphState> fixNode = state -> Map.of(SoftwareStudioWorkflowGraphState.DATA_KEY,
-                executeFix(state.workflowData(), logger));
+        NodeAction<SoftwareStudioWorkflowGraphState> pmNode = createNodeAction(requirementNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> architectNode = createNodeAction(architectureNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> contractNode = createNodeAction(contractNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> planNode = createNodeAction(batchPlanNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> generateBatchNode = createNodeAction(this::executeGenerateBatch, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> validateBatchNode = createNodeAction(batchValidationNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> generateTestsNode = createNodeAction(testGenerationNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> frontendReviewNode = createNodeAction(frontendReviewNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> persistNode = createNodeAction(persistenceNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> runNode = createNodeAction(verificationNodeService::run, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> evaluateNode = createNodeAction(evaluationNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> fixNode = createNodeAction(this::executeFix, logger);
 
         try {
             // 整体图的职责：

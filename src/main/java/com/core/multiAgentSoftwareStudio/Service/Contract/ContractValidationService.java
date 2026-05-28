@@ -7,6 +7,7 @@ import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ViewContract;
+import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -22,6 +23,12 @@ import java.util.regex.Pattern;
  */
 @Service
 public class ContractValidationService {
+
+    private final SourceCodePathService sourceCodePathService;
+
+    public ContractValidationService(SourceCodePathService sourceCodePathService) {
+        this.sourceCodePathService = sourceCodePathService;
+    }
 
     private static final Pattern PACKAGE_PATTERN = Pattern.compile("^\\s*package\\s+([a-zA-Z0-9_.]+)\\s*;", Pattern.MULTILINE);
     private static final Pattern PUBLIC_TYPE_PATTERN = Pattern.compile("\\bpublic\\s+(class|interface|record|enum)\\s+([A-Za-z0-9_]+)");
@@ -41,11 +48,11 @@ public class ContractValidationService {
 
         Map<String, SourceCode> fileIndex = new LinkedHashMap<>();
         for (SourceCode generatedFile : generatedFiles) {
-            fileIndex.put(normalize(generatedFile.filename()), generatedFile);
+            fileIndex.put(sourceCodePathService.normalizePath(generatedFile.filename()), generatedFile);
         }
 
         for (FileBlueprint blueprint : batch.files()) {
-            SourceCode generated = findMatchingFile(fileIndex, normalize(blueprint.targetPath()));
+            SourceCode generated = findMatchingFile(fileIndex, sourceCodePathService.normalizePath(blueprint.targetPath()));
             if (generated == null) {
                 warnings.add("Missing generated file for blueprint: " + blueprint.targetPath());
                 continue;
@@ -81,7 +88,7 @@ public class ContractValidationService {
         List<String> backendEndpoints = new ArrayList<>();
 
         for (SourceCode file : generatedFiles) {
-            String filename = normalize(file.filename());
+            String filename = sourceCodePathService.normalizePath(file.filename());
             String code = file.code() == null ? "" : file.code();
 
             if (filename.endsWith(".java")) {
@@ -117,7 +124,7 @@ public class ContractValidationService {
 
         String expectedName = Path.of(expectedPath).getFileName().toString();
         return fileIndex.values().stream()
-                .filter(source -> Path.of(normalize(source.filename())).getFileName().toString().equals(expectedName))
+                .filter(source -> Path.of(sourceCodePathService.normalizePath(source.filename())).getFileName().toString().equals(expectedName))
                 .findFirst()
                 .orElse(null);
     }
@@ -133,7 +140,7 @@ public class ContractValidationService {
         }
 
         String declaredPackagePath = matcher.group(1).replace('.', '/');
-        String normalized = normalize(filename);
+        String normalized = sourceCodePathService.normalizePath(filename);
         if (normalized.startsWith("src/main/java/")) {
             validatePackageAgainstSourceRoot(normalized, "src/main/java/", declaredPackagePath, matcher.group(1), warnings);
         } else if (normalized.startsWith("src/test/java/")) {
@@ -166,7 +173,7 @@ public class ContractValidationService {
             return;
         }
 
-        String expectedName = Path.of(normalize(filename)).getFileName().toString().replaceFirst("\\.[^.]+$", "");
+        String expectedName = Path.of(sourceCodePathService.normalizePath(filename)).getFileName().toString().replaceFirst("\\.[^.]+$", "");
         String actualName = matcher.group(2);
         if (!expectedName.equals(actualName)) {
             warnings.add("Public type name mismatch in " + filename + ": expected " + expectedName + " but found " + actualName);
@@ -199,7 +206,7 @@ public class ContractValidationService {
     private List<String> collectTemplateNames(List<SourceCode> generatedFiles) {
         List<String> templateNames = new ArrayList<>();
         for (SourceCode file : generatedFiles) {
-            String filename = normalize(file.filename());
+            String filename = sourceCodePathService.normalizePath(file.filename());
             if (filename.startsWith("src/main/resources/templates/") && filename.endsWith(".html")) {
                 templateNames.add(Path.of(filename).getFileName().toString().replaceFirst("\\.html$", ""));
             }
@@ -229,7 +236,7 @@ public class ContractValidationService {
             Matcher importMatcher = IMPORT_PATTERN.matcher(mainFile.code() == null ? "" : mainFile.code());
             while (importMatcher.find()) {
                 SourceCode importedType = javaTypes.get(importMatcher.group(1));
-                if (importedType != null && normalize(importedType.filename()).startsWith("src/test/java/")) {
+                if (importedType != null && sourceCodePathService.normalizePath(importedType.filename()).startsWith("src/test/java/")) {
                     warnings.add("Main source file " + mainFile.filename()
                             + " imports production-looking type from test source set: " + importedType.filename()
                             + ". Move that type to src/main/java or stop using it from main code.");
@@ -360,12 +367,12 @@ public class ContractValidationService {
             List<String> templateNames,
             List<String> warnings) {
         for (ViewContract view : views) {
-            String templatePath = normalize(view.templatePath());
+            String templatePath = sourceCodePathService.normalizePath(view.templatePath());
             String viewName = view.name() == null || view.name().isBlank()
                     ? Path.of(templatePath).getFileName().toString().replaceFirst("\\.html$", "")
                     : view.name();
             boolean templateExists = generatedFiles.stream()
-                    .map(file -> normalize(file.filename()))
+                    .map(file -> sourceCodePathService.normalizePath(file.filename()))
                     .anyMatch(filename -> filename.equals(templatePath));
             if (!templateExists && !templateNames.contains(viewName)) {
                 warnings.add("Contract view `" + viewName + "` expects template `" + templatePath
@@ -399,9 +406,9 @@ public class ContractValidationService {
      * 判断生成结果中是否包含指定项目相对路径的文件
      */
     private boolean containsFile(List<SourceCode> generatedFiles, String expectedPath) {
-        String normalizedExpectedPath = normalize(expectedPath);
+        String normalizedExpectedPath = sourceCodePathService.normalizePath(expectedPath);
         return generatedFiles.stream()
-                .map(file -> normalize(file.filename()))
+                .map(file -> sourceCodePathService.normalizePath(file.filename()))
                 .anyMatch(filename -> filename.equals(normalizedExpectedPath));
     }
 
@@ -409,8 +416,7 @@ public class ContractValidationService {
      * 判断文件是否属于前端资源
      */
     private boolean isFrontendAsset(String filename) {
-        String normalized = normalize(filename);
-        return normalized.endsWith(".html") || normalized.endsWith(".css") || normalized.endsWith(".js");
+        return sourceCodePathService.isFrontendFile(filename);
     }
 
     /**
@@ -449,12 +455,5 @@ public class ContractValidationService {
             return normalizeEndpoint(prefix);
         }
         return normalizeEndpoint(prefix + "/" + suffix);
-    }
-
-    /**
-     * 规范化项目内文件路径
-     */
-    private String normalize(String path) {
-        return path == null ? "unknown" : path.trim().replace("\\", "/");
     }
 }

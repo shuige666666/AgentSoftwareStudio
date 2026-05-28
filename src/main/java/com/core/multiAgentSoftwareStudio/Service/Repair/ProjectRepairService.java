@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
+import static com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService.safeValue;
+
 /**
  * 负责调用调试 Agent 分析编译、运行、测试错误，并将整文件修复结果同步到内存和磁盘。
  */
@@ -93,41 +95,10 @@ public class ProjectRepairService {
             String normalizedFilename = sourceCodePathService.normalizeGeneratedFilename(fix.filename(), fix.newCode());
             CodeFix normalizedFix = new CodeFix(normalizedFilename, fix.explanation(), fix.newCode());
             logger.accept("   - " + safeValue(fix.explanation(), "No explanation provided"));
-            updateCodesInMemory(codes, normalizedFix);
+            sourceCodePathService.applyCodeFix(codes, normalizedFilename, fix.newCode());
             normalizedFixes.add(normalizedFix);
         }
         workspaceService.applyFixesToDisk(projectPath, normalizedFixes, logger);
-    }
-
-    /**
-     * 用修复后的代码更新内存中的文件列表
-     */
-    private void updateCodesInMemory(List<SourceCode> codes, CodeFix fix) {
-        // debugger 返回修复结果后，先更新内存，再落盘。
-        // 后续重跑时用到的是修复后的最新版本，而不是旧代码。
-        boolean found = false;
-        String normalizedFixFilename = sourceCodePathService.normalizeGeneratedFilename(fix.filename(), fix.newCode());
-        String fixPureName = Path.of(normalizedFixFilename).getFileName().toString();
-
-        for (int i = 0; i < codes.size(); i++) {
-            String existingFilename = sourceCodePathService.normalizeGeneratedFilename(codes.get(i).filename(), codes.get(i).code());
-            if (existingFilename.equals(normalizedFixFilename)) {
-                codes.set(i, new SourceCode(existingFilename, codes.get(i).language(), fix.newCode()));
-                found = true;
-                break;
-            }
-            String existingPureName = Path.of(existingFilename).getFileName().toString();
-            if (existingPureName.equals(fixPureName)) {
-                codes.set(i, new SourceCode(existingFilename, codes.get(i).language(), fix.newCode()));
-                found = true;
-                break;
-            }
-        }
-
-        if (!found) {
-            codes.add(new SourceCode(normalizedFixFilename, sourceCodePathService.detectLanguageFromFilename(normalizedFixFilename),
-                    fix.newCode()));
-        }
     }
 
     /**
@@ -225,12 +196,5 @@ public class ProjectRepairService {
             }
         }
         return misplacedFiles;
-    }
-
-    /**
-     * 在值为空时返回兜底文本
-     */
-    private String safeValue(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
     }
 }

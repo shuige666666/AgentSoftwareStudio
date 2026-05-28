@@ -3,6 +3,7 @@ package com.core.multiAgentSoftwareStudio.Service.Contract;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
+import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -16,6 +17,12 @@ import java.util.Map;
 @Service
 public class ProjectContractMergeService {
 
+    private final SourceCodePathService sourceCodePathService;
+
+    public ProjectContractMergeService(SourceCodePathService sourceCodePathService) {
+        this.sourceCodePathService = sourceCodePathService;
+    }
+
     /**
      * 合并架构文件和契约补充文件，确保后续批次规划能看到 DTO、模板和前端资源
      */
@@ -27,13 +34,13 @@ public class ProjectContractMergeService {
         Map<String, FileBlueprint> filesByPath = new LinkedHashMap<>();
         if (structure.files() != null) {
             for (FileBlueprint file : structure.files()) {
-                filesByPath.put(normalize(file.targetPath()), file);
+                filesByPath.put(sourceCodePathService.normalizePath(file.targetPath()), file);
             }
         }
 
         if (contract != null && contract.additionalFiles() != null) {
             for (FileBlueprint file : contract.additionalFiles()) {
-                filesByPath.putIfAbsent(normalize(file.targetPath()), file);
+                filesByPath.putIfAbsent(sourceCodePathService.normalizePath(file.targetPath()), file);
             }
         }
 
@@ -42,15 +49,5 @@ public class ProjectContractMergeService {
                 structure.projectType(),
                 structure.mainClassName(),
                 new ArrayList<>(filesByPath.values()));
-    }
-
-    /**
-     * 统一文件路径格式，避免 Windows 反斜杠和重复空白导致去重失败
-     */
-    private String normalize(String path) {
-        if (path == null || path.isBlank()) {
-            return "unknown";
-        }
-        return path.trim().replace("\\", "/");
     }
 }
