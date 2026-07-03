@@ -59,8 +59,9 @@ public class DockerSandboxService {
         boolean needsPortBinding = false;
 
         if ("SPRING_BOOT".equals(projectType)) {
-            cmd = "mvn spring-boot:run";
-            needsPortBinding = true;
+            // spring-boot:run 启动成功后进程会常驻，验证节点会一直等待日志流结束。
+            // 这里用 package 做最终编译检查，让沙箱命令在成功后主动退出。
+            cmd = "mvn -DskipTests package";
         } else if ("PURE_JAVA_MAVEN".equals(projectType)) {
             cmd = "apt-get update && apt-get install -y xvfb && xvfb-run mvn compile exec:java -Dexec.mainClass=\""
                     + mainClass + "\"";

@@ -4,13 +4,14 @@ import com.core.multiAgentSoftwareStudio.Agent.ArchitectAgent;
 import com.core.multiAgentSoftwareStudio.Agent.ContractAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
 import com.core.multiAgentSoftwareStudio.Agent.FrontendReviewAgent;
+import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
+import com.core.multiAgentSoftwareStudio.Service.Metric.ObservedDeepSeekChatModel;
 import com.core.multiAgentSoftwareStudio.Agent.ProductManagerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.TestWriterAgent;
 import com.core.multiAgentSoftwareStudio.Agent.LangGraphPromptExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -32,32 +33,36 @@ public class AiConfig {
         @Bean
         @Primary // 告诉 Spring：如果有多个 ChatLanguageModel，优先用我这个
         ChatLanguageModel coderModel(@Value("${spring.ai.openai.api-key}") String apiKey, // 读取你配置文件里的 Key
-                        @Value("${spring.ai.openai.base-url}") String baseUrl // 读取你配置文件里的 BaseUrl
+                        @Value("${spring.ai.openai.base-url}") String baseUrl, // 读取你配置文件里的 BaseUrl
+                        ObjectMapper objectMapper,
+                        LlmUsageMetricsService metricsService
         ) {
 
-                return OpenAiChatModel.builder()
-                                .baseUrl(baseUrl) // DeepSeek 官方 API 地址
-                                .apiKey(apiKey)
-                                .modelName("deepseek-v4-flash") // 模型名称
-                                .temperature(0.1) // 写代码通常需要严谨，温度设低一点
-                                .timeout(Duration.ofMinutes(8)) // 代码生成和修复较慢，给更宽松的超时窗口
-                                .maxTokens(8192) // 供应商限制最大 8192，避免 invalid_parameter_error
-                                .logRequests(true) // 测试阶段开启日志，方便看它发了什么
-                                .logResponses(true) // 测试阶段开启日志，方便看它回了什么
-                                .build();
+                return new ObservedDeepSeekChatModel(
+                                apiKey,
+                                baseUrl,
+                                "deepseek-v4-flash",
+                                0.1,
+                                8192,
+                                Duration.ofMinutes(8),
+                                objectMapper,
+                                metricsService);
         }
 
         @Bean
         ChatLanguageModel logicModel(@Value("${spring.ai.openai.api-key}") String apiKey,
-                        @Value("${spring.ai.openai.base-url}") String baseUrl) {
-                return OpenAiChatModel.builder()
-                                .baseUrl(baseUrl)
-                                .apiKey(apiKey)
-                                .modelName("deepseek-v4-pro") // 逻辑能力最强，适合 PM 和 架构师
-                                .temperature(0.5) // 稍微高一点，增加规划的灵活性
-                                .timeout(Duration.ofMinutes(5)) // PM/架构阶段也可能因为长提示词或供应商排队触发默认超时
-                                .maxTokens(8192)
-                                .build();
+                        @Value("${spring.ai.openai.base-url}") String baseUrl,
+                        ObjectMapper objectMapper,
+                        LlmUsageMetricsService metricsService) {
+                return new ObservedDeepSeekChatModel(
+                                apiKey,
+                                baseUrl,
+                                "deepseek-v4-pro",
+                                0.5,
+                                8192,
+                                Duration.ofMinutes(5),
+                                objectMapper,
+                                metricsService);
         }
 
         /**

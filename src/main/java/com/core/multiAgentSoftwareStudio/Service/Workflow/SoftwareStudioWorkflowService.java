@@ -1,6 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow;
 
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
 import com.core.multiAgentSoftwareStudio.Service.Repair.ProjectRepairService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ArchitectureNodeService;
@@ -46,6 +47,7 @@ public class SoftwareStudioWorkflowService {
     private final VerificationNodeService verificationNodeService;
     private final EvaluationNodeService evaluationNodeService;
     private final ProjectRepairService projectRepairService;
+    private final LlmUsageMetricsService llmUsageMetricsService;
 
     /**
      * 注入软件工坊工作流所需的节点服务。
@@ -61,7 +63,8 @@ public class SoftwareStudioWorkflowService {
             PersistenceNodeService persistenceNodeService,
             VerificationNodeService verificationNodeService,
             EvaluationNodeService evaluationNodeService,
-            ProjectRepairService projectRepairService) {
+            ProjectRepairService projectRepairService,
+            LlmUsageMetricsService llmUsageMetricsService) {
         this.requirementNodeService = requirementNodeService;
         this.architectureNodeService = architectureNodeService;
         this.contractNodeService = contractNodeService;
@@ -74,6 +77,7 @@ public class SoftwareStudioWorkflowService {
         this.verificationNodeService = verificationNodeService;
         this.evaluationNodeService = evaluationNodeService;
         this.projectRepairService = projectRepairService;
+        this.llmUsageMetricsService = llmUsageMetricsService;
     }
 
     /**
@@ -83,11 +87,16 @@ public class SoftwareStudioWorkflowService {
         Consumer<String> logger = eventListener != null ? eventListener : message -> {
         };
         SoftwareStudioWorkflowData initialData = new SoftwareStudioWorkflowData(userRequest, maxRetries);
-        SoftwareStudioWorkflowData finalData = runWorkflowGraph(initialData, logger);
-        if (!finalData.success) {
-            logger.accept("Project generation finished without a clean pass after " + maxRetries + " repair attempts.");
+        llmUsageMetricsService.beginTask();
+        try {
+            SoftwareStudioWorkflowData finalData = runWorkflowGraph(initialData, logger);
+            if (!finalData.success) {
+                logger.accept("Project generation finished without a clean pass after " + maxRetries + " repair attempts.");
+            }
+            return finalData.codes;
+        } finally {
+            logger.accept(llmUsageMetricsService.formatSummary());
         }
-        return finalData.codes;
     }
 
     /**

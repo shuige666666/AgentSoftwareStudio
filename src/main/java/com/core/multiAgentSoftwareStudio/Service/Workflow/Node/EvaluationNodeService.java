@@ -33,11 +33,17 @@ public class EvaluationNodeService {
         data.pendingErrorType = null;
 
         String executionResult = data.executionResult == null ? "" : data.executionResult;
-        boolean hasError = executionResult.contains("Exception")
-                || executionResult.contains("Error")
-                || executionResult.contains("failed")
-                || executionResult.contains("error")
-                || executionResult.contains("javac: file not found");
+        boolean isDockerError = executionResult.startsWith("Docker Execution Error:");
+        boolean buildSucceeded = !isDockerError && executionResult.contains("BUILD SUCCESS");
+
+        boolean hasError;
+        if (isDockerError) {
+            hasError = true;
+        } else if (buildSucceeded) {
+            hasError = false;
+        } else {
+            hasError = hasBuildOrRuntimeError(executionResult);
+        }
 
         if (!hasError) {
             logger.accept("8. Runtime/compile stage passed, running tests.");
@@ -45,12 +51,14 @@ public class EvaluationNodeService {
             logger.accept("Test result:");
             logger.accept(data.testResult);
 
-            if (data.testResult.contains("Failures: 0") && data.testResult.contains("Errors: 0")) {
+            if (hasBuildOrRuntimeError(data.testResult)) {
+                data.pendingErrorType = determineErrorType(data.testResult);
+                data.pendingFixLog = data.testResult;
+            } else if (data.testResult.contains("Failures: 0") && data.testResult.contains("Errors: 0")) {
                 logger.accept("All generated tests passed.");
                 data.success = true;
                 return data;
-            }
-            if (data.testResult.contains("Failures:") || data.testResult.contains("Errors:")) {
+            } else if (data.testResult.contains("Failures:") || data.testResult.contains("Errors:")) {
                 data.pendingErrorType = "LOGIC ERROR (TEST FAILURE)";
                 data.pendingFixLog = data.testResult;
             } else {
@@ -78,14 +86,36 @@ public class EvaluationNodeService {
      */
     private String determineErrorType(String executionResult) {
         // 这里不是做非常精确的错误分类，而是为了决定后续 prompt 应该偏向哪种修复思路。
-        if (executionResult.contains("javac:") || executionResult.contains("Compilation failure")) {
+        if (executionResult.contains("COMPILATION ERROR")
+                || executionResult.contains("Compilation failure")
+                || executionResult.contains("javac:")
+                || executionResult.contains("cannot find symbol")
+                || executionResult.contains("symbol:")
+                || executionResult.contains("maven-compiler-plugin")) {
             return "COMPILATION ERROR";
         }
-        if (executionResult.contains("Tests run:") && executionResult.contains("Failures:")) {
+        if ((executionResult.contains("Tests run:") && executionResult.contains("Failures:"))
+                || executionResult.contains("There are test failures")) {
             if (!executionResult.contains("Failures: 0") || !executionResult.contains("Errors: 0")) {
                 return "LOGIC ERROR (TEST FAILURE)";
             }
         }
         return "RUNTIME ERROR";
+    }
+
+    private boolean hasBuildOrRuntimeError(String output) {
+        if (output == null || output.isBlank()) {
+            return false;
+        }
+        // 避免 "Errors: 0"、"No errors" 这类正常输出被宽泛的 Error/error 误判。
+        return output.contains("BUILD FAILURE")
+                || output.contains("COMPILATION ERROR")
+                || output.contains("Compilation failure")
+                || output.contains("javac:")
+                || output.contains("cannot find symbol")
+                || output.contains("symbol:")
+                || output.contains("Failed to execute")
+                || output.contains("Exception in thread")
+                || output.contains("There are test failures");
     }
 }
