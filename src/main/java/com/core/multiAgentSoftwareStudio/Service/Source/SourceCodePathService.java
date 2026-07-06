@@ -63,16 +63,17 @@ public class SourceCodePathService {
      * 适用于 BatchGeneration、TestGeneration 等场景，生成阶段文件名已经过规范化。
      */
     public void upsertSourceCode(List<SourceCode> codes, String filename, String code) {
-        String normalizedCandidate = normalizeGeneratedFilename(filename, code);
+        String safeCode = code == null ? "" : code;
+        String normalizedCandidate = normalizeGeneratedFilename(filename, safeCode);
         String language = detectLanguageFromFilename(normalizedCandidate);
         for (int i = 0; i < codes.size(); i++) {
             String normalizedExisting = normalizeGeneratedFilename(codes.get(i).filename(), codes.get(i).code());
             if (normalizedExisting.equals(normalizedCandidate)) {
-                codes.set(i, new SourceCode(normalizedCandidate, language, code));
+                codes.set(i, new SourceCode(normalizedCandidate, language, safeCode));
                 return;
             }
         }
-        codes.add(new SourceCode(normalizedCandidate, language, code));
+        codes.add(new SourceCode(normalizedCandidate, language, safeCode));
     }
 
     /**
@@ -80,23 +81,24 @@ public class SourceCodePathService {
      * 适用于 Debugger / FrontendReview 等修复场景，模型可能只返回类名而非完整路径。
      */
     public void applyCodeFix(List<SourceCode> codes, String filename, String code) {
-        String normalizedFixFilename = normalizeGeneratedFilename(filename, code);
+        String safeCode = code == null ? "" : code;
+        String normalizedFixFilename = normalizeGeneratedFilename(filename, safeCode);
         String fixPureName = Path.of(normalizedFixFilename).getFileName().toString();
         String language = detectLanguageFromFilename(normalizedFixFilename);
 
         for (int i = 0; i < codes.size(); i++) {
             String existingFilename = normalizeGeneratedFilename(codes.get(i).filename(), codes.get(i).code());
             if (existingFilename.equals(normalizedFixFilename)) {
-                codes.set(i, new SourceCode(existingFilename, codes.get(i).language(), code));
+                codes.set(i, new SourceCode(existingFilename, codes.get(i).language(), safeCode));
                 return;
             }
             String existingPureName = Path.of(existingFilename).getFileName().toString();
             if (existingPureName.equals(fixPureName)) {
-                codes.set(i, new SourceCode(existingFilename, codes.get(i).language(), code));
+                codes.set(i, new SourceCode(existingFilename, codes.get(i).language(), safeCode));
                 return;
             }
         }
-        codes.add(new SourceCode(normalizedFixFilename, language, code));
+        codes.add(new SourceCode(normalizedFixFilename, language, safeCode));
     }
 
     // ==================== 路径规范化 ====================

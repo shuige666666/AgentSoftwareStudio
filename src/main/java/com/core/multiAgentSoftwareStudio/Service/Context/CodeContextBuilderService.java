@@ -39,7 +39,7 @@ public class CodeContextBuilderService {
         StringBuilder builder = new StringBuilder();
         for (SourceCode code : codes) {
             builder.append("--- File: ").append(code.filename()).append(" ---\n");
-            builder.append(code.code()).append("\n\n");
+            builder.append(safeCode(code)).append("\n\n");
         }
         return builder.toString();
     }
@@ -66,7 +66,7 @@ public class CodeContextBuilderService {
                 continue;
             }
             builder.append("--- File: ").append(normalizeDependencyPath(dependencyCode.filename())).append(" ---\n");
-            builder.append(dependencyCode.code()).append("\n\n");
+            builder.append(safeCode(dependencyCode)).append("\n\n");
         }
 
         if (builder.isEmpty()) {
@@ -177,7 +177,7 @@ public class CodeContextBuilderService {
                 continue;
             }
             builder.append("--- File: ").append(code.filename()).append(" ---\n");
-            builder.append(code.code()).append("\n\n");
+            builder.append(safeCode(code)).append("\n\n");
         }
         return builder.toString();
     }
@@ -212,10 +212,10 @@ public class CodeContextBuilderService {
         for (SourceCode code : codes) {
             if (relatedFiles.contains(code.filename())) {
                 builder.append("--- File: ").append(code.filename()).append(" ---\n");
-                builder.append(code.code()).append("\n\n");
+                builder.append(safeCode(code)).append("\n\n");
             } else {
                 builder.append("--- File: ").append(code.filename()).append(" (Summary) ---\n");
-                builder.append(extractSummary(code.code())).append("\n\n");
+                builder.append(extractSummary(safeCode(code))).append("\n\n");
             }
         }
         return builder.toString();
@@ -227,6 +227,9 @@ public class CodeContextBuilderService {
     private String extractSummary(String code) {
         // 摘要策略尽量简单：只保留 package、public 类型声明、public 方法签名。
         // 目标不是完全还原代码，而是让修复阶段知道项目大致轮廓。
+        if (code == null || code.isBlank()) {
+            return "// [No summary available]";
+        }
         StringBuilder summary = new StringBuilder();
         String[] lines = code.split("\n");
         for (String line : lines) {
@@ -245,5 +248,9 @@ public class CodeContextBuilderService {
             return "// [No summary available]";
         }
         return summary.toString();
+    }
+
+    private String safeCode(SourceCode code) {
+        return code == null || code.code() == null ? "" : code.code();
     }
 }

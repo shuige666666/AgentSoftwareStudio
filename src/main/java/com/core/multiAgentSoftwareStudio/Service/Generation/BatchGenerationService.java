@@ -121,7 +121,7 @@ public class BatchGenerationService {
         String language = rawResult != null && rawResult.language() != null
                 ? rawResult.language()
                 : sourceCodePathService.detectLanguageFromFilename(targetPath);
-        String code = rawResult == null ? "" : rawResult.code();
+        String code = rawResult == null || rawResult.code() == null ? "" : rawResult.code();
         return new SourceCode(targetPath, language, code);
     }
 
