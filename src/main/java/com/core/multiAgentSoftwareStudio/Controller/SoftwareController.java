@@ -3,6 +3,10 @@ package com.core.multiAgentSoftwareStudio.Controller;
 import com.core.multiAgentSoftwareStudio.Service.SoftwareStudioService;
 import com.core.multiAgentSoftwareStudio.Pojo.Result.Result;
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkCase;
+import com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkRunReport;
+import com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkRunRequest;
+import com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkRunnerService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -22,6 +26,7 @@ import java.util.concurrent.Executors;
 public class SoftwareController {
 
     private final SoftwareStudioService softwareStudioService;
+    private final BenchmarkRunnerService benchmarkRunnerService;
 
     @PostMapping("/chat")
     public Result<List<SourceCode>> chat(@RequestBody Map<String, String> request) {
@@ -60,5 +65,21 @@ public class SoftwareController {
         });
 
         return emitter;
+    }
+
+    /**
+     * 查看基准任务，不会调用 LLM。
+     */
+    @PostMapping("/benchmarks/cases")
+    public Result<List<BenchmarkCase>> benchmarkCases() {
+        return Result.success(benchmarkRunnerService.listCases());
+    }
+
+    /**
+     * 显式执行真实 LLM 基准任务；该调用会消耗模型额度并运行生成项目的验证流程。
+     */
+    @PostMapping("/benchmarks/run")
+    public Result<BenchmarkRunReport> runBenchmarks(@RequestBody(required = false) BenchmarkRunRequest request) {
+        return Result.success(benchmarkRunnerService.run(request));
     }
 }

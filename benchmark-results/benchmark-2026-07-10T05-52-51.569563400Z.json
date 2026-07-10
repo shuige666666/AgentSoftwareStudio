@@ -1,0 +1,124 @@
+{
+  "startedAt" : "2026-07-10T05:52:51.569563400Z",
+  "finishedAt" : "2026-07-10T06:14:51.769790100Z",
+  "cases" : [ {
+    "caseId" : "calculator-web-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Simple_Calculator_Web_Application_20260710_135740",
+    "elapsedMillis" : 322383,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=[INFO] Scanning for projects... [INFO] [INFO] -----------------------< com.example:calculator >----------------------- [INFO] Building calculator 1.0.0 [INFO] --------------------------------[ jar ]--------------------------------- [INFO] [..."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : false,
+        "evidence" : "No generated JUnit test source was found."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      } ]
+    },
+    "usage" : {
+      "calls" : 16,
+      "successfulCalls" : 16,
+      "failedCalls" : 0,
+      "durationMillis" : 310201,
+      "inputCacheHitTokens" : 13568,
+      "inputCacheMissTokens" : 15541,
+      "outputTokens" : 28114,
+      "totalTokens" : 57223
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "task-api-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : true,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Task_Manager_REST_API_20260710_140124",
+    "elapsedMillis" : 368390,
+    "quality" : {
+      "passed" : true,
+      "findings" : [ {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      } ]
+    },
+    "usage" : {
+      "calls" : 14,
+      "successfulCalls" : 14,
+      "failedCalls" : 0,
+      "durationMillis" : 227776,
+      "inputCacheHitTokens" : 11392,
+      "inputCacheMissTokens" : 23888,
+      "outputTokens" : 18063,
+      "totalTokens" : 53343
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "snake-websocket-basic",
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\贪吃蛇网页游戏_20260710_141137",
+    "elapsedMillis" : 629426,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=[INFO] Scanning for projects... [INFO] [INFO] --------------------< com.example.snake:snake-game >-------------------- [INFO] Building 贪吃蛇网页游戏 1.0.0 [INFO] --------------------------------[ jar ]--------------------------------- [INFO] [INF..."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      } ]
+    },
+    "usage" : {
+      "calls" : 24,
+      "successfulCalls" : 24,
+      "failedCalls" : 0,
+      "durationMillis" : 581483,
+      "inputCacheHitTokens" : 29696,
+      "inputCacheMissTokens" : 44649,
+      "outputTokens" : 64561,
+      "totalTokens" : 138906
+    },
+    "workflowError" : null
+  } ],
+  "platformSuccessCount" : 2,
+  "independentQualityPassCount" : 1,
+  "falseSuccessCount" : 1,
+  "falseSuccessRate" : 0.5,
+  "reportPath" : "C:\\My Space\\Other Projects\\agent 软件开发小组\\agent-software-studio\\benchmark-results\\benchmark-2026-07-10T05-52-51.569563400Z.json"
+}

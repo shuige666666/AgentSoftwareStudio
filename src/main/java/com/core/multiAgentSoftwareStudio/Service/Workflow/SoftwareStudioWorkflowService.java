@@ -84,6 +84,13 @@ public class SoftwareStudioWorkflowService {
      * 启动完整的项目生成工作流
      */
     public List<SourceCode> generateProject(String userRequest, Consumer<String> eventListener, int maxRetries) {
+        return generateProjectWithResult(userRequest, eventListener, maxRetries).codes();
+    }
+
+    /**
+     * 执行真实工作流，并返回质量基准所需的平台结论、验证证据和产物位置。
+     */
+    public WorkflowExecutionResult generateProjectWithResult(String userRequest, Consumer<String> eventListener, int maxRetries) {
         Consumer<String> logger = eventListener != null ? eventListener : message -> {
         };
         SoftwareStudioWorkflowData initialData = new SoftwareStudioWorkflowData(userRequest, maxRetries);
@@ -93,7 +100,16 @@ public class SoftwareStudioWorkflowService {
             if (!finalData.success) {
                 logger.accept("Project generation finished without a clean pass after " + maxRetries + " repair attempts.");
             }
-            return finalData.codes;
+            return new WorkflowExecutionResult(
+                    List.copyOf(finalData.codes),
+                    finalData.success,
+                    finalData.projectPath,
+                    finalData.executionResult,
+                    finalData.testResult,
+                    List.copyOf(finalData.validationWarnings),
+                    finalData.pendingErrorType,
+                    finalData.currentAttempt,
+                    llmUsageMetricsService.snapshot());
         } finally {
             logger.accept(llmUsageMetricsService.formatSummary());
         }
