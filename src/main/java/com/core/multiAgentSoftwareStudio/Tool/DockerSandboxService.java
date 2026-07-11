@@ -46,6 +46,18 @@ public class DockerSandboxService {
     }
 
     /**
+     * 轻量检查本地 Docker Daemon 是否可访问；检查失败只返回 false，不影响主应用启动。
+     */
+    public boolean isDockerAvailable() {
+        try {
+            dockerClient.pingCmd().exec();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * 运行指定路径下的项目代码
      * 
      * @param projectPath 已经持久化到本地的项目根路径
@@ -85,6 +97,96 @@ public class DockerSandboxService {
             cmd = "find . -name \"*.java\" > sources.txt && javac -d . @sources.txt && java -cp . org.junit.runner.JUnitCore $(find . -name \"*Test.class\" | sed 's/\\.\\///;s/\\.class//;s/\\//./g')";
         }
         return executeInDocker(projectPath, projectType, cmd, false);
+    }
+
+    /**
+     * 启动一个常驻的 Spring Boot 预览容器，只负责创建和启动，不等待应用进程退出。
+     */
+    public String startSpringBootPreview(Path projectPath, int hostPort) {
+        if (projectPath == null || !Files.isDirectory(projectPath)) {
+            throw new IllegalArgumentException("项目路径不存在：" + projectPath);
+        }
+
+        String imageName = "maven:3.8.5-openjdk-17-slim";
+        ensureImageExists(imageName);
+
+        List<Bind> binds = new ArrayList<>();
+        binds.add(new Bind(projectPath.toAbsolutePath().toString(), new Volume("/app")));
+        Path hostMavenRepo = Paths.get(System.getProperty("user.home"), ".m2", "repository");
+        binds.add(new Bind(hostMavenRepo.toAbsolutePath().toString(), new Volume("/root/.m2/repository")));
+
+        HostConfig hostConfig = HostConfig.newHostConfig()
+                .withBinds(binds)
+                .withPortBindings(PortBinding.parse(hostPort + ":8080"))
+                .withAutoRemove(false);
+
+        CreateContainerResponse container = dockerClient.createContainerCmd(imageName)
+                .withWorkingDir("/app")
+                .withHostConfig(hostConfig)
+                .withExposedPorts(ExposedPort.tcp(8080))
+                .withCmd("sh", "-c", "mvn spring-boot:run")
+                .exec();
+        try {
+            dockerClient.startContainerCmd(container.getId()).exec();
+            return container.getId();
+        } catch (RuntimeException e) {
+            dockerClient.removeContainerCmd(container.getId()).withForce(true).exec();
+            throw e;
+        }
+    }
+
+    /**
+     * 获取预览容器截至当前的完整日志，用于判断 Spring Boot 是否已经就绪。
+     */
+    public String getContainerLogs(String containerId) {
+        StringBuilder logs = new StringBuilder();
+        try {
+            dockerClient.logContainerCmd(containerId)
+                    .withStdOut(true)
+                    .withStdErr(true)
+                    .withTailAll()
+                    .exec(new com.github.dockerjava.api.async.ResultCallback.Adapter<Frame>() {
+                        @Override
+                        public void onNext(Frame item) {
+                            logs.append(new String(item.getPayload(), StandardCharsets.UTF_8));
+                        }
+                    }).awaitCompletion(5, TimeUnit.SECONDS);
+            return logs.toString();
+        } catch (Exception e) {
+            return "无法读取容器日志：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 检查容器是否仍在运行；容器不存在时同样返回 false。
+     */
+    public boolean isContainerRunning(String containerId) {
+        try {
+            return Boolean.TRUE.equals(dockerClient.inspectContainerCmd(containerId).exec().getState().getRunning());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 停止并强制删除预览容器，确保异常启动也能释放端口。
+     */
+    public void stopAndRemoveContainer(String containerId) {
+        if (containerId == null || containerId.isBlank()) {
+            return;
+        }
+        try {
+            if (isContainerRunning(containerId)) {
+                dockerClient.stopContainerCmd(containerId).withTimeout(5).exec();
+            }
+        } catch (Exception ignored) {
+            // 容器可能已自行退出，仍继续尝试删除。
+        }
+        try {
+            dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+        } catch (Exception ignored) {
+            // 重复停止保持幂等，容器不存在时无需继续抛错。
+        }
     }
 
     private String executeInDocker(Path projectPath, String projectType, String cmd, boolean needsPortBinding) {

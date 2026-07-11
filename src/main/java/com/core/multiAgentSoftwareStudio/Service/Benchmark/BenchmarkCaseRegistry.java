@@ -33,7 +33,7 @@ public class BenchmarkCaseRegistry {
                         "task-api-basic",
                         "任务管理 REST API",
                         """
-                                请生成一个 Java 17、Spring Boot 的内存任务管理 REST API。
+                                请生成一个 Java 17、Spring Boot 的任务管理 REST API。
                                 支持创建、查询列表、按 id 查询和完成任务；使用构造器注入；
                                 必须提供 JUnit 5 测试和至少一个 Spring Boot 上下文启动测试。
                                 所有接口路径、请求字段和响应字段需要保持一致。
@@ -48,7 +48,35 @@ public class BenchmarkCaseRegistry {
                                 必须为核心规则、WebSocket 协议和 Spring Boot 上下文提供 JUnit 5 测试。
                                 前端、后端和测试必须使用同一份消息契约。
                                 """,
-                        SPRING_BASELINE_GATES));
+                        SPRING_BASELINE_GATES),
+                new BenchmarkCase(
+                        "url-shortener-basic",
+                        "短链接服务",
+                        """
+                                请生成一个 Java 17、Spring Boot 的短链接服务。
+                                支持生成短链接、访问短链接和查询链接信息。
+                                需要处理无效链接，并提供必要的自动化测试。
+                                """,
+                        SPRING_BASELINE_GATES),
+                new BenchmarkCase(
+                        "poll-system-basic",
+                        "在线投票系统",
+                        """
+                                请生成一个 Java 17、Spring Boot 的在线投票系统。
+                                支持创建投票、用户投票和查看投票结果。
+                                需要防止用户重复投票，并提供必要的测试。
+                                """,
+                        SPRING_BASELINE_GATES),
+                new BenchmarkCase(
+                        "blog-system-basic",
+                        "简单博客系统",
+                        """
+                                请生成一个 Java 17、Spring Boot 的简单博客系统。
+                                支持文章的发布、修改、删除、查询和评论功能。
+                                提供可使用的 Web 页面和必要的自动化测试。
+                                """,
+                        SPRING_BASELINE_GATES)
+        );
     }
 
     public List<BenchmarkCase> select(List<String> ids) {

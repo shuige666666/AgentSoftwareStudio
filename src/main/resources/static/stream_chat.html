@@ -246,6 +246,59 @@
             color: #94a3b8;
             text-align: right;
         }
+        .preview-panel {
+            display: none;
+            grid-template-columns: minmax(0, 1fr) auto auto;
+            gap: 12px;
+            align-items: center;
+            margin-top: 18px;
+            padding: 14px 16px;
+            border: 1px solid #285263;
+            border-radius: 8px;
+            background: linear-gradient(105deg, rgba(20, 184, 166, 0.12), rgba(15, 23, 42, 0.96) 55%);
+        }
+        .preview-panel.visible {
+            display: grid;
+        }
+        .preview-copy strong {
+            display: block;
+            color: #ccfbf1;
+            font-size: 14px;
+            letter-spacing: 0.02em;
+        }
+        .preview-copy span {
+            display: block;
+            margin-top: 4px;
+            color: #94a3b8;
+            font-size: 13px;
+        }
+        .preview-panel button,
+        .preview-link {
+            width: auto;
+            min-width: 116px;
+            margin: 0;
+            padding: 9px 14px;
+            font-size: 14px;
+            text-align: center;
+            text-decoration: none;
+        }
+        .preview-link {
+            display: none;
+            border: 1px solid #2dd4bf;
+            border-radius: 6px;
+            color: #99f6e4;
+            background: rgba(13, 148, 136, 0.16);
+        }
+        .preview-link.visible {
+            display: inline-block;
+        }
+        .preview-stop {
+            display: none !important;
+            background: #9f1239;
+        }
+        .preview-stop.visible {
+            display: block !important;
+        }
         @media (max-width: 720px) {
             body {
                 padding: 14px;
@@ -256,6 +309,15 @@
             .log-line {
                 grid-template-columns: 62px minmax(0, 1fr);
                 gap: 8px;
+            }
+            .preview-panel,
+            .preview-panel.visible {
+                grid-template-columns: 1fr;
+            }
+            .preview-panel button,
+            .preview-link {
+                width: 100%;
+                box-sizing: border-box;
             }
         }
     </style>
@@ -269,12 +331,25 @@
         </div>
         
         <button id="sendBtn" onclick="startStream()">Generate Project</button>
+
+        <div id="previewPanel" class="preview-panel">
+            <div class="preview-copy">
+                <strong>Spring Boot Preview</strong>
+                <span id="previewMessage">Project ready for an isolated preview run.</span>
+            </div>
+            <button id="previewBtn" onclick="startPreview()">Start Preview</button>
+            <a id="previewLink" class="preview-link" href="#" target="_blank" rel="noopener">Open localhost:8081</a>
+            <button id="previewStopBtn" class="preview-stop" onclick="stopPreview()">Stop Preview</button>
+        </div>
         
         <div id="status" class="status"></div>
         <div id="output"></div>
     </div>
 
     <script>
+        let currentProjectId = null;
+        let previewPollTimer = null;
+
         async function startStream() {
             const messageInput = document.getElementById('messageInput');
             const sendBtn = document.getElementById('sendBtn');
@@ -291,6 +366,7 @@
             sendBtn.disabled = true;
             outputDiv.innerHTML = '<div class="empty-output">Waiting for workflow output...</div>';
             statusDiv.textContent = 'Connecting...';
+            resetPreview();
 
             try {
                 const response = await fetch('/api/SoftwareStudio/stream-chat', {
@@ -310,6 +386,7 @@
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
+                let currentEvent = 'message';
 
                 while (true) {
                     const { value, done } = await reader.read();
@@ -323,12 +400,21 @@
                     buffer = lines.pop();
                     
                     for (const line of lines) {
-                        if (line.trim() === '') continue;
-                        
+                        if (line.trim() === '') {
+                            currentEvent = 'message';
+                            continue;
+                        }
+                        if (line.startsWith('event:')) {
+                            currentEvent = line.substring(6).trim();
+                            continue;
+                        }
                         if (line.startsWith('data:')) {
-                            // Remove 'data:' prefix and trim leading space if present
-                            const data = line.substring(5);
-                            appendLogLine(outputDiv, data);
+                            const data = line.substring(5).trimStart();
+                            if (currentEvent === 'generation-complete') {
+                                handleGenerationComplete(JSON.parse(data));
+                            } else {
+                                appendLogLine(outputDiv, data);
+                            }
                         }
                     }
                     // Auto-scroll to bottom
@@ -343,6 +429,101 @@
             } finally {
                 sendBtn.disabled = false;
             }
+        }
+
+        function handleGenerationComplete(result) {
+            if (!result.success || !result.previewAvailable || !result.projectId) {
+                return;
+            }
+            currentProjectId = result.projectId;
+            document.getElementById('previewPanel').classList.add('visible');
+            document.getElementById('previewMessage').textContent = 'Build passed. Preview is available as an optional action.';
+        }
+
+        async function startPreview() {
+            if (!currentProjectId) return;
+            const button = document.getElementById('previewBtn');
+            button.disabled = true;
+            setPreviewMessage('Starting Maven and waiting for Spring Boot readiness...');
+            try {
+                const result = await requestPreview('POST');
+                renderPreviewStatus(result);
+                beginPreviewPolling();
+            } catch (error) {
+                setPreviewMessage(error.message);
+                button.disabled = false;
+            }
+        }
+
+        async function stopPreview() {
+            if (!currentProjectId) return;
+            clearPreviewPolling();
+            try {
+                const result = await requestPreview('DELETE');
+                renderPreviewStatus(result);
+            } catch (error) {
+                setPreviewMessage(error.message);
+            }
+        }
+
+        async function requestPreview(method = 'GET') {
+            const response = await fetch(`/api/SoftwareStudio/projects/${encodeURIComponent(currentProjectId)}/preview`, { method });
+            const payload = await response.json();
+            if (!response.ok || payload.code !== 1) {
+                throw new Error(payload.msg || `Preview request failed (${response.status})`);
+            }
+            return payload.data;
+        }
+
+        function beginPreviewPolling() {
+            clearPreviewPolling();
+            previewPollTimer = setInterval(async () => {
+                try {
+                    const result = await requestPreview();
+                    renderPreviewStatus(result);
+                    if (result.state !== 'STARTING') clearPreviewPolling();
+                } catch (error) {
+                    setPreviewMessage(error.message);
+                    clearPreviewPolling();
+                }
+            }, 1500);
+        }
+
+        function renderPreviewStatus(result) {
+            const startButton = document.getElementById('previewBtn');
+            const stopButton = document.getElementById('previewStopBtn');
+            const link = document.getElementById('previewLink');
+            setPreviewMessage(result.message || result.state);
+
+            const running = result.state === 'RUNNING';
+            const starting = result.state === 'STARTING';
+            startButton.style.display = running ? 'none' : 'block';
+            startButton.disabled = starting || running;
+            startButton.textContent = starting ? 'Starting...' : (running ? 'Preview Running' : 'Start Preview');
+            stopButton.classList.toggle('visible', running || starting);
+            link.classList.toggle('visible', running);
+            if (running && result.url) link.href = result.url;
+        }
+
+        function setPreviewMessage(message) {
+            document.getElementById('previewMessage').textContent = message;
+        }
+
+        function clearPreviewPolling() {
+            if (previewPollTimer) clearInterval(previewPollTimer);
+            previewPollTimer = null;
+        }
+
+        function resetPreview() {
+            clearPreviewPolling();
+            currentProjectId = null;
+            document.getElementById('previewPanel').classList.remove('visible');
+            document.getElementById('previewLink').classList.remove('visible');
+            document.getElementById('previewStopBtn').classList.remove('visible');
+            const button = document.getElementById('previewBtn');
+            button.style.display = 'block';
+            button.disabled = false;
+            button.textContent = 'Start Preview';
         }
 
         function appendLogLine(outputDiv, rawText) {

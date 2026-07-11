@@ -2,6 +2,7 @@ package com.core.multiAgentSoftwareStudio.Service;
 
 import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.WorkflowExecutionResult;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -32,8 +33,8 @@ public class SoftwareStudioService {
     /**
      * 以流式日志回调的方式执行项目生成流程
      */
-    public void generateProjectStream(String userRequest, Consumer<String> eventListener) {
-        workflowService.generateProject(userRequest, log -> {
+    public WorkflowExecutionResult generateProjectStream(String userRequest, Consumer<String> eventListener) {
+        return workflowService.generateProjectWithResult(userRequest, log -> {
             System.out.println(log);
             if (eventListener != null) {
                 eventListener.accept(log);
