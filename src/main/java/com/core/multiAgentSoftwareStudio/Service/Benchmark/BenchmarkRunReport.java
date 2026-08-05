@@ -8,6 +8,8 @@ import java.util.List;
 public record BenchmarkRunReport(
         String startedAt,
         String finishedAt,
+        List<BenchmarkModelInfo> models,
+        BenchmarkRunConfiguration benchmarkConfig,
         List<BenchmarkCaseResult> cases,
         int platformSuccessCount,
         int independentQualityPassCount,

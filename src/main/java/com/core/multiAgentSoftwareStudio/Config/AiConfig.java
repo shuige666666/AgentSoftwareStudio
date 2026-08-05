@@ -26,6 +26,17 @@ import java.time.Duration;
 @Configuration
 public class AiConfig {
 
+        // 基准报告与模型实例共用这组常量，防止记录参数与真实调用参数偏离。
+        public static final String CODER_MODEL_NAME = "deepseek-v4-flash";
+        public static final double CODER_MODEL_TEMPERATURE = 0.1;
+        public static final int CODER_MODEL_MAX_OUTPUT_TOKENS = 8192;
+        public static final Duration CODER_MODEL_TIMEOUT = Duration.ofMinutes(8);
+
+        public static final String LOGIC_MODEL_NAME = "deepseek-v4-pro";
+        public static final double LOGIC_MODEL_TEMPERATURE = 0.5;
+        public static final int LOGIC_MODEL_MAX_OUTPUT_TOKENS = 8192;
+        public static final Duration LOGIC_MODEL_TIMEOUT = Duration.ofMinutes(5);
+
         /**
          * 模型配置
          * （同配置文件：OpenAI 协议）
@@ -41,10 +52,10 @@ public class AiConfig {
                 return new ObservedDeepSeekChatModel(
                                 apiKey,
                                 baseUrl,
-                                "deepseek-v4-flash",
-                                0.1,
-                                8192,
-                                Duration.ofMinutes(8),
+                                CODER_MODEL_NAME,
+                                CODER_MODEL_TEMPERATURE,
+                                CODER_MODEL_MAX_OUTPUT_TOKENS,
+                                CODER_MODEL_TIMEOUT,
                                 objectMapper,
                                 metricsService);
         }
@@ -57,10 +68,10 @@ public class AiConfig {
                 return new ObservedDeepSeekChatModel(
                                 apiKey,
                                 baseUrl,
-                                "deepseek-v4-pro",
-                                0.5,
-                                8192,
-                                Duration.ofMinutes(5),
+                                LOGIC_MODEL_NAME,
+                                LOGIC_MODEL_TEMPERATURE,
+                                LOGIC_MODEL_MAX_OUTPUT_TOKENS,
+                                LOGIC_MODEL_TIMEOUT,
                                 objectMapper,
                                 metricsService);
         }

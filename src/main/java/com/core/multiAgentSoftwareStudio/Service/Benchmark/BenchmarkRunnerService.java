@@ -1,18 +1,22 @@
 package com.core.multiAgentSoftwareStudio.Service.Benchmark;
 
+import com.core.multiAgentSoftwareStudio.Config.AiConfig;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.WorkflowExecutionResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -31,15 +35,18 @@ public class BenchmarkRunnerService {
     private final BenchmarkQualityEvaluator qualityEvaluator;
     private final SoftwareStudioWorkflowService workflowService;
     private final ObjectMapper objectMapper;
+    private final String modelBaseUrl;
 
     public BenchmarkRunnerService(BenchmarkCaseRegistry caseRegistry,
             BenchmarkQualityEvaluator qualityEvaluator,
             SoftwareStudioWorkflowService workflowService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            @Value("${spring.ai.openai.base-url}") String modelBaseUrl) {
         this.caseRegistry = caseRegistry;
         this.qualityEvaluator = qualityEvaluator;
         this.workflowService = workflowService;
         this.objectMapper = objectMapper;
+        this.modelBaseUrl = modelBaseUrl;
     }
 
     public List<BenchmarkCase> listCases() {
@@ -49,8 +56,14 @@ public class BenchmarkRunnerService {
     public BenchmarkRunReport run(BenchmarkRunRequest request) {
         List<BenchmarkCase> cases = caseRegistry.select(request == null ? List.of() : request.caseIds());
         int maxRetries = request == null || request.maxRetries() == null ? 2 : Math.max(1, request.maxRetries());
+        Map<String, String> releaseLabels = request == null || request.modelReleaseLabels() == null
+                ? Map.of()
+                : request.modelReleaseLabels();
         Instant started = Instant.now();
         List<BenchmarkCaseResult> results = new ArrayList<>();
+        List<BenchmarkModelInfo> models = modelInfo(releaseLabels);
+        BenchmarkRunConfiguration benchmarkConfig = new BenchmarkRunConfiguration(
+                cases.stream().map(BenchmarkCase::id).toList(), maxRetries, resolveGitCommit());
 
         System.out.println("[Benchmark] 质量基准测试进度：0/" + cases.size() + "，准备执行。");
         for (int index = 0; index < cases.size(); index++) {
@@ -67,17 +80,19 @@ public class BenchmarkRunnerService {
         Double falseSuccessRate = platformSuccessCount == 0 ? null : (double) falseSuccessCount / platformSuccessCount;
 
         BenchmarkRunReport withoutPath = new BenchmarkRunReport(
-                started.toString(), finished.toString(), List.copyOf(results), platformSuccessCount,
+                started.toString(), finished.toString(), models, benchmarkConfig, List.copyOf(results), platformSuccessCount,
                 independentPassCount, falseSuccessCount, falseSuccessRate, null);
         String reportPath = reportPathFor(started).toAbsolutePath().toString();
         persist(new BenchmarkRunReport(
-                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.cases(),
+                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.models(), withoutPath.benchmarkConfig(),
+                withoutPath.cases(),
                 withoutPath.platformSuccessCount(), withoutPath.independentQualityPassCount(),
                 withoutPath.falseSuccessCount(), withoutPath.falseSuccessRate(), reportPath),
                 Path.of(reportPath));
         System.out.println("[Benchmark] 质量基准测试进度：" + cases.size() + "/" + cases.size() + "，全部任务已完成。");
         return new BenchmarkRunReport(
-                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.cases(),
+                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.models(), withoutPath.benchmarkConfig(),
+                withoutPath.cases(),
                 withoutPath.platformSuccessCount(), withoutPath.independentQualityPassCount(),
                 withoutPath.falseSuccessCount(), withoutPath.falseSuccessRate(), reportPath);
     }
@@ -138,6 +153,66 @@ public class BenchmarkRunnerService {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to persist benchmark report", e);
         }
+    }
+
+    /**
+     * 从 AiConfig 的实际运行常量生成模型快照，避免报告与真实调用参数分别维护。
+     */
+    private List<BenchmarkModelInfo> modelInfo(Map<String, String> releaseLabels) {
+        String provider = providerFrom(modelBaseUrl);
+        return List.of(
+                new BenchmarkModelInfo(
+                        "coderModel", AiConfig.CODER_MODEL_NAME, null, provider, modelBaseUrl,
+                        AiConfig.CODER_MODEL_TEMPERATURE, AiConfig.CODER_MODEL_MAX_OUTPUT_TOKENS,
+                        AiConfig.CODER_MODEL_TIMEOUT.toSeconds(), "unknown",
+                        normalizeNullable(releaseLabels.get("coderModel"))),
+                new BenchmarkModelInfo(
+                        "logicModel", AiConfig.LOGIC_MODEL_NAME, null, provider, modelBaseUrl,
+                        AiConfig.LOGIC_MODEL_TEMPERATURE, AiConfig.LOGIC_MODEL_MAX_OUTPUT_TOKENS,
+                        AiConfig.LOGIC_MODEL_TIMEOUT.toSeconds(), "unknown",
+                        normalizeNullable(releaseLabels.get("logicModel"))));
+    }
+
+    /**
+     * 优先记录供应商接口域名；非标准地址也不阻断基准任务。
+     */
+    private String providerFrom(String baseUrl) {
+        try {
+            String host = URI.create(baseUrl).getHost();
+            return host == null || host.isBlank() ? "unknown" : host;
+        } catch (IllegalArgumentException ignored) {
+            return "unknown";
+        }
+    }
+
+    /**
+     * 读取当前 Git 提交号；在无 Git 环境的部署包中保留 unknown，不影响测试执行。
+     */
+    private String resolveGitCommit() {
+        String environmentCommit = normalizeNullable(System.getenv("GIT_COMMIT"));
+        if (environmentCommit != null) {
+            return environmentCommit;
+        }
+        try {
+            Process process = new ProcessBuilder("git", "rev-parse", "HEAD")
+                    .redirectErrorStream(true)
+                    .start();
+            if (!process.waitFor(2, TimeUnit.SECONDS) || process.exitValue() != 0) {
+                process.destroyForcibly();
+                return "unknown";
+            }
+            String commit = normalizeNullable(new String(process.getInputStream().readAllBytes()).trim());
+            return commit == null ? "unknown" : commit;
+        } catch (IOException e) {
+            return "unknown";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "unknown";
+        }
+    }
+
+    private String normalizeNullable(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private long elapsedMillis(long startedNanos) {
