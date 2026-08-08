@@ -9,8 +9,8 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunConfiguration;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunRequest;
-import com.core.multiAgentSoftwareStudio.Model.Metric.LlmUsageSnapshot;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
+import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -52,17 +52,20 @@ public class BenchmarkRunnerService {
     private final BenchmarkCaseRegistry caseRegistry;
     private final BenchmarkQualityEvaluator qualityEvaluator;
     private final SoftwareStudioWorkflowService workflowService;
+    private final LlmUsageMetricsService llmUsageMetricsService;
     private final ObjectMapper objectMapper;
     private final String modelBaseUrl;
 
     public BenchmarkRunnerService(BenchmarkCaseRegistry caseRegistry,
             BenchmarkQualityEvaluator qualityEvaluator,
             SoftwareStudioWorkflowService workflowService,
+            LlmUsageMetricsService llmUsageMetricsService,
             ObjectMapper objectMapper,
             @Value("${spring.ai.openai.base-url}") String modelBaseUrl) {
         this.caseRegistry = caseRegistry;
         this.qualityEvaluator = qualityEvaluator;
         this.workflowService = workflowService;
+        this.llmUsageMetricsService = llmUsageMetricsService;
         this.objectMapper = objectMapper;
         this.modelBaseUrl = modelBaseUrl;
     }
@@ -146,7 +149,7 @@ public class BenchmarkRunnerService {
             BenchmarkQualityResult quality = new BenchmarkQualityResult(false, List.of());
             return new BenchmarkCaseResult(
                     benchmarkCase.id(), false, false, "NOT_REVIEWED", null, elapsedMillis(started), quality,
-                    new LlmUsageSnapshot(0, 0, 0, 0, 0, 0, 0, 0, false),
+                    llmUsageMetricsService.snapshot(),
                     e.getClass().getSimpleName() + ": " + safeMessage(e));
         } finally {
             // 当前任务结束后停止心跳线程，避免后续任务的控制台进度被旧任务重复刷写。
@@ -187,12 +190,12 @@ public class BenchmarkRunnerService {
         models.put(AiConfig.CODER_MODEL_BEAN_NAME, new BenchmarkModelInfo(
                 AiConfig.CODER_MODEL_NAME, null, provider, modelBaseUrl,
                 AiConfig.CODER_MODEL_TEMPERATURE, AiConfig.CODER_MODEL_MAX_OUTPUT_TOKENS,
-                AiConfig.CODER_MODEL_TIMEOUT.toSeconds(), "unknown",
+                AiConfig.CODER_MODEL_TIMEOUT.toSeconds(), AiConfig.CODER_MODEL_JSON_OUTPUT_ENABLED, "unknown",
                 normalizeNullable(releaseLabels.get(AiConfig.CODER_MODEL_BEAN_NAME))));
         models.put(AiConfig.LOGIC_MODEL_BEAN_NAME, new BenchmarkModelInfo(
                 AiConfig.LOGIC_MODEL_NAME, null, provider, modelBaseUrl,
                 AiConfig.LOGIC_MODEL_TEMPERATURE, AiConfig.LOGIC_MODEL_MAX_OUTPUT_TOKENS,
-                AiConfig.LOGIC_MODEL_TIMEOUT.toSeconds(), "unknown",
+                AiConfig.LOGIC_MODEL_TIMEOUT.toSeconds(), AiConfig.LOGIC_MODEL_JSON_OUTPUT_ENABLED, "unknown",
                 normalizeNullable(releaseLabels.get(AiConfig.LOGIC_MODEL_BEAN_NAME))));
         return Collections.unmodifiableMap(models);
     }

@@ -5,6 +5,10 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.AgentModelAssignment;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkModelInfo;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunConfiguration;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmFailureCounts;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmFinishReasonCounts;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationCounts;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmUsageSnapshot;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -25,7 +29,7 @@ class BenchmarkRunReportSerializationTest {
         BenchmarkModelInfo model = new BenchmarkModelInfo(
                 "deepseek-v4-flash", null, "api.deepseek.com",
                 "https://api.deepseek.com", 0.1, 8192, 480,
-                "unknown", "2026-08-05-update");
+                true, "unknown", "2026-08-05-update");
         AgentModelAssignment assignment = new AgentModelAssignment("TestWriterAgent", "coderModel");
         BenchmarkRunConfiguration config = new BenchmarkRunConfiguration(
                 List.of("task-api-basic"), 3, "abc123");
@@ -39,6 +43,7 @@ class BenchmarkRunReportSerializationTest {
         assertEquals("deepseek-v4-flash", json.at("/models/coderModel/requestedName").asText());
         assertTrue(json.at("/models/coderModel/reportedName").isNull());
         assertEquals("2026-08-05-update", json.at("/models/coderModel/manualReleaseLabel").asText());
+        assertTrue(json.at("/models/coderModel/jsonOutputEnabled").asBoolean());
         assertEquals("TestWriterAgent", json.at("/agentModelAssignments/0/agent").asText());
         assertEquals("coderModel", json.at("/agentModelAssignments/0/modelRef").asText());
         assertEquals(3, json.at("/benchmarkConfig/maxRetries").asInt());
@@ -65,5 +70,24 @@ class BenchmarkRunReportSerializationTest {
         assertTrue(assignments.stream().allMatch(assignment ->
                 assignment.modelRef().equals(AiConfig.CODER_MODEL_BEAN_NAME)
                         || assignment.modelRef().equals(AiConfig.LOGIC_MODEL_BEAN_NAME)));
+    }
+
+    /**
+     * 基准 JSON 只序列化分类总量，不引入单次失败明细。
+     */
+    @Test
+    void shouldSerializeAggregatedLlmOutcomeCounts() {
+        LlmUsageSnapshot snapshot = new LlmUsageSnapshot(
+                3, 2, 1, 1000, 0, 10, 20, 30, false,
+                new LlmFinishReasonCounts(1, 1, 0, 0, 0),
+                new LlmFailureCounts(1, 0, 0, 0, 0, 0),
+                new LlmOutputValidationCounts(0, 1, 0));
+
+        JsonNode json = new ObjectMapper().valueToTree(snapshot);
+
+        assertEquals(1, json.at("/finishReasonCounts/length").asLong());
+        assertEquals(1, json.at("/failureCounts/timeout").asLong());
+        assertEquals(1, json.at("/outputValidationCounts/jsonParseError").asLong());
+        assertTrue(json.path("failures").isMissingNode());
     }
 }

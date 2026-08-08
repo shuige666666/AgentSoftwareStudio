@@ -1,5 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationType;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.bsc.langgraph4j.GraphStateException;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.InterruptedIOException;
 import java.net.SocketTimeoutException;
+import java.net.http.HttpTimeoutException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +74,13 @@ public class LangGraphPromptExecutor {
     }
 
     /**
+     * 将 Agent 层的 JSON 解析或结构校验失败汇总到当前生成任务。
+     */
+    public void recordOutputValidationFailure(LlmOutputValidationType validationType) {
+        metricsService.recordOutputValidationFailure(validationType);
+    }
+
+    /**
      * 兼容层模型调用偶发会因为网络抖动或供应商排队触发 timeout。
      * 这里仅对超时类异常做少量重试，避免一次瞬时波动就中断整条工作流。
      */
@@ -94,7 +103,9 @@ public class LangGraphPromptExecutor {
     private boolean isTimeoutError(Throwable throwable) {
         Throwable current = throwable;
         while (current != null) {
-            if (current instanceof SocketTimeoutException || current instanceof InterruptedIOException) {
+            if (current instanceof HttpTimeoutException
+                    || current instanceof SocketTimeoutException
+                    || current instanceof InterruptedIOException) {
                 return true;
             }
             current = current.getCause();

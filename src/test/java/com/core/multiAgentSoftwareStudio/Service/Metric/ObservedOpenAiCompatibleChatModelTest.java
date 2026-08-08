@@ -88,7 +88,36 @@ class ObservedOpenAiCompatibleChatModelTest {
         assertEquals("hello", request.path("messages").path(0).path("content").asText());
     }
 
+    /**
+     * JSON Agent 开启结构化输出时，请求体应显式要求 json_object。
+     */
+    @Test
+    void enablesJsonObjectResponseFormatForJsonAgents() {
+        ObservedOpenAiCompatibleChatModel model = newModel(true);
+
+        ObjectNode request = model.buildRequest(List.of(UserMessage.from("return JSON")));
+
+        assertEquals("json_object", request.path("response_format").path("type").asText());
+    }
+
+    /**
+     * 保留可选开关，为未来不要求 JSON 的普通文本 Agent 避免误加结构化约束。
+     */
+    @Test
+    void omitsJsonObjectResponseFormatWhenDisabled() {
+        ObservedOpenAiCompatibleChatModel model = newModel(true, false);
+
+        ObjectNode request = model.buildRequest(List.of(UserMessage.from("hello")));
+
+        assertTrue(request.path("response_format").isMissingNode());
+    }
+
     private ObservedOpenAiCompatibleChatModel newModel(boolean deepSeekCacheMetricsEnabled) {
+        return newModel(deepSeekCacheMetricsEnabled, true);
+    }
+
+    private ObservedOpenAiCompatibleChatModel newModel(boolean deepSeekCacheMetricsEnabled,
+                                                       boolean jsonOutputEnabled) {
         return new ObservedOpenAiCompatibleChatModel(
                 "test-key",
                 "https://api.deepseek.com",
@@ -98,6 +127,7 @@ class ObservedOpenAiCompatibleChatModelTest {
                 Duration.ofSeconds(5),
                 objectMapper,
                 new LlmUsageMetricsService(),
-                deepSeekCacheMetricsEnabled);
+                deepSeekCacheMetricsEnabled,
+                jsonOutputEnabled);
     }
 }

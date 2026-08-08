@@ -1,10 +1,13 @@
 package com.core.multiAgentSoftwareStudio.Service.Metric;
 
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmCallUsage;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmFailureType;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ChatMessageType;
@@ -18,6 +21,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +39,7 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
     private final ObjectMapper objectMapper;
     private final LlmUsageMetricsService metricsService;
     private final boolean deepSeekCacheMetricsEnabled;
+    private final boolean jsonOutputEnabled;
     private final HttpClient httpClient;
 
     public ObservedOpenAiCompatibleChatModel(String apiKey,
@@ -45,7 +50,8 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
                                              Duration timeout,
                                              ObjectMapper objectMapper,
                                              LlmUsageMetricsService metricsService,
-                                             boolean deepSeekCacheMetricsEnabled) {
+                                             boolean deepSeekCacheMetricsEnabled,
+                                             boolean jsonOutputEnabled) {
         this.apiKey = apiKey;
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.modelName = modelName;
@@ -55,6 +61,7 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
         this.objectMapper = objectMapper;
         this.metricsService = metricsService;
         this.deepSeekCacheMetricsEnabled = deepSeekCacheMetricsEnabled;
+        this.jsonOutputEnabled = jsonOutputEnabled;
         this.httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
     }
 
@@ -66,12 +73,16 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
             String rawResponse = postChatCompletion(requestBody);
             JsonNode root = objectMapper.readTree(rawResponse);
             if (root.has("error")) {
-                throw new IllegalStateException("OpenAI-compatible API returned error: " + root.get("error"));
+                throw new ProviderResponseException("OpenAI-compatible API returned error: " + root.get("error"));
             }
 
             String content = root.path("choices").path(0).path("message").path("content").asText();
+            String finishReason = root.path("choices").path(0).path("finish_reason").asText();
             LlmCallUsage usage = parseUsage(root.path("usage"));
-            metricsService.recordSuccess(modelName, usage, elapsedMillis(started));
+            metricsService.recordSuccess(modelName, usage, elapsedMillis(started), finishReason);
+            if (content.isBlank()) {
+                metricsService.recordOutputValidationFailure(LlmOutputValidationType.EMPTY_CONTENT);
+            }
 
             return Response.from(
                     AiMessage.from(content),
@@ -79,17 +90,29 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
                             safeInt(usage.inputTokens()),
                             safeInt(usage.outputTokens()),
                             safeInt(usage.totalTokens())),
-                    mapFinishReason(root.path("choices").path(0).path("finish_reason").asText()),
+                    mapFinishReason(finishReason),
                     usageMetadata(usage));
+        } catch (HttpTimeoutException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.TIMEOUT, e);
+            throw new IllegalStateException("OpenAI-compatible API request timed out", e);
+        } catch (JsonProcessingException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.RESPONSE_PARSE_ERROR, e);
+            throw new IllegalStateException("Failed to parse OpenAI-compatible API response", e);
         } catch (IOException e) {
-            metricsService.recordFailure(modelName, elapsedMillis(started), e);
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.HTTP_ERROR, e);
             throw new IllegalStateException("Failed to call OpenAI-compatible API", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            metricsService.recordFailure(modelName, elapsedMillis(started), e);
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.INTERRUPTED, e);
             throw new IllegalStateException("Interrupted while calling OpenAI-compatible API", e);
+        } catch (ModelHttpException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.HTTP_ERROR, e);
+            throw e;
+        } catch (ProviderResponseException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.PROVIDER_ERROR, e);
+            throw e;
         } catch (RuntimeException e) {
-            metricsService.recordFailure(modelName, elapsedMillis(started), e);
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.UNKNOWN, e);
             throw e;
         }
     }
@@ -108,6 +131,9 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
         root.put("model", modelName);
         root.put("temperature", temperature);
         root.put("max_tokens", maxTokens);
+        if (jsonOutputEnabled) {
+            root.putObject("response_format").put("type", "json_object");
+        }
 
         ArrayNode messageNodes = root.putArray("messages");
         if (messages.isEmpty()) {
@@ -186,7 +212,8 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("OpenAI-compatible API HTTP " + response.statusCode() + ": " + response.body());
+            throw new ModelHttpException(
+                    "OpenAI-compatible API HTTP " + response.statusCode() + ": " + response.body());
         }
         return response.body();
     }
@@ -221,5 +248,17 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
             trimmed = trimmed.substring(0, trimmed.length() - 1);
         }
         return trimmed;
+    }
+
+    private static final class ModelHttpException extends IllegalStateException {
+        private ModelHttpException(String message) {
+            super(message);
+        }
+    }
+
+    private static final class ProviderResponseException extends IllegalStateException {
+        private ProviderResponseException(String message) {
+            super(message);
+        }
     }
 }

@@ -85,6 +85,8 @@ Invoke-RestMethod 'http://127.0.0.1:8080/api/SoftwareStudio/benchmarks/run' `
 - 指定一个 `caseId`，就真实生成并验证 1 个项目。不传 `caseIds`，就依次跑全部 3 个项目。
 - 每个项目当前默认 `maxRetries=2`，表示一次初始生成后，最多再经历一次修复回环；它不是重复抽样两次。
 
+（下方的信息为旧的信息，可能和现在的实际信息有所不同）
+
 首轮真实结果：
 
 - 任务：`calculator-web-basic`
@@ -96,7 +98,7 @@ Invoke-RestMethod 'http://127.0.0.1:8080/api/SoftwareStudio/benchmarks/run' `
 - 独立质量门禁：失败
 - 假成功率：暂不可计算——本轮没有平台自判成功的样本，分母为 0。
 
-报告已保存到：[benchmark-2026-07-10T03-52-50.876087300Z.json](C:/My Space/Other Projects/agent 软件开发小组/agent-software-studio/benchmark-results/benchmark-2026-07-10T03-52-50.876087300Z.json)。
+报告已保存到：E:\Study\AI Project Study\前期的小项目学习\SoftwareStudio-5\benchmark-results
 
 生成的结果（中文翻译版）
 

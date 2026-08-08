@@ -1,5 +1,8 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationType;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 
@@ -39,6 +42,7 @@ public abstract class AbstractJsonAgent {
             try {
                 return objectMapper.readValue(json, type);
             } catch (Exception e) {
+                promptExecutor.recordOutputValidationFailure(classifyOutputValidationFailure(e));
                 lastParseError = e;
                 if (attempt == MAX_JSON_REPAIR_ATTEMPTS) {
                     throw new IllegalStateException(
@@ -97,5 +101,15 @@ public abstract class AbstractJsonAgent {
             return value;
         }
         return value.substring(0, ERROR_SNIPPET_LIMIT) + "... [truncated]";
+    }
+
+    private LlmOutputValidationType classifyOutputValidationFailure(Exception error) {
+        if (error instanceof JsonParseException) {
+            return LlmOutputValidationType.JSON_PARSE_ERROR;
+        }
+        if (error instanceof JsonMappingException) {
+            return LlmOutputValidationType.SCHEMA_VALIDATION_ERROR;
+        }
+        return LlmOutputValidationType.JSON_PARSE_ERROR;
     }
 }

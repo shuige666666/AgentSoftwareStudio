@@ -32,12 +32,14 @@ public class AiConfig {
         public static final double CODER_MODEL_TEMPERATURE = 0.1;
         public static final int CODER_MODEL_MAX_OUTPUT_TOKENS = 8192;
         public static final Duration CODER_MODEL_TIMEOUT = Duration.ofMinutes(8);
+        public static final boolean CODER_MODEL_JSON_OUTPUT_ENABLED = true;
 
         public static final String LOGIC_MODEL_BEAN_NAME = "logicModel";
         public static final String LOGIC_MODEL_NAME = "qwen3.7-plus";
         public static final double LOGIC_MODEL_TEMPERATURE = 0.5;
         public static final int LOGIC_MODEL_MAX_OUTPUT_TOKENS = 8192;
         public static final Duration LOGIC_MODEL_TIMEOUT = Duration.ofMinutes(5);
+        public static final boolean LOGIC_MODEL_JSON_OUTPUT_ENABLED = true;
 
         /**
          * 将显式的 API 提供方配置转换为类型安全枚举，避免根据模型名或 URL 误判。
@@ -69,7 +71,8 @@ public class AiConfig {
                                 CODER_MODEL_TIMEOUT,
                                 objectMapper,
                                 metricsService,
-                                aiProvider.deepSeekCacheMetricsEnabled());
+                                aiProvider.deepSeekCacheMetricsEnabled(),
+                                CODER_MODEL_JSON_OUTPUT_ENABLED);
         }
 
         @Bean(name = LOGIC_MODEL_BEAN_NAME)
@@ -87,7 +90,8 @@ public class AiConfig {
                                 LOGIC_MODEL_TIMEOUT,
                                 objectMapper,
                                 metricsService,
-                                aiProvider.deepSeekCacheMetricsEnabled());
+                                aiProvider.deepSeekCacheMetricsEnabled(),
+                                LOGIC_MODEL_JSON_OUTPUT_ENABLED);
         }
 
         /**

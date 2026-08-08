@@ -11,6 +11,7 @@ public record BenchmarkModelInfo(
         double temperature,
         int maxOutputTokens,
         long timeoutSeconds,
+        boolean jsonOutputEnabled,
         String revision,
         String manualReleaseLabel) {
 }
