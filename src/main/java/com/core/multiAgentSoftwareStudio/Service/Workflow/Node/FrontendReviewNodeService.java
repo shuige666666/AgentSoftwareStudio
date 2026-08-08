@@ -1,9 +1,9 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow.Node;
 
 import com.core.multiAgentSoftwareStudio.Agent.FrontendReviewAgent;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFix;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFixResult;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFix;
+import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFixResult;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Service.Context.CodeContextBuilderService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;

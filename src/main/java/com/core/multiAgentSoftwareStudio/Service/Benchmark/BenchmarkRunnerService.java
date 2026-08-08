@@ -1,22 +1,40 @@
 package com.core.multiAgentSoftwareStudio.Service.Benchmark;
 
 import com.core.multiAgentSoftwareStudio.Config.AiConfig;
-import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.AgentModelAssignment;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCaseResult;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkModelInfo;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunConfiguration;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunRequest;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmUsageSnapshot;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.WorkflowExecutionResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -54,6 +72,7 @@ public class BenchmarkRunnerService {
     }
 
     public BenchmarkRunReport run(BenchmarkRunRequest request) {
+        long batchStartedNanos = System.nanoTime();
         List<BenchmarkCase> cases = caseRegistry.select(request == null ? List.of() : request.caseIds());
         int maxRetries = request == null || request.maxRetries() == null ? 2 : Math.max(1, request.maxRetries());
         Map<String, String> releaseLabels = request == null || request.modelReleaseLabels() == null
@@ -61,7 +80,8 @@ public class BenchmarkRunnerService {
                 : request.modelReleaseLabels();
         Instant started = Instant.now();
         List<BenchmarkCaseResult> results = new ArrayList<>();
-        List<BenchmarkModelInfo> models = modelInfo(releaseLabels);
+        Map<String, BenchmarkModelInfo> models = modelInfo(releaseLabels);
+        List<AgentModelAssignment> agentModelAssignments = agentModelAssignments();
         BenchmarkRunConfiguration benchmarkConfig = new BenchmarkRunConfiguration(
                 cases.stream().map(BenchmarkCase::id).toList(), maxRetries, resolveGitCommit());
 
@@ -80,19 +100,22 @@ public class BenchmarkRunnerService {
         Double falseSuccessRate = platformSuccessCount == 0 ? null : (double) falseSuccessCount / platformSuccessCount;
 
         BenchmarkRunReport withoutPath = new BenchmarkRunReport(
-                started.toString(), finished.toString(), models, benchmarkConfig, List.copyOf(results), platformSuccessCount,
+                started.toString(), finished.toString(), models, agentModelAssignments, benchmarkConfig,
+                List.copyOf(results), platformSuccessCount,
                 independentPassCount, falseSuccessCount, falseSuccessRate, null);
         String reportPath = reportPathFor(started).toAbsolutePath().toString();
         persist(new BenchmarkRunReport(
-                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.models(), withoutPath.benchmarkConfig(),
-                withoutPath.cases(),
+                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.models(),
+                withoutPath.agentModelAssignments(), withoutPath.benchmarkConfig(), withoutPath.cases(),
                 withoutPath.platformSuccessCount(), withoutPath.independentQualityPassCount(),
                 withoutPath.falseSuccessCount(), withoutPath.falseSuccessRate(), reportPath),
                 Path.of(reportPath));
-        System.out.println("[Benchmark] 质量基准测试进度：" + cases.size() + "/" + cases.size() + "，全部任务已完成。");
+        long totalElapsedMillis = elapsedMillis(batchStartedNanos);
+        System.out.println("[Benchmark] 质量基准测试进度：" + cases.size() + "/" + cases.size()
+                + "，全部任务已完成，整批总用时 " + formatTotalElapsed(totalElapsedMillis) + "。");
         return new BenchmarkRunReport(
-                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.models(), withoutPath.benchmarkConfig(),
-                withoutPath.cases(),
+                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.models(),
+                withoutPath.agentModelAssignments(), withoutPath.benchmarkConfig(), withoutPath.cases(),
                 withoutPath.platformSuccessCount(), withoutPath.independentQualityPassCount(),
                 withoutPath.falseSuccessCount(), withoutPath.falseSuccessRate(), reportPath);
     }
@@ -123,7 +146,7 @@ public class BenchmarkRunnerService {
             BenchmarkQualityResult quality = new BenchmarkQualityResult(false, List.of());
             return new BenchmarkCaseResult(
                     benchmarkCase.id(), false, false, "NOT_REVIEWED", null, elapsedMillis(started), quality,
-                    new LlmUsageMetricsService.Snapshot(0, 0, 0, 0, 0, 0, 0, 0),
+                    new LlmUsageSnapshot(0, 0, 0, 0, 0, 0, 0, 0),
                     e.getClass().getSimpleName() + ": " + safeMessage(e));
         } finally {
             // 当前任务结束后停止心跳线程，避免后续任务的控制台进度被旧任务重复刷写。
@@ -158,19 +181,45 @@ public class BenchmarkRunnerService {
     /**
      * 从 AiConfig 的实际运行常量生成模型快照，避免报告与真实调用参数分别维护。
      */
-    private List<BenchmarkModelInfo> modelInfo(Map<String, String> releaseLabels) {
+    private Map<String, BenchmarkModelInfo> modelInfo(Map<String, String> releaseLabels) {
         String provider = providerFrom(modelBaseUrl);
-        return List.of(
-                new BenchmarkModelInfo(
-                        "coderModel", AiConfig.CODER_MODEL_NAME, null, provider, modelBaseUrl,
-                        AiConfig.CODER_MODEL_TEMPERATURE, AiConfig.CODER_MODEL_MAX_OUTPUT_TOKENS,
-                        AiConfig.CODER_MODEL_TIMEOUT.toSeconds(), "unknown",
-                        normalizeNullable(releaseLabels.get("coderModel"))),
-                new BenchmarkModelInfo(
-                        "logicModel", AiConfig.LOGIC_MODEL_NAME, null, provider, modelBaseUrl,
-                        AiConfig.LOGIC_MODEL_TEMPERATURE, AiConfig.LOGIC_MODEL_MAX_OUTPUT_TOKENS,
-                        AiConfig.LOGIC_MODEL_TIMEOUT.toSeconds(), "unknown",
-                        normalizeNullable(releaseLabels.get("logicModel"))));
+        Map<String, BenchmarkModelInfo> models = new LinkedHashMap<>();
+        models.put(AiConfig.CODER_MODEL_BEAN_NAME, new BenchmarkModelInfo(
+                AiConfig.CODER_MODEL_NAME, null, provider, modelBaseUrl,
+                AiConfig.CODER_MODEL_TEMPERATURE, AiConfig.CODER_MODEL_MAX_OUTPUT_TOKENS,
+                AiConfig.CODER_MODEL_TIMEOUT.toSeconds(), "unknown",
+                normalizeNullable(releaseLabels.get(AiConfig.CODER_MODEL_BEAN_NAME))));
+        models.put(AiConfig.LOGIC_MODEL_BEAN_NAME, new BenchmarkModelInfo(
+                AiConfig.LOGIC_MODEL_NAME, null, provider, modelBaseUrl,
+                AiConfig.LOGIC_MODEL_TEMPERATURE, AiConfig.LOGIC_MODEL_MAX_OUTPUT_TOKENS,
+                AiConfig.LOGIC_MODEL_TIMEOUT.toSeconds(), "unknown",
+                normalizeNullable(releaseLabels.get(AiConfig.LOGIC_MODEL_BEAN_NAME))));
+        return Collections.unmodifiableMap(models);
+    }
+
+    /**
+     * 直接读取 AiConfig 中 Agent Bean 参数的 Qualifier，确保报告映射跟随真实注入关系变化。
+     */
+    static List<AgentModelAssignment> agentModelAssignments() {
+        return Arrays.stream(AiConfig.class.getDeclaredMethods())
+                .filter(method -> method.isAnnotationPresent(Bean.class))
+                .map(BenchmarkRunnerService::agentModelAssignment)
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing(AgentModelAssignment::agent))
+                .toList();
+    }
+
+    private static AgentModelAssignment agentModelAssignment(Method method) {
+        for (Parameter parameter : method.getParameters()) {
+            if (!ChatLanguageModel.class.isAssignableFrom(parameter.getType())) {
+                continue;
+            }
+            Qualifier qualifier = parameter.getAnnotation(Qualifier.class);
+            if (qualifier != null) {
+                return new AgentModelAssignment(method.getReturnType().getSimpleName(), qualifier.value());
+            }
+        }
+        return null;
     }
 
     /**
@@ -213,6 +262,15 @@ public class BenchmarkRunnerService {
 
     private String normalizeNullable(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    /**
+     * 将整批毫秒耗时格式化为适合控制台阅读的分秒文本，同时保留精确毫秒值。
+     */
+    static String formatTotalElapsed(long elapsedMillis) {
+        long minutes = elapsedMillis / 60_000;
+        long seconds = elapsedMillis % 60_000 / 1_000;
+        return minutes + " 分 " + seconds + " 秒（" + elapsedMillis + " 毫秒）";
     }
 
     private long elapsedMillis(long startedNanos) {

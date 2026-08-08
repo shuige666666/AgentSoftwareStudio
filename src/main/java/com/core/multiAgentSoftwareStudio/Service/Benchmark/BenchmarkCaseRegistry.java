@@ -1,5 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Service.Benchmark;
 
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkGate;
 import org.springframework.stereotype.Service;
 
 import java.util.List;

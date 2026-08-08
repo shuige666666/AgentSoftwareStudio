@@ -1,6 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow.Node;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
+import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationBatch;
 import com.core.multiAgentSoftwareStudio.Service.Contract.ContractValidationService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
 import org.springframework.stereotype.Service;

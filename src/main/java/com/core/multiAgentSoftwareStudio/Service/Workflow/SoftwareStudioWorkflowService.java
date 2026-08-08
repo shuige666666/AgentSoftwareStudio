@@ -1,6 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
 import com.core.multiAgentSoftwareStudio.Service.Repair.ProjectRepairService;

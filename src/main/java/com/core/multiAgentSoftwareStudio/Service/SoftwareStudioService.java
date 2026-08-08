@@ -1,8 +1,8 @@
 package com.core.multiAgentSoftwareStudio.Service;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.WorkflowExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import org.springframework.stereotype.Service;
 
 import java.util.List;

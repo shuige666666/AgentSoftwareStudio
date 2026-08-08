@@ -1,5 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Service.Metric;
 
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmCallUsage;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,7 +13,7 @@ class LlmUsageMetricsServiceTest {
         metricsService.beginTask();
         metricsService.recordSuccess(
                 "deepseek-test",
-                new LlmUsageMetricsService.Usage(80, 20, 30, 130),
+                new LlmCallUsage(80, 20, 30, 130),
                 1000);
 
         String summary = metricsService.formatSummary();

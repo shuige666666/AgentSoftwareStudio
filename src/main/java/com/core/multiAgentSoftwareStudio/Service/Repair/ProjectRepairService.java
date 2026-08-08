@@ -1,10 +1,10 @@
 package com.core.multiAgentSoftwareStudio.Service.Repair;
 
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFix;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFixResult;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFix;
+import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFixResult;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Service.Context.CodeContextBuilderService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;

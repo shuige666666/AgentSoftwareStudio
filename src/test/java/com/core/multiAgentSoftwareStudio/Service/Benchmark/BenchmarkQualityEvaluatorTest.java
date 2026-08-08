@@ -1,8 +1,11 @@
 package com.core.multiAgentSoftwareStudio.Service.Benchmark;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
-import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.WorkflowExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkGate;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmUsageSnapshot;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -65,6 +68,6 @@ class BenchmarkQualityEvaluatorTest {
 
     private WorkflowExecutionResult execution(boolean platformSuccess, List<SourceCode> codes, String testResult) {
         return new WorkflowExecutionResult(codes, platformSuccess, "generated", "BUILD SUCCESS", testResult, List.of(), null, 1,
-                new LlmUsageMetricsService.Snapshot(1, 1, 0, 1, 0, 1, 1, 2));
+                new LlmUsageSnapshot(1, 1, 0, 1, 0, 1, 1, 2));
     }
 }

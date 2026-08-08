@@ -1,6 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Service.Source;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;

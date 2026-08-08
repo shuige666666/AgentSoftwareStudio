@@ -1,15 +1,15 @@
 package com.core.multiAgentSoftwareStudio.Controller;
 
 import com.core.multiAgentSoftwareStudio.Service.SoftwareStudioService;
-import com.core.multiAgentSoftwareStudio.Pojo.Result.Result;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
-import com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkCase;
-import com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkRunReport;
-import com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkRunRequest;
+import com.core.multiAgentSoftwareStudio.Model.Response.Result;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunRequest;
 import com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkRunnerService;
-import com.core.multiAgentSoftwareStudio.Service.Preview.PreviewStatus;
+import com.core.multiAgentSoftwareStudio.Model.Preview.PreviewStatus;
 import com.core.multiAgentSoftwareStudio.Service.Preview.ProjectPreviewService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.WorkflowExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;

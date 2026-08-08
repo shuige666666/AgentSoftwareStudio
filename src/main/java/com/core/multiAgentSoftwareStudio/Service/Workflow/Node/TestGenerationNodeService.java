@@ -1,8 +1,8 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow.Node;
 
 import com.core.multiAgentSoftwareStudio.Agent.TestWriterAgent;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.TestClassesResult;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.TestClassesResult;
 import com.core.multiAgentSoftwareStudio.Service.Context.CodeContextBuilderService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;

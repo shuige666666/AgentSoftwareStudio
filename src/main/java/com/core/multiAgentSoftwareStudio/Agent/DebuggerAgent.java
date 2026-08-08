@@ -1,6 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFixResult;
+import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFixResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 

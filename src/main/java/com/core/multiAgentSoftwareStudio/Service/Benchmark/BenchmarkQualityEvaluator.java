@@ -1,7 +1,11 @@
 package com.core.multiAgentSoftwareStudio.Service.Benchmark;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.WorkflowExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkFinding;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkGate;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;

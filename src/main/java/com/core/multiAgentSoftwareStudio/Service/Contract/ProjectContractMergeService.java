@@ -1,8 +1,8 @@
 package com.core.multiAgentSoftwareStudio.Service.Contract;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
+import com.core.multiAgentSoftwareStudio.Model.Generation.FileBlueprint;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.springframework.stereotype.Service;
 

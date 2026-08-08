@@ -1,6 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Service.Metric;
 
-import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService.Usage;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmCallUsage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -67,7 +67,7 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
             }
 
             String content = root.path("choices").path(0).path("message").path("content").asText();
-            Usage usage = parseUsage(root.path("usage"));
+            LlmCallUsage usage = parseUsage(root.path("usage"));
             metricsService.recordSuccess(modelName, usage, elapsedMillis(started));
 
             return Response.from(
@@ -119,7 +119,7 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
         return root;
     }
 
-    Usage parseUsage(JsonNode usage) {
+    LlmCallUsage parseUsage(JsonNode usage) {
         long hitTokens = usage.path("prompt_cache_hit_tokens").asLong(0);
         long missTokens = usage.path("prompt_cache_miss_tokens").asLong(0);
         long promptTokens = usage.path("prompt_tokens").asLong(hitTokens + missTokens);
@@ -129,7 +129,7 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
 
         long outputTokens = usage.path("completion_tokens").asLong(0);
         long totalTokens = usage.path("total_tokens").asLong(promptTokens + outputTokens);
-        return new Usage(hitTokens, missTokens, outputTokens, totalTokens);
+        return new LlmCallUsage(hitTokens, missTokens, outputTokens, totalTokens);
     }
 
     private void addMessage(ArrayNode messages, String role, String content) {

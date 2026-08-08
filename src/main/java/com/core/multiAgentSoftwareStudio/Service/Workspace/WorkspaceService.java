@@ -1,7 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Service.Workspace;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFix;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFix;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.springframework.stereotype.Service;
 

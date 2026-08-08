@@ -1,6 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Service.Context;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.junit.jupiter.api.Test;
 

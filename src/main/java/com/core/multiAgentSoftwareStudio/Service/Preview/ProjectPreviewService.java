@@ -1,5 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Service.Preview;
 
+import com.core.multiAgentSoftwareStudio.Model.Preview.PreviewStatus;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;

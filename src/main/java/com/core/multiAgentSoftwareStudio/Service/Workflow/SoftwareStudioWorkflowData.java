@@ -1,11 +1,11 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationPlan;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationBatch;
+import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationPlan;
+import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 
 import java.io.Serializable;
 import java.util.ArrayList;

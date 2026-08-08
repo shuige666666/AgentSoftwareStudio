@@ -1,12 +1,12 @@
 package com.core.multiAgentSoftwareStudio.Service.Contract;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ApiEndpointContract;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FrontendCallContract;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ViewContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ApiEndpointContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.FileBlueprint;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.FrontendCallContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationBatch;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ViewContract;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.springframework.stereotype.Service;
 

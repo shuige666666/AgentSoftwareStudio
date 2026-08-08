@@ -1,5 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Service.Metric;
 
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmCallUsage;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmUsageSnapshot;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
@@ -55,7 +57,7 @@ public class LlmUsageMetricsService {
         return value == null || value.isBlank() ? "LLM调用" : value;
     }
 
-    public void recordSuccess(String modelName, Usage usage, long elapsedMillis) {
+    public void recordSuccess(String modelName, LlmCallUsage usage, long elapsedMillis) {
         long callIndex = calls.incrementAndGet();
         successfulCalls.incrementAndGet();
         durationMillis.addAndGet(elapsedMillis);
@@ -95,8 +97,8 @@ public class LlmUsageMetricsService {
                 error == null ? "未知错误" : error.getMessage());
     }
 
-    public Snapshot snapshot() {
-        return new Snapshot(
+    public LlmUsageSnapshot snapshot() {
+        return new LlmUsageSnapshot(
                 calls.get(),
                 successfulCalls.get(),
                 failedCalls.get(),
@@ -108,7 +110,7 @@ public class LlmUsageMetricsService {
     }
 
     public String formatSummary() {
-        Snapshot snapshot = snapshot();
+        LlmUsageSnapshot snapshot = snapshot();
         return String.format(Locale.ROOT, """
                 [LLM用量汇总]
                 LLM调用次数=%d，成功=%d，失败=%d，总耗时=%dms
@@ -138,23 +140,4 @@ public class LlmUsageMetricsService {
         return inputTokens == 0 ? 0.0 : (double) hitTokens / inputTokens;
     }
 
-    public record Usage(long inputCacheHitTokens,
-                        long inputCacheMissTokens,
-                        long outputTokens,
-                        long totalTokens) {
-    }
-
-    public record Snapshot(long calls,
-                           long successfulCalls,
-                           long failedCalls,
-                           long durationMillis,
-                           long inputCacheHitTokens,
-                           long inputCacheMissTokens,
-                           long outputTokens,
-                           long totalTokens) {
-        public double remoteInputCacheHitRate() {
-            long inputTokens = inputCacheHitTokens + inputCacheMissTokens;
-            return inputTokens == 0 ? 0.0 : (double) inputCacheHitTokens / inputTokens;
-        }
-    }
 }

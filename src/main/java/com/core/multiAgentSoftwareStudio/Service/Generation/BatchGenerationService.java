@@ -1,12 +1,12 @@
 package com.core.multiAgentSoftwareStudio.Service.Generation;
 
 import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.FileBlueprint;
+import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationBatch;
+import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Service.Context.CodeContextBuilderService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;

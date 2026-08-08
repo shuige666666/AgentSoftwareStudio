@@ -1,0 +1,289 @@
+{
+  "startedAt" : "2026-08-08T10:00:19.178955100Z",
+  "finishedAt" : "2026-08-08T10:19:36.901873Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "deepseek-v4-flash",
+      "reportedName" : null,
+      "provider" : "api.deepseek.com",
+      "baseUrl" : "https://api.deepseek.com",
+      "temperature" : 0.2,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "revision" : "unknown",
+      "manualReleaseLabel" : "DeepSeek-V4-Flash-0731"
+    },
+    "logicModel" : {
+      "requestedName" : "deepseek-v4-pro",
+      "reportedName" : null,
+      "provider" : "api.deepseek.com",
+      "baseUrl" : "https://api.deepseek.com",
+      "temperature" : 0.5,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 300,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "ArchitectAgent",
+    "modelRef" : "coderModel"
+  }, {
+    "agent" : "ContractAgent",
+    "modelRef" : "coderModel"
+  }, {
+    "agent" : "DebuggerAgent",
+    "modelRef" : "coderModel"
+  }, {
+    "agent" : "DeveloperAgent",
+    "modelRef" : "coderModel"
+  }, {
+    "agent" : "FrontendReviewAgent",
+    "modelRef" : "coderModel"
+  }, {
+    "agent" : "ProductManagerAgent",
+    "modelRef" : "coderModel"
+  }, {
+    "agent" : "TestWriterAgent",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "calculator-web-basic", "task-api-basic", "snake-websocket-basic", "url-shortener-basic", "poll-system-basic", "blog-system-basic" ],
+    "maxRetries" : 3,
+    "gitCommit" : "835d1682852c82cc1c545727da41ef6c398caace"
+  },
+  "cases" : [ {
+    "caseId" : "calculator-web-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Simple_Calculator_Web_App_20260808_180340",
+    "elapsedMillis" : 202622,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : false,
+        "evidence" : "No generated JUnit test source was found."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=error: no source files"
+      } ]
+    },
+    "usage" : {
+      "calls" : 4,
+      "successfulCalls" : 4,
+      "failedCalls" : 0,
+      "durationMillis" : 201373,
+      "inputCacheHitTokens" : 0,
+      "inputCacheMissTokens" : 2808,
+      "outputTokens" : 25586,
+      "totalTokens" : 28394
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "task-api-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\任务管理_REST_API_20260808_180650",
+    "elapsedMillis" : 189810,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : false,
+        "evidence" : "No generated JUnit test source was found."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=error: no source files"
+      } ]
+    },
+    "usage" : {
+      "calls" : 4,
+      "successfulCalls" : 4,
+      "failedCalls" : 0,
+      "durationMillis" : 188958,
+      "inputCacheHitTokens" : 256,
+      "inputCacheMissTokens" : 2757,
+      "outputTokens" : 25744,
+      "totalTokens" : 28757
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "snake-websocket-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\WebSocket_Snake_Game_MVP_20260808_181018",
+    "elapsedMillis" : 207658,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : false,
+        "evidence" : "No generated JUnit test source was found."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=error: no source files"
+      } ]
+    },
+    "usage" : {
+      "calls" : 4,
+      "successfulCalls" : 4,
+      "failedCalls" : 0,
+      "durationMillis" : 206947,
+      "inputCacheHitTokens" : 1792,
+      "inputCacheMissTokens" : 1323,
+      "outputTokens" : 26068,
+      "totalTokens" : 29183
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "url-shortener-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\短链接服务（Short_Link_Service）_20260808_181320",
+    "elapsedMillis" : 182003,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : false,
+        "evidence" : "No generated JUnit test source was found."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=error: no source files"
+      } ]
+    },
+    "usage" : {
+      "calls" : 4,
+      "successfulCalls" : 4,
+      "failedCalls" : 0,
+      "durationMillis" : 181302,
+      "inputCacheHitTokens" : 1792,
+      "inputCacheMissTokens" : 833,
+      "outputTokens" : 25611,
+      "totalTokens" : 28236
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "poll-system-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Online_Voting_System_20260808_181625",
+    "elapsedMillis" : 184958,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : false,
+        "evidence" : "No generated JUnit test source was found."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=error: no source files"
+      } ]
+    },
+    "usage" : {
+      "calls" : 4,
+      "successfulCalls" : 4,
+      "failedCalls" : 0,
+      "durationMillis" : 184198,
+      "inputCacheHitTokens" : 1792,
+      "inputCacheMissTokens" : 1074,
+      "outputTokens" : 25629,
+      "totalTokens" : 28495
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "blog-system-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Simple_Blog_System_20260808_181936",
+    "elapsedMillis" : 190603,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : false,
+        "evidence" : "No generated JUnit test source was found."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=error: no source files"
+      } ]
+    },
+    "usage" : {
+      "calls" : 4,
+      "successfulCalls" : 4,
+      "failedCalls" : 0,
+      "durationMillis" : 189760,
+      "inputCacheHitTokens" : 1792,
+      "inputCacheMissTokens" : 927,
+      "outputTokens" : 25222,
+      "totalTokens" : 27941
+    },
+    "workflowError" : null
+  } ],
+  "platformSuccessCount" : 6,
+  "independentQualityPassCount" : 0,
+  "falseSuccessCount" : 6,
+  "falseSuccessRate" : 1.0,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-08-08T10-00-19.178955100Z.json"
+}

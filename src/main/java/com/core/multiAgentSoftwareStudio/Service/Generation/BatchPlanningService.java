@@ -1,9 +1,9 @@
 package com.core.multiAgentSoftwareStudio.Service.Generation;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.FileBlueprint;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationBatch;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.GenerationPlan;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
+import com.core.multiAgentSoftwareStudio.Model.Generation.FileBlueprint;
+import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationBatch;
+import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationPlan;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.springframework.stereotype.Service;
 
