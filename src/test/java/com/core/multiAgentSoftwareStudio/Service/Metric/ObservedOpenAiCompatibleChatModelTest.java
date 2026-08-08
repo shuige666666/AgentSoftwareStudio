@@ -10,14 +10,18 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class ObservedDeepSeekChatModelTest {
+class ObservedOpenAiCompatibleChatModelTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * 直连 DeepSeek 时应继续解析专用缓存字段。
+     */
     @Test
-    void parsesDeepSeekCacheUsageFields() {
-        ObservedDeepSeekChatModel model = newModel();
+    void parsesDeepSeekCacheUsageFieldsWhenEnabled() {
+        ObservedOpenAiCompatibleChatModel model = newModel(true);
         ObjectNode usage = JsonNodeFactory.instance.objectNode();
         usage.put("prompt_cache_hit_tokens", 120);
         usage.put("prompt_cache_miss_tokens", 30);
@@ -30,13 +34,19 @@ class ObservedDeepSeekChatModelTest {
         assertEquals(30, parsed.inputCacheMissTokens());
         assertEquals(25, parsed.outputTokens());
         assertEquals(175, parsed.totalTokens());
+        assertTrue(parsed.cacheMetricsAvailable());
     }
 
+    /**
+     * 非 DeepSeek 配置只保留通用 Token，避免将不可统计误报为零命中。
+     */
     @Test
-    void treatsPromptTokensAsMissWhenCacheFieldsAreAbsent() {
-        ObservedDeepSeekChatModel model = newModel();
+    void treatsPromptTokensAsGenericInputWhenCacheMetricsAreDisabled() {
+        ObservedOpenAiCompatibleChatModel model = newModel(false);
         ObjectNode usage = JsonNodeFactory.instance.objectNode();
         usage.put("prompt_tokens", 150);
+        usage.put("prompt_cache_hit_tokens", 120);
+        usage.put("prompt_cache_miss_tokens", 30);
         usage.put("completion_tokens", 25);
         usage.put("total_tokens", 175);
 
@@ -44,13 +54,32 @@ class ObservedDeepSeekChatModelTest {
 
         assertEquals(0, parsed.inputCacheHitTokens());
         assertEquals(150, parsed.inputCacheMissTokens());
+        assertEquals(150, parsed.inputTokens());
         assertEquals(25, parsed.outputTokens());
         assertEquals(175, parsed.totalTokens());
+        assertFalse(parsed.cacheMetricsAvailable());
+    }
+
+    /**
+     * 即使配置为 DeepSeek，响应未返回专用字段时也不应伪造缓存命中率。
+     */
+    @Test
+    void marksCacheMetricsUnavailableWhenProviderFieldsAreAbsent() {
+        ObservedOpenAiCompatibleChatModel model = newModel(true);
+        ObjectNode usage = JsonNodeFactory.instance.objectNode();
+        usage.put("prompt_tokens", 150);
+        usage.put("completion_tokens", 25);
+        usage.put("total_tokens", 175);
+
+        var parsed = model.parseUsage(usage);
+
+        assertEquals(150, parsed.inputTokens());
+        assertFalse(parsed.cacheMetricsAvailable());
     }
 
     @Test
     void keepsPromptAsPlainUserMessage() {
-        ObservedDeepSeekChatModel model = newModel();
+        ObservedOpenAiCompatibleChatModel model = newModel(true);
 
         ObjectNode request = model.buildRequest(List.of(UserMessage.from("hello")));
 
@@ -59,8 +88,8 @@ class ObservedDeepSeekChatModelTest {
         assertEquals("hello", request.path("messages").path(0).path("content").asText());
     }
 
-    private ObservedDeepSeekChatModel newModel() {
-        return new ObservedDeepSeekChatModel(
+    private ObservedOpenAiCompatibleChatModel newModel(boolean deepSeekCacheMetricsEnabled) {
+        return new ObservedOpenAiCompatibleChatModel(
                 "test-key",
                 "https://api.deepseek.com",
                 "deepseek-test",
@@ -68,6 +97,7 @@ class ObservedDeepSeekChatModelTest {
                 128,
                 Duration.ofSeconds(5),
                 objectMapper,
-                new LlmUsageMetricsService());
+                new LlmUsageMetricsService(),
+                deepSeekCacheMetricsEnabled);
     }
 }

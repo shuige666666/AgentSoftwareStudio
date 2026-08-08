@@ -68,6 +68,6 @@ class BenchmarkQualityEvaluatorTest {
 
     private WorkflowExecutionResult execution(boolean platformSuccess, List<SourceCode> codes, String testResult) {
         return new WorkflowExecutionResult(codes, platformSuccess, "generated", "BUILD SUCCESS", testResult, List.of(), null, 1,
-                new LlmUsageSnapshot(1, 1, 0, 1, 0, 1, 1, 2));
+                new LlmUsageSnapshot(1, 1, 0, 1, 0, 1, 1, 2, false));
     }
 }

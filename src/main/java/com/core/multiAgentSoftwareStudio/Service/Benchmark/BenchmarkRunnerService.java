@@ -146,7 +146,7 @@ public class BenchmarkRunnerService {
             BenchmarkQualityResult quality = new BenchmarkQualityResult(false, List.of());
             return new BenchmarkCaseResult(
                     benchmarkCase.id(), false, false, "NOT_REVIEWED", null, elapsedMillis(started), quality,
-                    new LlmUsageSnapshot(0, 0, 0, 0, 0, 0, 0, 0),
+                    new LlmUsageSnapshot(0, 0, 0, 0, 0, 0, 0, 0, false),
                     e.getClass().getSimpleName() + ": " + safeMessage(e));
         } finally {
             // 当前任务结束后停止心跳线程，避免后续任务的控制台进度被旧任务重复刷写。

@@ -5,7 +5,7 @@ import com.core.multiAgentSoftwareStudio.Agent.ContractAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
 import com.core.multiAgentSoftwareStudio.Agent.FrontendReviewAgent;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
-import com.core.multiAgentSoftwareStudio.Service.Metric.ObservedDeepSeekChatModel;
+import com.core.multiAgentSoftwareStudio.Service.Metric.ObservedOpenAiCompatibleChatModel;
 import com.core.multiAgentSoftwareStudio.Agent.ProductManagerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.TestWriterAgent;
@@ -28,16 +28,24 @@ public class AiConfig {
 
         // 基准报告与模型实例共用这组常量，防止记录参数与真实调用参数偏离。
         public static final String CODER_MODEL_BEAN_NAME = "coderModel";
-        public static final String CODER_MODEL_NAME = "deepseek-v4-flash";
+        public static final String CODER_MODEL_NAME = "qwen3.7-flash-2026-07-15";
         public static final double CODER_MODEL_TEMPERATURE = 0.1;
         public static final int CODER_MODEL_MAX_OUTPUT_TOKENS = 8192;
         public static final Duration CODER_MODEL_TIMEOUT = Duration.ofMinutes(8);
 
         public static final String LOGIC_MODEL_BEAN_NAME = "logicModel";
-        public static final String LOGIC_MODEL_NAME = "deepseek-v4-pro";
+        public static final String LOGIC_MODEL_NAME = "qwen3.7-plus";
         public static final double LOGIC_MODEL_TEMPERATURE = 0.5;
         public static final int LOGIC_MODEL_MAX_OUTPUT_TOKENS = 8192;
         public static final Duration LOGIC_MODEL_TIMEOUT = Duration.ofMinutes(5);
+
+        /**
+         * 将显式的 API 提供方配置转换为类型安全枚举，避免根据模型名或 URL 误判。
+         */
+        @Bean
+        AiProvider aiProvider(@Value("${studio.ai.provider:deepseek-direct}") String provider) {
+                return AiProvider.fromConfig(provider);
+        }
 
         /**
          * 模型配置
@@ -48,10 +56,11 @@ public class AiConfig {
         ChatLanguageModel coderModel(@Value("${spring.ai.openai.api-key}") String apiKey, // 读取你配置文件里的 Key
                         @Value("${spring.ai.openai.base-url}") String baseUrl, // 读取你配置文件里的 BaseUrl
                         ObjectMapper objectMapper,
-                        LlmUsageMetricsService metricsService
+                        LlmUsageMetricsService metricsService,
+                        AiProvider aiProvider
         ) {
 
-                return new ObservedDeepSeekChatModel(
+                return new ObservedOpenAiCompatibleChatModel(
                                 apiKey,
                                 baseUrl,
                                 CODER_MODEL_NAME,
@@ -59,15 +68,17 @@ public class AiConfig {
                                 CODER_MODEL_MAX_OUTPUT_TOKENS,
                                 CODER_MODEL_TIMEOUT,
                                 objectMapper,
-                                metricsService);
+                                metricsService,
+                                aiProvider.deepSeekCacheMetricsEnabled());
         }
 
         @Bean(name = LOGIC_MODEL_BEAN_NAME)
         ChatLanguageModel logicModel(@Value("${spring.ai.openai.api-key}") String apiKey,
                         @Value("${spring.ai.openai.base-url}") String baseUrl,
                         ObjectMapper objectMapper,
-                        LlmUsageMetricsService metricsService) {
-                return new ObservedDeepSeekChatModel(
+                        LlmUsageMetricsService metricsService,
+                        AiProvider aiProvider) {
+                return new ObservedOpenAiCompatibleChatModel(
                                 apiKey,
                                 baseUrl,
                                 LOGIC_MODEL_NAME,
@@ -75,7 +86,8 @@ public class AiConfig {
                                 LOGIC_MODEL_MAX_OUTPUT_TOKENS,
                                 LOGIC_MODEL_TIMEOUT,
                                 objectMapper,
-                                metricsService);
+                                metricsService,
+                                aiProvider.deepSeekCacheMetricsEnabled());
         }
 
         /**

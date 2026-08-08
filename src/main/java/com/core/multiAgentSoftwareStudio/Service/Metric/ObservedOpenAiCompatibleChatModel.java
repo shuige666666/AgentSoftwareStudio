@@ -23,9 +23,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * DeepSeek OpenAI-compatible Chat 模型包装器，只做 usage 观测，不改变 prompt 结构。
+ * OpenAI-compatible Chat 模型包装器，统一记录通用 Token 用量并可选观测 DeepSeek 缓存指标。
  */
-public class ObservedDeepSeekChatModel implements ChatLanguageModel {
+public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
     private final String apiKey;
     private final String baseUrl;
     private final String modelName;
@@ -34,16 +34,18 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
     private final Duration timeout;
     private final ObjectMapper objectMapper;
     private final LlmUsageMetricsService metricsService;
+    private final boolean deepSeekCacheMetricsEnabled;
     private final HttpClient httpClient;
 
-    public ObservedDeepSeekChatModel(String apiKey,
-                                     String baseUrl,
-                                     String modelName,
-                                     double temperature,
-                                     int maxTokens,
-                                     Duration timeout,
-                                     ObjectMapper objectMapper,
-                                     LlmUsageMetricsService metricsService) {
+    public ObservedOpenAiCompatibleChatModel(String apiKey,
+                                             String baseUrl,
+                                             String modelName,
+                                             double temperature,
+                                             int maxTokens,
+                                             Duration timeout,
+                                             ObjectMapper objectMapper,
+                                             LlmUsageMetricsService metricsService,
+                                             boolean deepSeekCacheMetricsEnabled) {
         this.apiKey = apiKey;
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.modelName = modelName;
@@ -52,6 +54,7 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
         this.timeout = timeout;
         this.objectMapper = objectMapper;
         this.metricsService = metricsService;
+        this.deepSeekCacheMetricsEnabled = deepSeekCacheMetricsEnabled;
         this.httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
     }
 
@@ -63,7 +66,7 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
             String rawResponse = postChatCompletion(requestBody);
             JsonNode root = objectMapper.readTree(rawResponse);
             if (root.has("error")) {
-                throw new IllegalStateException("DeepSeek API returned error: " + root.get("error"));
+                throw new IllegalStateException("OpenAI-compatible API returned error: " + root.get("error"));
             }
 
             String content = root.path("choices").path(0).path("message").path("content").asText();
@@ -73,20 +76,18 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
             return Response.from(
                     AiMessage.from(content),
                     new TokenUsage(
-                            safeInt(usage.inputCacheHitTokens() + usage.inputCacheMissTokens()),
+                            safeInt(usage.inputTokens()),
                             safeInt(usage.outputTokens()),
                             safeInt(usage.totalTokens())),
                     mapFinishReason(root.path("choices").path(0).path("finish_reason").asText()),
-                    Map.of(
-                            "prompt_cache_hit_tokens", usage.inputCacheHitTokens(),
-                            "prompt_cache_miss_tokens", usage.inputCacheMissTokens()));
+                    usageMetadata(usage));
         } catch (IOException e) {
             metricsService.recordFailure(modelName, elapsedMillis(started), e);
-            throw new IllegalStateException("Failed to call DeepSeek API", e);
+            throw new IllegalStateException("Failed to call OpenAI-compatible API", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             metricsService.recordFailure(modelName, elapsedMillis(started), e);
-            throw new IllegalStateException("Interrupted while calling DeepSeek API", e);
+            throw new IllegalStateException("Interrupted while calling OpenAI-compatible API", e);
         } catch (RuntimeException e) {
             metricsService.recordFailure(modelName, elapsedMillis(started), e);
             throw e;
@@ -119,17 +120,37 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
         return root;
     }
 
+    /**
+     * 通用 Token 始终按 OpenAI 字段读取；DeepSeek 缓存字段只在配置启用且响应真实返回时生效。
+     */
     LlmCallUsage parseUsage(JsonNode usage) {
-        long hitTokens = usage.path("prompt_cache_hit_tokens").asLong(0);
-        long missTokens = usage.path("prompt_cache_miss_tokens").asLong(0);
-        long promptTokens = usage.path("prompt_tokens").asLong(hitTokens + missTokens);
-        if (hitTokens == 0 && missTokens == 0 && promptTokens > 0) {
-            missTokens = promptTokens;
+        boolean cacheMetricsAvailable = deepSeekCacheMetricsEnabled
+                && (usage.has("prompt_cache_hit_tokens") || usage.has("prompt_cache_miss_tokens"));
+        long hitTokens = cacheMetricsAvailable
+                ? usage.path("prompt_cache_hit_tokens").asLong(0)
+                : 0;
+        long promptTokens = usage.path("prompt_tokens").asLong(0);
+        long missTokens = cacheMetricsAvailable
+                ? usage.path("prompt_cache_miss_tokens").asLong(Math.max(0, promptTokens - hitTokens))
+                : promptTokens;
+
+        if (promptTokens == 0 && cacheMetricsAvailable) {
+            promptTokens = hitTokens + missTokens;
         }
 
         long outputTokens = usage.path("completion_tokens").asLong(0);
         long totalTokens = usage.path("total_tokens").asLong(promptTokens + outputTokens);
-        return new LlmCallUsage(hitTokens, missTokens, outputTokens, totalTokens);
+        return new LlmCallUsage(hitTokens, missTokens, outputTokens, totalTokens, cacheMetricsAvailable);
+    }
+
+    private Map<String, Object> usageMetadata(LlmCallUsage usage) {
+        if (!usage.cacheMetricsAvailable()) {
+            return Map.of("cache_metrics_available", false);
+        }
+        return Map.of(
+                "cache_metrics_available", true,
+                "prompt_cache_hit_tokens", usage.inputCacheHitTokens(),
+                "prompt_cache_miss_tokens", usage.inputCacheMissTokens());
     }
 
     private void addMessage(ArrayNode messages, String role, String content) {
@@ -165,7 +186,7 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("DeepSeek API HTTP " + response.statusCode() + ": " + response.body());
+            throw new IllegalStateException("OpenAI-compatible API HTTP " + response.statusCode() + ": " + response.body());
         }
         return response.body();
     }
@@ -190,7 +211,7 @@ public class ObservedDeepSeekChatModel implements ChatLanguageModel {
 
     private String normalizeBaseUrl(String value) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("DeepSeek baseUrl must not be blank");
+            throw new IllegalArgumentException("OpenAI-compatible baseUrl must not be blank");
         }
         String trimmed = value.strip();
         if (trimmed.endsWith("/chat/completions")) {

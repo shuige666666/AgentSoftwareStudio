@@ -11,13 +11,21 @@ public record LlmUsageSnapshot(
         long inputCacheHitTokens,
         long inputCacheMissTokens,
         long outputTokens,
-        long totalTokens) {
+        long totalTokens,
+        boolean cacheMetricsAvailable) {
+
+    public long inputTokens() {
+        return inputCacheHitTokens + inputCacheMissTokens;
+    }
 
     /**
-     * 计算远程输入缓存命中率，无输入 Token 时返回 0。
+     * 计算远程输入缓存命中率；当前供应商不提供该指标时返回 null。
      */
-    public double remoteInputCacheHitRate() {
-        long inputTokens = inputCacheHitTokens + inputCacheMissTokens;
+    public Double remoteInputCacheHitRate() {
+        if (!cacheMetricsAvailable) {
+            return null;
+        }
+        long inputTokens = inputTokens();
         return inputTokens == 0 ? 0.0 : (double) inputCacheHitTokens / inputTokens;
     }
 }
