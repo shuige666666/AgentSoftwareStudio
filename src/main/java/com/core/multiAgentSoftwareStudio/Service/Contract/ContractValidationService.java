@@ -13,8 +13,10 @@ import org.springframework.stereotype.Service;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,7 +37,30 @@ public class ContractValidationService {
     private static final Pattern IMPORT_PATTERN = Pattern.compile("^\\s*import\\s+([a-zA-Z0-9_.]+)\\s*;", Pattern.MULTILINE);
     private static final Pattern MVC_VIEW_RETURN_PATTERN = Pattern.compile("\\breturn\\s+\"([A-Za-z0-9_./-]+)\"\\s*;");
     private static final Pattern REQUEST_MAPPING_PATTERN = Pattern.compile("@(?:RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\\s*(?:\\(\\s*)?(?:(?:value|path)\\s*=\\s*)?\"([^\"]+)\"");
-    private static final Pattern FRONTEND_REQUEST_PATTERN = Pattern.compile("\\b(?:fetch|axios\\.(?:get|post|put|delete|patch))\\s*\\(\\s*['\"]([^'\"]+)['\"]");
+    private static final Pattern FRONTEND_REQUEST_PATTERN = Pattern.compile(
+            "\\b(?:fetch|axios\\.(?:get|post|put|delete|patch))\\s*\\(\\s*([`'\"])(.*?)\\1",
+            Pattern.DOTALL);
+    private static final Pattern JSON_STRINGIFY_PATTERN = Pattern.compile(
+            "JSON\\.stringify\\s*\\(\\s*\\{(.*?)\\}\\s*\\)", Pattern.DOTALL);
+    private static final Pattern DTO_FIELD_PATTERN = Pattern.compile(
+            "\\bprivate\\s+(?:final\\s+)?[A-Za-z0-9_$.<>?, @\\[\\]]+\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*(?:;|=)");
+    private static final Pattern PATH_VARIABLE_PATTERN = Pattern.compile("\\{([A-Za-z_$][A-Za-z0-9_$]*)}");
+    private static final Pattern PATH_VARIABLE_PARAMETER_PATTERN = Pattern.compile(
+            "@PathVariable(?:\\s*\\([^)]*\\))?\\s+(?:final\\s+)?[A-Za-z0-9_$.<>?,]+\\s+([A-Za-z_$][A-Za-z0-9_$]*)");
+    private static final Pattern THYMELEAF_NESTED_URL_PATTERN = Pattern.compile(
+            "th:(?:action|href)\\s*=\\s*\"[^\"]*@\\{[^\"(]*\\$\\{");
+    private static final Pattern HTML_FORM_PATTERN = Pattern.compile(
+            "<form\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern HTML_LINK_PATTERN = Pattern.compile(
+            "<a\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern HTML_ACTION_ATTRIBUTE_PATTERN = Pattern.compile(
+            "\\b(?:th:)?action\\s*=\\s*([\"'])(.*?)\\1", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern HTML_HREF_ATTRIBUTE_PATTERN = Pattern.compile(
+            "\\b(?:th:)?href\\s*=\\s*([\"'])(.*?)\\1", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern HTML_METHOD_ATTRIBUTE_PATTERN = Pattern.compile(
+            "\\b(?:th:)?method\\s*=\\s*([\"'])(.*?)\\1", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern TEXTAREA_PATTERN = Pattern.compile(
+            "<textarea\\b([^>]*)>(.*?)</textarea>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     /**
      * 对当前批次的生成结果做轻量契约校验
@@ -109,6 +134,10 @@ public class ContractValidationService {
 
         validateMainDoesNotDependOnTest(mainJavaFiles, javaTypes, warnings);
         validateFrontendRequests(frontendFiles, backendEndpoints, warnings);
+        validateControllerPathVariables(mainJavaFiles, warnings);
+        validateStaticIndexRouteConflicts(mainJavaFiles, generatedFiles, warnings);
+        validateThymeleafTemplates(generatedFiles, warnings);
+        validateFrontendPayloads(contract, generatedFiles, warnings);
         validateProjectContract(contract, generatedFiles, templateNames, backendEndpoints, warnings);
         return warnings;
     }
@@ -312,11 +341,11 @@ public class ContractValidationService {
         for (SourceCode frontendFile : frontendFiles) {
             Matcher matcher = FRONTEND_REQUEST_PATTERN.matcher(frontendFile.code() == null ? "" : frontendFile.code());
             while (matcher.find()) {
-                String requestPath = normalizeEndpoint(matcher.group(1));
-                if (isExternalUrl(requestPath) || requestPath.contains("${") || requestPath.contains("+")) {
+                String requestPath = normalizeEndpoint(matcher.group(2));
+                if (isExternalUrl(requestPath) || requestPath.contains("+")) {
                     continue;
                 }
-                boolean matched = backendEndpoints.stream().anyMatch(endpoint -> endpoint.equals(requestPath));
+                boolean matched = backendEndpoints.stream().anyMatch(endpoint -> endpointsMatch(endpoint, requestPath));
                 if (!matched) {
                     warnings.add("Frontend file " + frontendFile.filename() + " calls `" + requestPath
                             + "` but no matching controller mapping was found. Known backend endpoints: "
@@ -390,7 +419,7 @@ public class ContractValidationService {
             List<String> warnings) {
         for (FrontendCallContract call : frontendCalls) {
             String callPath = normalizeEndpoint(call.path());
-            boolean endpointExists = backendEndpoints.stream().anyMatch(endpoint -> endpoint.equals(callPath));
+            boolean endpointExists = backendEndpoints.stream().anyMatch(endpoint -> endpointsMatch(endpoint, callPath));
             if (!endpointExists) {
                 warnings.add("Contract frontend call `" + call.sourceFile() + " -> " + call.method() + " " + callPath
                         + "` has no matching backend endpoint.");
@@ -398,8 +427,360 @@ public class ContractValidationService {
 
             if (!call.sourceFile().isBlank() && !containsFile(generatedFiles, call.sourceFile())) {
                 warnings.add("Contract frontend call source file is missing: " + call.sourceFile());
+                continue;
+            }
+
+            SourceCode source = findFile(generatedFiles, call.sourceFile());
+            if (source != null && !containsFrontendCall(source.code(), call.method(), callPath)) {
+                warnings.add("Contract frontend call `" + call.sourceFile() + " -> " + call.method() + " " + callPath
+                        + "` is declared but the source file does not issue that request.");
             }
         }
+    }
+
+    /**
+     * 校验前端 JSON 请求字段是否与契约声明的请求 DTO 一致，防止 optionId/pollOptionId 一类静默错位。
+     */
+    private void validateFrontendPayloads(ProjectContract contract,
+            List<SourceCode> generatedFiles,
+            List<String> warnings) {
+        if (contract == null) {
+            return;
+        }
+        for (FrontendCallContract call : contract.frontendCalls()) {
+            if ("GET".equalsIgnoreCase(call.method())) {
+                continue;
+            }
+            ApiEndpointContract endpoint = contract.endpoints().stream()
+                    .filter(candidate -> candidate.method().equalsIgnoreCase(call.method()))
+                    .filter(candidate -> endpointsMatch(candidate.path(), call.path()))
+                    .findFirst()
+                    .orElse(null);
+            if (endpoint == null || endpoint.requestDto().isBlank()) {
+                continue;
+            }
+
+            SourceCode frontend = findFile(generatedFiles, call.sourceFile());
+            SourceCode dto = findJavaType(generatedFiles, endpoint.requestDto());
+            if (frontend == null || dto == null) {
+                continue;
+            }
+
+            Set<String> payloadFields = extractPayloadFields(frontend.code(), call.path());
+            Set<String> dtoFields = extractDtoFields(dto.code());
+            if (payloadFields.isEmpty() || dtoFields.isEmpty()) {
+                continue;
+            }
+            Set<String> unknown = new LinkedHashSet<>(payloadFields);
+            unknown.removeAll(dtoFields);
+            Set<String> missing = new LinkedHashSet<>(dtoFields);
+            missing.removeAll(payloadFields);
+            if (!unknown.isEmpty() || !missing.isEmpty()) {
+                warnings.add("Frontend request body field mismatch for `" + call.method() + " "
+                        + normalizeEndpoint(call.path()) + "`: unknown=" + unknown + ", missing=" + missing
+                        + ", requestDto=" + simpleTypeName(endpoint.requestDto()) + ".");
+            }
+        }
+    }
+
+    /**
+     * 检查 Controller 路径变量是否真正进入方法实现，避免路由中的 pollId 被接收后直接丢弃。
+     */
+    private void validateControllerPathVariables(List<SourceCode> mainJavaFiles, List<String> warnings) {
+        for (SourceCode file : mainJavaFiles) {
+            String code = file.code() == null ? "" : file.code();
+            if (!code.contains("@Controller") && !code.contains("@RestController")) {
+                continue;
+            }
+            String classPrefix = controllerClassPrefix(code);
+            int classDeclarationIndex = code.indexOf(" class ");
+            Matcher mapping = REQUEST_MAPPING_PATTERN.matcher(code);
+            while (mapping.find()) {
+                if (classDeclarationIndex < 0 || mapping.start() < classDeclarationIndex) {
+                    continue;
+                }
+                String endpoint = joinEndpoint(classPrefix, mapping.group(1));
+                Matcher pathVariable = PATH_VARIABLE_PATTERN.matcher(endpoint);
+                if (!pathVariable.find()) {
+                    continue;
+                }
+                int bodyStart = code.indexOf('{', mapping.end());
+                if (bodyStart < 0 || bodyStart - mapping.end() > 800) {
+                    continue;
+                }
+                String header = code.substring(mapping.end(), bodyStart);
+                int bodyEnd = findMatchingBrace(code, bodyStart);
+                if (bodyEnd < 0) {
+                    continue;
+                }
+                String body = code.substring(bodyStart + 1, bodyEnd);
+                Matcher parameter = PATH_VARIABLE_PARAMETER_PATTERN.matcher(header);
+                while (parameter.find()) {
+                    String parameterName = parameter.group(1);
+                    if (endpoint.contains("{" + parameterName + "}")
+                            && !Pattern.compile("\\b" + Pattern.quote(parameterName) + "\\b").matcher(body).find()) {
+                        warnings.add("Controller path variable `" + parameterName + "` for endpoint `" + endpoint
+                                + "` is declared but not used in " + file.filename() + ".");
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 静态首页存在时，REST Controller 不应再用文本或 JSON 响应占用根路径。
+     */
+    private void validateStaticIndexRouteConflicts(List<SourceCode> mainJavaFiles,
+            List<SourceCode> generatedFiles,
+            List<String> warnings) {
+        boolean hasStaticIndex = containsFile(generatedFiles, "src/main/resources/static/index.html");
+        if (!hasStaticIndex) {
+            return;
+        }
+        for (SourceCode file : mainJavaFiles) {
+            String code = file.code() == null ? "" : file.code();
+            if (!code.contains("@RestController")) {
+                continue;
+            }
+            int classDeclarationIndex = code.indexOf(" class ");
+            Matcher mapping = REQUEST_MAPPING_PATTERN.matcher(code);
+            while (mapping.find()) {
+                if (mapping.start() > classDeclarationIndex
+                        && "/".equals(normalizeEndpoint(mapping.group(1)))) {
+                    warnings.add("Static index route conflict: " + file.filename()
+                            + " maps REST output to `/` while src/main/resources/static/index.html exists.");
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * 捕获可确定判定的 Thymeleaf 表达式和编辑表单绑定风险，弥补只检查模板文件存在的不足。
+     */
+    private void validateThymeleafTemplates(List<SourceCode> generatedFiles, List<String> warnings) {
+        for (SourceCode file : generatedFiles) {
+            String filename = sourceCodePathService.normalizePath(file.filename());
+            if (!filename.startsWith("src/main/resources/templates/") || !filename.endsWith(".html")) {
+                continue;
+            }
+            String code = file.code() == null ? "" : file.code();
+            if (THYMELEAF_NESTED_URL_PATTERN.matcher(code).find()) {
+                warnings.add("Thymeleaf template risk in " + filename
+                        + ": URL expression nests `${...}` inside `@{...}`; use a path-variable expression instead.");
+            }
+            boolean editForm = code.contains("!= null") && code.contains("th:action");
+            if (!editForm) {
+                continue;
+            }
+            Matcher textarea = TEXTAREA_PATTERN.matcher(code);
+            while (textarea.find()) {
+                String attributes = textarea.group(1);
+                String body = textarea.group(2).trim();
+                if (attributes.contains("name=") && !attributes.contains("th:text")
+                        && body.isBlank()) {
+                    warnings.add("Thymeleaf template risk in " + filename
+                            + ": editable textarea has no `th:text` binding and will not retain existing content.");
+                }
+            }
+        }
+    }
+
+    private String controllerClassPrefix(String code) {
+        int classDeclarationIndex = code.indexOf(" class ");
+        if (classDeclarationIndex < 0) {
+            return "/";
+        }
+        Matcher matcher = REQUEST_MAPPING_PATTERN.matcher(code);
+        while (matcher.find()) {
+            if (matcher.start() < classDeclarationIndex) {
+                return normalizeEndpoint(matcher.group(1));
+            }
+        }
+        return "/";
+    }
+
+    private int findMatchingBrace(String code, int openingBrace) {
+        int depth = 0;
+        for (int index = openingBrace; index < code.length(); index++) {
+            char current = code.charAt(index);
+            if (current == '{') {
+                depth++;
+            } else if (current == '}' && --depth == 0) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private SourceCode findFile(List<SourceCode> generatedFiles, String expectedPath) {
+        String normalized = sourceCodePathService.normalizePath(expectedPath);
+        return generatedFiles.stream()
+                .filter(file -> sourceCodePathService.normalizePath(file.filename()).equals(normalized))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private SourceCode findJavaType(List<SourceCode> generatedFiles, String requestedType) {
+        String simpleName = simpleTypeName(requestedType);
+        return generatedFiles.stream()
+                .filter(file -> sourceCodePathService.normalizePath(file.filename()).endsWith("/" + simpleName + ".java"))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String simpleTypeName(String typeName) {
+        String normalized = typeName == null ? "" : typeName.trim();
+        int genericIndex = normalized.indexOf('<');
+        if (genericIndex >= 0) {
+            normalized = normalized.substring(0, genericIndex);
+        }
+        int separator = Math.max(normalized.lastIndexOf('.'), normalized.lastIndexOf('$'));
+        return separator >= 0 ? normalized.substring(separator + 1) : normalized;
+    }
+
+    private Set<String> extractDtoFields(String code) {
+        Set<String> fields = new LinkedHashSet<>();
+        Matcher matcher = DTO_FIELD_PATTERN.matcher(code == null ? "" : code);
+        while (matcher.find()) {
+            fields.add(matcher.group(1));
+        }
+        return fields;
+    }
+
+    private Set<String> extractPayloadFields(String code, String expectedPath) {
+        String safeCode = code == null ? "" : code;
+        Matcher request = FRONTEND_REQUEST_PATTERN.matcher(safeCode);
+        while (request.find()) {
+            if (!endpointsMatch(request.group(2), expectedPath)) {
+                continue;
+            }
+            Matcher payload = JSON_STRINGIFY_PATTERN.matcher(safeCode);
+            payload.region(request.end(), Math.min(safeCode.length(), request.end() + 1600));
+            if (!payload.find()) {
+                return Set.of();
+            }
+            Set<String> fields = new LinkedHashSet<>();
+            for (String component : payload.group(1).split(",")) {
+                String candidate = component.trim();
+                if (candidate.isEmpty() || candidate.startsWith("...")) {
+                    continue;
+                }
+                int colon = candidate.indexOf(':');
+                String key = (colon >= 0 ? candidate.substring(0, colon) : candidate)
+                        .trim().replaceAll("^[`'\"]|[`'\"]$", "");
+                if (key.matches("[A-Za-z_$][A-Za-z0-9_$]*")) {
+                    fields.add(key);
+                }
+            }
+            return fields;
+        }
+        return Set.of();
+    }
+
+    private boolean containsFrontendCall(String code, String expectedMethod, String expectedPath) {
+        String safeCode = code == null ? "" : code;
+        Matcher matcher = FRONTEND_REQUEST_PATTERN.matcher(safeCode);
+        while (matcher.find()) {
+            if (endpointsMatch(matcher.group(2), expectedPath)) {
+                return true;
+            }
+        }
+        return containsHtmlFrontendCall(safeCode, expectedMethod, expectedPath);
+    }
+
+    /**
+     * 识别 MVC 页面通过表单或链接发起的请求，避免只支持 fetch/axios 时误报 Thymeleaf 项目。
+     */
+    private boolean containsHtmlFrontendCall(String code, String expectedMethod, String expectedPath) {
+        Matcher formMatcher = HTML_FORM_PATTERN.matcher(code);
+        while (formMatcher.find()) {
+            String attributes = formMatcher.group(1);
+            String action = firstAttributeValue(HTML_ACTION_ATTRIBUTE_PATTERN, attributes);
+            String method = firstAttributeValue(HTML_METHOD_ATTRIBUTE_PATTERN, attributes);
+            String normalizedMethod = method == null || method.isBlank() ? "GET" : method.trim().toUpperCase();
+            if (normalizedMethod.equalsIgnoreCase(expectedMethod)
+                    && containsEndpointExpression(action, expectedPath)) {
+                return true;
+            }
+        }
+
+        if (!"GET".equalsIgnoreCase(expectedMethod)) {
+            return false;
+        }
+        Matcher linkMatcher = HTML_LINK_PATTERN.matcher(code);
+        while (linkMatcher.find()) {
+            String href = firstAttributeValue(HTML_HREF_ATTRIBUTE_PATTERN, linkMatcher.group(1));
+            if (containsEndpointExpression(href, expectedPath)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String firstAttributeValue(Pattern pattern, String attributes) {
+        Matcher matcher = pattern.matcher(attributes == null ? "" : attributes);
+        return matcher.find() ? matcher.group(2).trim() : null;
+    }
+
+    /**
+     * 将普通 URL 或 Thymeleaf 的 @{...} 表达式还原为可与 Controller 匹配的端点。
+     */
+    private boolean containsEndpointExpression(String attributeValue, String expectedPath) {
+        if (attributeValue == null || attributeValue.isBlank()) {
+            return false;
+        }
+        List<String> thymeleafEndpoints = extractThymeleafEndpoints(attributeValue);
+        if (!thymeleafEndpoints.isEmpty()) {
+            return thymeleafEndpoints.stream().anyMatch(endpoint -> endpointsMatch(endpoint, expectedPath));
+        }
+        String plainValue = attributeValue.trim();
+        return plainValue.startsWith("/") && endpointsMatch(plainValue, expectedPath);
+    }
+
+    /**
+     * 支持标准路径参数写法 @{/articles/{id}(id=${article.id})}，并兼容一个属性中的多个表达式。
+     */
+    private List<String> extractThymeleafEndpoints(String attributeValue) {
+        List<String> endpoints = new ArrayList<>();
+        int searchFrom = 0;
+        while (searchFrom < attributeValue.length()) {
+            int expressionStart = attributeValue.indexOf("@{", searchFrom);
+            if (expressionStart < 0) {
+                break;
+            }
+            int depth = 1;
+            int cursor = expressionStart + 2;
+            for (; cursor < attributeValue.length(); cursor++) {
+                char current = attributeValue.charAt(cursor);
+                if (current == '{') {
+                    depth++;
+                } else if (current == '}' && --depth == 0) {
+                    break;
+                }
+            }
+            if (depth != 0) {
+                break;
+            }
+            String expression = attributeValue.substring(expressionStart + 2, cursor).trim();
+            int parameterStart = expression.indexOf('(');
+            String endpoint = parameterStart >= 0 ? expression.substring(0, parameterStart).trim() : expression;
+            if (!endpoint.isBlank()) {
+                endpoints.add(endpoint);
+            }
+            searchFrom = cursor + 1;
+        }
+        return endpoints;
+    }
+
+    private boolean endpointsMatch(String left, String right) {
+        return canonicalEndpoint(left).equals(canonicalEndpoint(right));
+    }
+
+    private String canonicalEndpoint(String raw) {
+        return normalizeEndpoint(raw)
+                .replaceAll("\\$\\{[^}]+}", "{}")
+                .replaceAll("\\{[^}]+}", "{}");
     }
 
     /**
@@ -441,7 +822,8 @@ public class ContractValidationService {
         if (!path.startsWith("/")) {
             path = "/" + path;
         }
-        return path.replaceAll("/{2,}", "/").replaceFirst("/$", "");
+        String normalized = path.replaceAll("/{2,}", "/");
+        return normalized.length() > 1 ? normalized.replaceFirst("/$", "") : normalized;
     }
 
     /**

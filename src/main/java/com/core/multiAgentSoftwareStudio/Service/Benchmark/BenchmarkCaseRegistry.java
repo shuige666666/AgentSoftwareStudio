@@ -17,7 +17,8 @@ public class BenchmarkCaseRegistry {
             BenchmarkGate.NO_PLACEHOLDER_SOURCE,
             BenchmarkGate.HAS_TEST_SOURCE,
             BenchmarkGate.TESTS_EXECUTED_AND_GREEN,
-            BenchmarkGate.HAS_SPRING_CONTEXT_TEST);
+            BenchmarkGate.HAS_SPRING_CONTEXT_TEST,
+            BenchmarkGate.CONTRACT_GATES_PASSED);
 
     public List<BenchmarkCase> allCases() {
         return List.of(

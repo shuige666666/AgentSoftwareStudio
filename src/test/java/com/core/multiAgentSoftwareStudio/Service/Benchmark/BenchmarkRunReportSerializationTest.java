@@ -5,6 +5,11 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.AgentModelAssignment;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkModelInfo;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunConfiguration;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkVerificationSummary;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCaseResult;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowRunSummary;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmFailureCounts;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmFinishReasonCounts;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationCounts;
@@ -32,7 +37,7 @@ class BenchmarkRunReportSerializationTest {
                 true, "unknown", "2026-08-05-update");
         AgentModelAssignment assignment = new AgentModelAssignment("TestWriterAgent", "coderModel");
         BenchmarkRunConfiguration config = new BenchmarkRunConfiguration(
-                List.of("task-api-basic"), 3, "abc123");
+                List.of("task-api-basic"), 3, "abc123", true, "sha256-local-tree");
         BenchmarkRunReport report = new BenchmarkRunReport(
                 "2026-08-05T00:00:00Z", "2026-08-05T00:10:00Z",
                 Map.of("coderModel", model), List.of(assignment), config,
@@ -48,6 +53,8 @@ class BenchmarkRunReportSerializationTest {
         assertEquals("coderModel", json.at("/agentModelAssignments/0/modelRef").asText());
         assertEquals(3, json.at("/benchmarkConfig/maxRetries").asInt());
         assertEquals("abc123", json.at("/benchmarkConfig/gitCommit").asText());
+        assertTrue(json.at("/benchmarkConfig/gitDirty").asBoolean());
+        assertEquals("sha256-local-tree", json.at("/benchmarkConfig/workingTreeFingerprint").asText());
     }
 
     /**
@@ -89,5 +96,34 @@ class BenchmarkRunReportSerializationTest {
         assertEquals(1, json.at("/failureCounts/timeout").asLong());
         assertEquals(1, json.at("/outputValidationCounts/jsonParseError").asLong());
         assertTrue(json.path("failures").isMissingNode());
+    }
+
+    /**
+     * 单用例报告应保留修复次数、最终失败分类和门禁告警数量，但不保存调用失败明细。
+     */
+    @Test
+    void shouldSerializeWorkflowOutcomeSummary() {
+        BenchmarkCaseResult result = new BenchmarkCaseResult(
+                "snake-websocket-basic", false, false, "NOT_REVIEWED", "generated", 100,
+                new BenchmarkQualityResult(false, List.of()),
+                new LlmUsageSnapshot(1, 1, 0, 1, 0, 1, 1, 2, false),
+                3, FailureKind.BUILD_PROFILE, 4,
+                new BenchmarkVerificationSummary(
+                        0, 1, true, false, 0, 0, 0, 120, 80, FailureKind.BUILD_PROFILE),
+                new WorkflowRunSummary(
+                        2, 3, 1, 0, 0, 0,
+                        Map.of(FailureKind.BUILD_PROFILE, 1L),
+                        Map.of(), Map.of("PROFILE_POM_XML", 1L)),
+                null);
+
+        JsonNode json = new ObjectMapper().valueToTree(result);
+
+        assertEquals(3, json.at("/attemptsUsed").asInt());
+        assertEquals("BUILD_PROFILE", json.at("/finalFailureKind").asText());
+        assertEquals(4, json.at("/validationWarningCount").asInt());
+        assertEquals(0, json.at("/verificationSummary/buildExitCode").asInt());
+        assertEquals(1, json.at("/verificationSummary/testExitCode").asInt());
+        assertEquals(1, json.at("/runSummary/repairAttempts").asInt());
+        assertEquals(1, json.at("/runSummary/failedGateCounts/PROFILE_POM_XML").asInt());
     }
 }

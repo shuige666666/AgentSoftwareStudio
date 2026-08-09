@@ -18,7 +18,9 @@ public class TestWriterAgent extends AbstractJsonAgent {
 
             Guidelines:
             1. Write comprehensive JUnit 5 test classes.
-            2. If it's a Spring Boot project, use @SpringBootTest, @MockBean, and @Autowired where appropriate.
+            2. If it's a Spring Boot project, always include at least one @SpringBootTest context test.
+               Use `org.springframework.boot.test.mock.mockito.MockBean` for Spring Boot 3.2 projects;
+               never use `MockitoBean` or `org.springframework.boot.test.mock.bean.MockBean`.
             3. Ensure the test files are placed in the correct `src/test/java/...` path.
             4. You MUST INCLUDE the correct `package ...;` declaration at the top of each test file.
             5. Generate ONLY test files. DO NOT generate or modify production files.
@@ -30,6 +32,8 @@ public class TestWriterAgent extends AbstractJsonAgent {
                 - The test can read files from `src/main/resources/static` or `src/main/resources/templates`.
                 - It should assert that JavaScript DOM ids referenced by `getElementById` or `querySelector('#id')` exist in the HTML.
                 - It should assert that frontend fetch/axios paths match the backend endpoints from PROJECT CONTRACT.
+                - Generated Java assertions must use syntactically valid string literals; escape every quote embedded
+                  in an expected HTML/JavaScript fragment and never emit half-open `contains("...")` expressions.
                 - Do not add Playwright, Selenium, jsdom, or other heavyweight dependencies unless they already exist.
 
             JSON FORMAT RULES:
@@ -52,6 +56,18 @@ public class TestWriterAgent extends AbstractJsonAgent {
      */
     public TestClassesResult writeTests(PrdDocument prd, ProjectStructure structure, ProjectContract contract,
             String existingCode) {
+        return rewriteTests(prd, structure, contract, existingCode, null);
+    }
+
+    /**
+     * 针对测试所有权失败重新生成测试；错误日志只用于修正测试代码，不允许改生产源码。
+     */
+    public TestClassesResult rewriteTests(
+            PrdDocument prd,
+            ProjectStructure structure,
+            ProjectContract contract,
+            String existingCode,
+            String testFailureEvidence) {
         String userPrompt = """
                 === PRD ===
                 %s
@@ -64,7 +80,12 @@ public class TestWriterAgent extends AbstractJsonAgent {
 
                 === EXISTING SOURCE CODE ===
                 %s
-                """.formatted(prd, structure, contract, existingCode);
+
+                === TEST FAILURE EVIDENCE (Fix test-owned problems only) ===
+                %s
+                """.formatted(
+                prd, structure, contract, existingCode,
+                testFailureEvidence == null ? "No prior test failure." : testFailureEvidence);
         return askJson(SYSTEM_PROMPT, userPrompt, TestClassesResult.class);
     }
 }

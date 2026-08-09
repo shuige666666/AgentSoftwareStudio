@@ -5,7 +5,12 @@ import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationPlan;
 import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
 import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectProfile;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectQualityPolicyResult;
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowJournalEntry;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -23,9 +28,12 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public int maxRetries;
     public List<SourceCode> codes = new ArrayList<>();
     public List<String> validationWarnings = new ArrayList<>();
+    public List<WorkflowJournalEntry> runJournal = new ArrayList<>();
     public PrdDocument prd;
     public ProjectStructure structure;
     public ProjectContract contract;
+    public ProjectProfile projectProfile;
+    public ProjectQualityPolicyResult qualityPolicyResult = ProjectQualityPolicyResult.empty();
     public GenerationPlan generationPlan = new GenerationPlan(List.of());
     public int currentBatchIndex;
     // 这里放进 LangGraph state 的对象都会被序列化，路径统一存字符串更稳妥。
@@ -34,8 +42,16 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public String testResult;
     public String pendingFixLog;
     public String pendingErrorType;
+    public FailureKind pendingFailureKind = FailureKind.NONE;
+    public VerificationResult verificationResult = VerificationResult.empty();
     public boolean success;
     public boolean shouldFix;
+    public boolean preflightPassed;
+    public boolean repairStopRequested;
+    public String lastFailureFingerprint;
+    public int repeatedFailureCount;
+    public int repeatedFailureStopCount;
+    public int noChangeStopCount;
     public int currentAttempt = 1;
 
     /**

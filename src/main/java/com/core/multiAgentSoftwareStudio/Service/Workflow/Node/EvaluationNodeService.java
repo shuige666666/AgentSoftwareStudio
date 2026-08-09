@@ -1,6 +1,11 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow.Node;
 
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
+import com.core.multiAgentSoftwareStudio.Model.Generation.QualityPolicyFinding;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.RunJournalService;
 import org.springframework.stereotype.Service;
 
 import java.util.function.Consumer;
@@ -12,12 +17,16 @@ import java.util.function.Consumer;
 public class EvaluationNodeService {
 
     private final VerificationNodeService verificationNodeService;
+    private final RunJournalService runJournalService;
 
     /**
      * 注入验证节点服务，用于在编译运行成功后继续执行测试。
      */
-    public EvaluationNodeService(VerificationNodeService verificationNodeService) {
+    public EvaluationNodeService(
+            VerificationNodeService verificationNodeService,
+            RunJournalService runJournalService) {
         this.verificationNodeService = verificationNodeService;
+        this.runJournalService = runJournalService;
     }
 
     /**
@@ -31,50 +40,46 @@ public class EvaluationNodeService {
         data.shouldFix = false;
         data.pendingFixLog = null;
         data.pendingErrorType = null;
+        data.pendingFailureKind = FailureKind.NONE;
 
-        String executionResult = data.executionResult == null ? "" : data.executionResult;
-        boolean isDockerError = executionResult.startsWith("Docker Execution Error:");
-        boolean buildSucceeded = !isDockerError && executionResult.contains("BUILD SUCCESS");
-
-        boolean hasError;
-        if (isDockerError) {
-            hasError = true;
-        } else if (buildSucceeded) {
-            hasError = false;
-        } else {
-            hasError = hasBuildOrRuntimeError(executionResult);
-        }
-
-        if (!hasError) {
+        VerificationResult verification = data.verificationResult == null
+                ? VerificationResult.empty()
+                : data.verificationResult;
+        if (verification.build().passed()) {
             logger.accept("8. Runtime/compile stage passed, running tests.");
-            data.testResult = verificationNodeService.runTests(data);
+            VerificationStepResult testStep = verificationNodeService.runTests(data);
+            data.verificationResult = verification.withTest(testStep);
+            runJournalService.recordVerification(data, testStep);
             logger.accept("Test result:");
             logger.accept(data.testResult);
 
-            if (hasBuildOrRuntimeError(data.testResult)) {
-                data.pendingErrorType = determineErrorType(data.testResult);
-                data.pendingFixLog = data.testResult;
-            } else if (data.testResult.contains("Failures: 0") && data.testResult.contains("Errors: 0")) {
+            if (data.verificationResult.passed()) {
+                var contractBlockers = data.qualityPolicyResult == null
+                        ? java.util.List.<QualityPolicyFinding>of()
+                        : data.qualityPolicyResult.contractBlockingFindings();
+                if (!contractBlockers.isEmpty()) {
+                    logger.accept("Technical verification passed; semantic contract gates still require repair.");
+                    String contractEvidence = contractBlockers.stream()
+                            .map(finding -> finding.gate() + ": " + finding.evidence())
+                            .reduce((left, right) -> left + "\n" + right)
+                            .orElse("Contract validation failed");
+                    setPendingFailure(data, FailureKind.CONTRACT, contractEvidence);
+                    data.shouldFix = !data.repairStopRequested && data.currentAttempt < data.maxRetries;
+                    return data;
+                }
                 logger.accept("All generated tests passed.");
                 data.success = true;
                 return data;
-            } else if (data.testResult.contains("Failures:") || data.testResult.contains("Errors:")) {
-                data.pendingErrorType = "LOGIC ERROR (TEST FAILURE)";
-                data.pendingFixLog = data.testResult;
-            } else {
-                logger.accept("No concrete test summary found. Treating the build as successful.");
-                data.success = true;
-                return data;
             }
+            setPendingFailure(data, data.verificationResult.primaryFailureKind(), data.testResult);
         } else {
-            data.pendingErrorType = determineErrorType(executionResult);
-            data.pendingFixLog = executionResult;
+            setPendingFailure(data, verification.primaryFailureKind(), data.executionResult);
         }
 
         // 修复被刻意延后到“全项目生成完成之后”。
         // 这样虽然最后一次修复看到的上下文更大，但总次数会少很多，
         // 整体 token 成本通常比“每个阶段都修”更低。
-        data.shouldFix = data.currentAttempt < data.maxRetries;
+        data.shouldFix = !data.repairStopRequested && data.currentAttempt < data.maxRetries;
         if (!data.shouldFix) {
             logger.accept("Reached the repair limit. Returning the latest generated code.");
         }
@@ -82,40 +87,12 @@ public class EvaluationNodeService {
     }
 
     /**
-     * 根据运行日志判断错误的大致类型
+     * 将结构化失败同步到旧的字符串字段，兼容现有 Debugger Prompt 和接口返回。
      */
-    private String determineErrorType(String executionResult) {
-        // 这里不是做非常精确的错误分类，而是为了决定后续 prompt 应该偏向哪种修复思路。
-        if (executionResult.contains("COMPILATION ERROR")
-                || executionResult.contains("Compilation failure")
-                || executionResult.contains("javac:")
-                || executionResult.contains("cannot find symbol")
-                || executionResult.contains("symbol:")
-                || executionResult.contains("maven-compiler-plugin")) {
-            return "COMPILATION ERROR";
-        }
-        if ((executionResult.contains("Tests run:") && executionResult.contains("Failures:"))
-                || executionResult.contains("There are test failures")) {
-            if (!executionResult.contains("Failures: 0") || !executionResult.contains("Errors: 0")) {
-                return "LOGIC ERROR (TEST FAILURE)";
-            }
-        }
-        return "RUNTIME ERROR";
-    }
-
-    private boolean hasBuildOrRuntimeError(String output) {
-        if (output == null || output.isBlank()) {
-            return false;
-        }
-        // 避免 "Errors: 0"、"No errors" 这类正常输出被宽泛的 Error/error 误判。
-        return output.contains("BUILD FAILURE")
-                || output.contains("COMPILATION ERROR")
-                || output.contains("Compilation failure")
-                || output.contains("javac:")
-                || output.contains("cannot find symbol")
-                || output.contains("symbol:")
-                || output.contains("Failed to execute")
-                || output.contains("Exception in thread")
-                || output.contains("There are test failures");
+    private void setPendingFailure(SoftwareStudioWorkflowData data, FailureKind failureKind, String log) {
+        FailureKind safeKind = failureKind == null ? FailureKind.UNKNOWN : failureKind;
+        data.pendingFailureKind = safeKind;
+        data.pendingErrorType = safeKind.name();
+        data.pendingFixLog = log == null ? "" : log;
     }
 }

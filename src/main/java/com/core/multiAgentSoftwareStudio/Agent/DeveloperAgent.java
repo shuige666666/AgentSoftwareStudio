@@ -29,6 +29,8 @@ public class DeveloperAgent extends AbstractJsonAgent {
                         7. For frontend files, every DOM id referenced by JavaScript (`getElementById`, `querySelector('#id')`) MUST exist in the generated HTML.
                         8. For interactive screens, wire button/event handlers end-to-end so user actions trigger the intended fetch or UI transition.
                         9. If using visibility classes such as `d-none`, always implement both show and hide transitions consistently.
+                        10. For a Spring Boot pom.xml, use Java 17, Spring Boot 3.2.4, and spring-boot-starter-test.
+                            Never add `spring-websocket-test` or Spring test annotations from newer incompatible releases.
 
                         CRITICAL RULES:
                         1. You must ONLY implement the code for the 'Current Target File'.

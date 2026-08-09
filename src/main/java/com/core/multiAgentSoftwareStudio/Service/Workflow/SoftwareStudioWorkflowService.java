@@ -12,6 +12,7 @@ import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ContractNodeServi
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.EvaluationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.FrontendReviewNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PersistenceNodeService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PreflightValidationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.RequirementNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.TestGenerationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.VerificationNodeService;
@@ -45,10 +46,12 @@ public class SoftwareStudioWorkflowService {
     private final TestGenerationNodeService testGenerationNodeService;
     private final FrontendReviewNodeService frontendReviewNodeService;
     private final PersistenceNodeService persistenceNodeService;
+    private final PreflightValidationNodeService preflightValidationNodeService;
     private final VerificationNodeService verificationNodeService;
     private final EvaluationNodeService evaluationNodeService;
     private final ProjectRepairService projectRepairService;
     private final LlmUsageMetricsService llmUsageMetricsService;
+    private final RunJournalService runJournalService;
 
     /**
      * 注入软件工坊工作流所需的节点服务。
@@ -61,11 +64,13 @@ public class SoftwareStudioWorkflowService {
             BatchValidationNodeService batchValidationNodeService,
             TestGenerationNodeService testGenerationNodeService,
             FrontendReviewNodeService frontendReviewNodeService,
+            PreflightValidationNodeService preflightValidationNodeService,
             PersistenceNodeService persistenceNodeService,
             VerificationNodeService verificationNodeService,
             EvaluationNodeService evaluationNodeService,
             ProjectRepairService projectRepairService,
-            LlmUsageMetricsService llmUsageMetricsService) {
+            LlmUsageMetricsService llmUsageMetricsService,
+            RunJournalService runJournalService) {
         this.requirementNodeService = requirementNodeService;
         this.architectureNodeService = architectureNodeService;
         this.contractNodeService = contractNodeService;
@@ -74,11 +79,13 @@ public class SoftwareStudioWorkflowService {
         this.batchValidationNodeService = batchValidationNodeService;
         this.testGenerationNodeService = testGenerationNodeService;
         this.frontendReviewNodeService = frontendReviewNodeService;
+        this.preflightValidationNodeService = preflightValidationNodeService;
         this.persistenceNodeService = persistenceNodeService;
         this.verificationNodeService = verificationNodeService;
         this.evaluationNodeService = evaluationNodeService;
         this.projectRepairService = projectRepairService;
         this.llmUsageMetricsService = llmUsageMetricsService;
+        this.runJournalService = runJournalService;
     }
 
     /**
@@ -110,7 +117,10 @@ public class SoftwareStudioWorkflowService {
                     List.copyOf(finalData.validationWarnings),
                     finalData.pendingErrorType,
                     finalData.currentAttempt,
-                    llmUsageMetricsService.snapshot());
+                    llmUsageMetricsService.snapshot(),
+                    finalData.qualityPolicyResult,
+                    finalData.verificationResult,
+                    runJournalService.summarize(finalData));
         } finally {
             logger.accept(llmUsageMetricsService.formatSummary());
         }
@@ -146,6 +156,7 @@ public class SoftwareStudioWorkflowService {
         NodeAction<SoftwareStudioWorkflowGraphState> validateBatchNode = createNodeAction(batchValidationNodeService::execute, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> generateTestsNode = createNodeAction(testGenerationNodeService::execute, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> frontendReviewNode = createNodeAction(frontendReviewNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> preflightNode = createNodeAction(preflightValidationNodeService::execute, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> persistNode = createNodeAction(persistenceNodeService::execute, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> runNode = createNodeAction(verificationNodeService::run, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> evaluateNode = createNodeAction(evaluationNodeService::execute, logger);
@@ -156,7 +167,8 @@ public class SoftwareStudioWorkflowService {
             // 1. 先产出 PRD 和架构蓝图
             // 2. 再做批次规划
             // 3. 按批次生成代码，每个批次生成后只做轻量校验
-            // 4. 所有批次结束后，统一生成测试、统一落盘、统一编译和修复
+            // 4. 所有批次结束后统一生成测试，并先通过 Profile 硬门禁再落盘验证
+            // 5. 失败按责任阶段分流，共享同一份修复预算后重新经过前置门禁
             var graph = new StateGraph<>(SoftwareStudioWorkflowGraphState.SCHEMA, SoftwareStudioWorkflowGraphState::new)
                     .addNode("pm", node_async(pmNode))
                     .addNode("architect", node_async(architectNode))
@@ -166,6 +178,7 @@ public class SoftwareStudioWorkflowService {
                     .addNode("validate_batch", node_async(validateBatchNode))
                     .addNode("generate_tests", node_async(generateTestsNode))
                     .addNode("frontend_review", node_async(frontendReviewNode))
+                    .addNode("preflight", node_async(preflightNode))
                     .addNode("persist", node_async(persistNode))
                     .addNode("run", node_async(runNode))
                     .addNode("evaluate", node_async(evaluateNode))
@@ -182,14 +195,18 @@ public class SoftwareStudioWorkflowService {
                                     state.workflowData().hasMoreBatches() ? "NEXT_BATCH" : "GENERATE_TESTS"),
                             Map.of("NEXT_BATCH", "generate_batch", "GENERATE_TESTS", "generate_tests"))
                     .addEdge("generate_tests", "frontend_review")
-                    .addEdge("frontend_review", "persist")
+                    .addEdge("frontend_review", "preflight")
+                    .addConditionalEdges(
+                            "preflight",
+                            state -> java.util.concurrent.CompletableFuture.completedFuture(preflightRoute(state.workflowData())),
+                            Map.of("PERSIST", "persist", "RUN", "run", "FIX", "fix", "END", END))
                     .addEdge("persist", "run")
                     .addEdge("run", "evaluate")
                     .addConditionalEdges(
                             "evaluate",
                             state -> java.util.concurrent.CompletableFuture.completedFuture(state.workflowData().shouldFix ? "FIX" : "END"),
                             Map.of("FIX", "fix", "END", END))
-                    .addEdge("fix", "run")
+                    .addEdge("fix", "preflight")
                     // LangGraph4j 默认最大迭代数较小（25），
                     // 我们这个工作流包含“按批次循环 +可选修复循环”，正常情况下也可能超过默认值。
                     // 提高最大迭代数上限以避免误判为死循环，同时仍保留兜底保护。
@@ -242,5 +259,18 @@ public class SoftwareStudioWorkflowService {
         // 每次修复回环有 fix+run+evaluate 三步。
         int estimated = 8 + estimatedBatchCount * 2 + retries * 3;
         return Math.max(estimated, 200);
+    }
+
+    /**
+     * 前置门禁失败时消耗共享修复预算；通过后根据是否已落盘选择持久化或重新验证。
+     */
+    private String preflightRoute(SoftwareStudioWorkflowData data) {
+        if (data.repairStopRequested) {
+            return "END";
+        }
+        if (!data.preflightPassed) {
+            return data.shouldFix ? "FIX" : "END";
+        }
+        return data.projectPath == null ? "PERSIST" : "RUN";
     }
 }

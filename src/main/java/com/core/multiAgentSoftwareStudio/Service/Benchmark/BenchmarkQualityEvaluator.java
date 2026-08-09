@@ -4,6 +4,7 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkFinding;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkGate;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
+import com.core.multiAgentSoftwareStudio.Model.Generation.QualityPolicyFinding;
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,7 @@ public class BenchmarkQualityEvaluator {
             case HAS_TEST_SOURCE -> hasTestSource(codes);
             case TESTS_EXECUTED_AND_GREEN -> testsExecutedAndGreen(execution);
             case HAS_SPRING_CONTEXT_TEST -> hasSpringContextTest(codes);
+            case CONTRACT_GATES_PASSED -> contractGatesPassed(execution);
         };
     }
 
@@ -72,10 +74,10 @@ public class BenchmarkQualityEvaluator {
 
     private BenchmarkFinding testsExecutedAndGreen(WorkflowExecutionResult execution) {
         String output = execution == null || execution.testResult() == null ? "" : execution.testResult();
-        boolean ranTests = output.contains("Tests run:") && !output.contains("No tests to run");
-        boolean green = output.contains("Failures: 0") && output.contains("Errors: 0")
-                && !output.contains("BUILD FAILURE") && !output.contains("There are test failures");
-        boolean passed = ranTests && green;
+        boolean passed = execution != null
+                && execution.verification() != null
+                && execution.verification().test().testSummary().executedAndGreen()
+                && execution.verification().test().passed();
         String evidence = passed
                 ? "Generated tests executed and reported zero failures and errors."
                 : "Tests must execute and report Failures: 0 plus Errors: 0; output=" + summarize(output);
@@ -87,6 +89,22 @@ public class BenchmarkQualityEvaluator {
                 .anyMatch(code -> (code.code() == null ? "" : code.code()).contains("@SpringBootTest"));
         return new BenchmarkFinding(BenchmarkGate.HAS_SPRING_CONTEXT_TEST, found,
                 found ? "Generated Spring context test exists." : "No @SpringBootTest was generated.");
+    }
+
+    /**
+     * 独立质量评价读取工作流最终一次契约检查，避免被已经修复的历史失败干扰。
+     */
+    private BenchmarkFinding contractGatesPassed(WorkflowExecutionResult execution) {
+        var qualityPolicyResult = execution == null ? null : execution.qualityPolicyResult();
+        List<QualityPolicyFinding> blockers = qualityPolicyResult == null
+                ? List.of()
+                : qualityPolicyResult.contractBlockingFindings();
+        boolean passed = qualityPolicyResult != null && blockers.isEmpty();
+        String evidence = passed
+                ? "Final semantic contract gates passed."
+                : "Final semantic contract gates contain " + blockers.size() + " blocker(s): "
+                        + blockers.stream().map(finding -> finding.gate()).distinct().toList();
+        return new BenchmarkFinding(BenchmarkGate.CONTRACT_GATES_PASSED, passed, evidence);
     }
 
     private String summarize(String output) {

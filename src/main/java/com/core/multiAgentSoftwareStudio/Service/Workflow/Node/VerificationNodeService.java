@@ -1,7 +1,13 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow.Node;
 
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.VerificationResultService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.RunJournalService;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStage;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -14,12 +20,19 @@ import java.util.function.Consumer;
 public class VerificationNodeService {
 
     private final DockerSandboxService sandboxService;
+    private final VerificationResultService verificationResultService;
+    private final RunJournalService runJournalService;
 
     /**
      * 注入 Docker 沙箱服务。
      */
-    public VerificationNodeService(DockerSandboxService sandboxService) {
+    public VerificationNodeService(
+            DockerSandboxService sandboxService,
+            VerificationResultService verificationResultService,
+            RunJournalService runJournalService) {
         this.sandboxService = sandboxService;
+        this.verificationResultService = verificationResultService;
+        this.runJournalService = runJournalService;
     }
 
     /**
@@ -30,10 +43,14 @@ public class VerificationNodeService {
         // 前面阶段只做轻量约束，避免每一层都进入昂贵的沙箱执行。
         logger.accept(
                 "7. Running final compile/runtime verification in the sandbox. Attempt " + data.currentAttempt + ".");
-        data.executionResult = sandboxService.runCodeInSandbox(
+        SandboxExecutionResult execution = sandboxService.runCodeInSandboxWithResult(
                 Path.of(data.projectPath),
                 data.structure.projectType(),
                 data.structure.mainClassName());
+        data.executionResult = execution.output();
+        VerificationStepResult build = verificationResultService.toStep(VerificationStage.BUILD, execution);
+        data.verificationResult = VerificationResult.afterBuild(build);
+        runJournalService.recordVerification(data, build);
 
         logger.accept("Execution result:");
         logger.accept("--------------------------------------------------");
@@ -45,7 +62,10 @@ public class VerificationNodeService {
     /**
      * 在 Docker 沙箱中执行生成项目的测试。
      */
-    public String runTests(SoftwareStudioWorkflowData data) {
-        return sandboxService.runTestsInSandbox(Path.of(data.projectPath), data.structure.projectType());
+    public VerificationStepResult runTests(SoftwareStudioWorkflowData data) {
+        SandboxExecutionResult execution = sandboxService.runTestsInSandboxWithResult(
+                Path.of(data.projectPath), data.structure.projectType());
+        data.testResult = execution.output();
+        return verificationResultService.toStep(VerificationStage.TEST, execution);
     }
 }

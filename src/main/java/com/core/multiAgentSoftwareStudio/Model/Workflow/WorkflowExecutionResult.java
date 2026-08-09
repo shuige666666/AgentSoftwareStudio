@@ -1,6 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Model.Workflow;
 
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectQualityPolicyResult;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmUsageSnapshot;
 
 import java.util.List;
@@ -20,5 +21,51 @@ public record WorkflowExecutionResult(
         List<String> validationWarnings,
         String pendingErrorType,
         int attemptsUsed,
-        LlmUsageSnapshot usage) {
+        LlmUsageSnapshot usage,
+        ProjectQualityPolicyResult qualityPolicyResult,
+        VerificationResult verification,
+        WorkflowRunSummary runSummary) {
+
+    public WorkflowExecutionResult {
+        qualityPolicyResult = qualityPolicyResult == null
+                ? ProjectQualityPolicyResult.empty()
+                : qualityPolicyResult;
+    }
+
+    /**
+     * 保留旧调用方式，便于已有单元测试和外围代码逐步迁移。
+     */
+    public WorkflowExecutionResult(
+            List<SourceCode> codes,
+            boolean platformSuccess,
+            String projectPath,
+            String executionResult,
+            String testResult,
+            List<String> validationWarnings,
+            String pendingErrorType,
+            int attemptsUsed,
+            LlmUsageSnapshot usage) {
+        this(codes, platformSuccess, projectPath, executionResult, testResult, validationWarnings,
+                pendingErrorType, attemptsUsed, usage, ProjectQualityPolicyResult.empty(),
+                VerificationResult.empty(), WorkflowRunSummary.empty());
+    }
+
+    /**
+     * 保留阶段一至三期间的完整调用签名，缺少最终质量策略时按无阻断项处理。
+     */
+    public WorkflowExecutionResult(
+            List<SourceCode> codes,
+            boolean platformSuccess,
+            String projectPath,
+            String executionResult,
+            String testResult,
+            List<String> validationWarnings,
+            String pendingErrorType,
+            int attemptsUsed,
+            LlmUsageSnapshot usage,
+            VerificationResult verification,
+            WorkflowRunSummary runSummary) {
+        this(codes, platformSuccess, projectPath, executionResult, testResult, validationWarnings,
+                pendingErrorType, attemptsUsed, usage, ProjectQualityPolicyResult.empty(), verification, runSummary);
+    }
 }

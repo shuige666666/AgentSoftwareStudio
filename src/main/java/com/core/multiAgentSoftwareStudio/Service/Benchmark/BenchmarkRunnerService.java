@@ -5,6 +5,7 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.AgentModelAssignment;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCaseResult;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkModelInfo;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkVerificationSummary;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunConfiguration;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
@@ -23,22 +24,29 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 顺序执行真实 LLM 基准任务。该服务只会被显式 HTTP 请求调用，绝不会由单元测试触发。
@@ -85,8 +93,10 @@ public class BenchmarkRunnerService {
         List<BenchmarkCaseResult> results = new ArrayList<>();
         Map<String, BenchmarkModelInfo> models = modelInfo(releaseLabels);
         List<AgentModelAssignment> agentModelAssignments = agentModelAssignments();
+        GitSnapshot gitSnapshot = resolveGitSnapshot();
         BenchmarkRunConfiguration benchmarkConfig = new BenchmarkRunConfiguration(
-                cases.stream().map(BenchmarkCase::id).toList(), maxRetries, resolveGitCommit());
+                cases.stream().map(BenchmarkCase::id).toList(), maxRetries,
+                gitSnapshot.commit(), gitSnapshot.dirty(), gitSnapshot.workingTreeFingerprint());
 
         System.out.println("[Benchmark] 质量基准测试进度：0/" + cases.size() + "，准备执行。");
         for (int index = 0; index < cases.size(); index++) {
@@ -144,12 +154,18 @@ public class BenchmarkRunnerService {
             BenchmarkQualityResult quality = qualityEvaluator.evaluate(benchmarkCase, execution);
             return new BenchmarkCaseResult(
                     benchmarkCase.id(), execution.platformSuccess(), quality.passed(), "NOT_REVIEWED",
-                    execution.projectPath(), elapsedMillis(started), quality, execution.usage(), null);
+                    execution.projectPath(), elapsedMillis(started), quality, execution.usage(),
+                    execution.attemptsUsed(), resolveFinalFailure(execution),
+                    execution.validationWarnings().size(),
+                    BenchmarkVerificationSummary.from(execution.verification()), execution.runSummary(), null);
         } catch (Exception e) {
             BenchmarkQualityResult quality = new BenchmarkQualityResult(false, List.of());
             return new BenchmarkCaseResult(
                     benchmarkCase.id(), false, false, "NOT_REVIEWED", null, elapsedMillis(started), quality,
                     llmUsageMetricsService.snapshot(),
+                    0, com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind.UNKNOWN, 0,
+                    BenchmarkVerificationSummary.empty(),
+                    com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowRunSummary.empty(),
                     e.getClass().getSimpleName() + ": " + safeMessage(e));
         } finally {
             // 当前任务结束后停止心跳线程，避免后续任务的控制台进度被旧任务重复刷写。
@@ -240,27 +256,95 @@ public class BenchmarkRunnerService {
     /**
      * 读取当前 Git 提交号；在无 Git 环境的部署包中保留 unknown，不影响测试执行。
      */
-    private String resolveGitCommit() {
+    private GitSnapshot resolveGitSnapshot() {
         String environmentCommit = normalizeNullable(System.getenv("GIT_COMMIT"));
-        if (environmentCommit != null) {
-            return environmentCommit;
+        String commit = environmentCommit == null ? runGit("rev-parse", "HEAD") : environmentCommit;
+        if (commit == null) {
+            commit = "unknown";
         }
+
+        String rawStatus = runGit("-c", "core.quotepath=false", "status", "--porcelain=v1", "--untracked-files=all");
+        if (rawStatus == null) {
+            return new GitSnapshot(commit, false, null);
+        }
+        List<String> sourceStatus = rawStatus.lines()
+                .filter(line -> !line.isBlank())
+                .filter(line -> !isGeneratedArtifactStatus(line))
+                .toList();
+        if (sourceStatus.isEmpty()) {
+            return new GitSnapshot(commit, false, null);
+        }
+
+        String diff = runGit("diff", "--binary", "HEAD", "--", ".",
+                ":(exclude)benchmark-results/**", ":(exclude)ai_generated_projects/**", ":(exclude)target/**");
+        StringBuilder fingerprintInput = new StringBuilder(String.join("\n", sourceStatus))
+                .append("\n---DIFF---\n")
+                .append(diff == null ? "" : diff);
+        for (String statusLine : sourceStatus) {
+            if (!statusLine.startsWith("?? ")) {
+                continue;
+            }
+            Path untracked = Path.of(statusLine.substring(3).trim());
+            if (!Files.isRegularFile(untracked)) {
+                continue;
+            }
+            try {
+                fingerprintInput.append("\n---UNTRACKED:").append(untracked).append("---\n")
+                        .append(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                                .digest(Files.readAllBytes(untracked))));
+            } catch (IOException | NoSuchAlgorithmException ignored) {
+                fingerprintInput.append("<unreadable>");
+            }
+        }
+        return new GitSnapshot(commit, true, sha256(fingerprintInput.toString()));
+    }
+
+    private boolean isGeneratedArtifactStatus(String statusLine) {
+        String path = statusLine.length() <= 3 ? "" : statusLine.substring(3).trim().replace('\\', '/');
+        return path.startsWith("benchmark-results/")
+                || path.startsWith("ai_generated_projects/")
+                || path.startsWith("target/");
+    }
+
+    private String runGit(String... arguments) {
         try {
-            Process process = new ProcessBuilder("git", "rev-parse", "HEAD")
+            List<String> command = new ArrayList<>();
+            command.add("git");
+            command.addAll(Arrays.asList(arguments));
+            Process process = new ProcessBuilder(command)
                     .redirectErrorStream(true)
                     .start();
-            if (!process.waitFor(2, TimeUnit.SECONDS) || process.exitValue() != 0) {
+            CompletableFuture<byte[]> output = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return process.getInputStream().readAllBytes();
+                } catch (IOException ignored) {
+                    return new byte[0];
+                }
+            });
+            if (!process.waitFor(3, TimeUnit.SECONDS) || process.exitValue() != 0) {
                 process.destroyForcibly();
-                return "unknown";
+                output.cancel(true);
+                return null;
             }
-            String commit = normalizeNullable(new String(process.getInputStream().readAllBytes()).trim());
-            return commit == null ? "unknown" : commit;
-        } catch (IOException e) {
-            return "unknown";
+            return normalizeNullable(new String(output.get(1, TimeUnit.SECONDS), StandardCharsets.UTF_8));
+        } catch (IOException | ExecutionException | TimeoutException e) {
+            return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return "unknown";
+            return null;
         }
+    }
+
+    private String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("当前 JDK 不支持 SHA-256", e);
+        }
+    }
+
+    private record GitSnapshot(String commit, boolean dirty, String workingTreeFingerprint) {
     }
 
     private String normalizeNullable(String value) {
@@ -282,5 +366,25 @@ public class BenchmarkRunnerService {
 
     private String safeMessage(Exception error) {
         return error.getMessage() == null ? "No message" : error.getMessage();
+    }
+
+    private com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind resolveFinalFailure(
+            WorkflowExecutionResult execution) {
+        if (execution == null || execution.platformSuccess()) {
+            return com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind.NONE;
+        }
+        if (execution.pendingErrorType() != null && !execution.pendingErrorType().isBlank()) {
+            try {
+                return com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind.valueOf(execution.pendingErrorType());
+            } catch (IllegalArgumentException ignored) {
+                // 兼容旧工作流返回的自由文本错误类型，继续使用结构化验证结果兜底。
+            }
+        }
+        if (execution.verification() != null
+                && execution.verification().primaryFailureKind()
+                        != com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind.NONE) {
+            return execution.verification().primaryFailureKind();
+        }
+        return com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind.UNKNOWN;
     }
 }

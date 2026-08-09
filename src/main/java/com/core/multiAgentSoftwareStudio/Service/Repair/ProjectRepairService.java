@@ -1,45 +1,66 @@
 package com.core.multiAgentSoftwareStudio.Service.Repair;
 
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
+import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
+import com.core.multiAgentSoftwareStudio.Agent.TestWriterAgent;
 import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFix;
 import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFixResult;
 import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.TestClassesResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairDecision;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairTarget;
 import com.core.multiAgentSoftwareStudio.Service.Context.CodeContextBuilderService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.FailureTriageService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.RunJournalService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import static com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService.safeValue;
 
 /**
- * 负责调用调试 Agent 分析编译、运行、测试错误，并将整文件修复结果同步到内存和磁盘。
+ * 负责根据失败分流调用 TestWriter 或 Debugger，并将整文件修复结果同步到内存和磁盘。
  */
 @Service
 public class ProjectRepairService {
 
     private final DebuggerAgent debuggerAgent;
+    private final DeveloperAgent developerAgent;
+    private final TestWriterAgent testWriterAgent;
     private final WorkspaceService workspaceService;
     private final CodeContextBuilderService codeContextBuilderService;
     private final SourceCodePathService sourceCodePathService;
+    private final FailureTriageService failureTriageService;
+    private final RunJournalService runJournalService;
 
     /**
      * 注入修复流程所需的调试 Agent、工作区服务和上下文辅助服务。
      */
     public ProjectRepairService(DebuggerAgent debuggerAgent,
+            DeveloperAgent developerAgent,
+            TestWriterAgent testWriterAgent,
             WorkspaceService workspaceService,
             CodeContextBuilderService codeContextBuilderService,
-            SourceCodePathService sourceCodePathService) {
+            SourceCodePathService sourceCodePathService,
+            FailureTriageService failureTriageService,
+            RunJournalService runJournalService) {
         this.debuggerAgent = debuggerAgent;
+        this.developerAgent = developerAgent;
+        this.testWriterAgent = testWriterAgent;
         this.workspaceService = workspaceService;
         this.codeContextBuilderService = codeContextBuilderService;
         this.sourceCodePathService = sourceCodePathService;
+        this.failureTriageService = failureTriageService;
+        this.runJournalService = runJournalService;
     }
 
     /**
@@ -50,17 +71,43 @@ public class ProjectRepairService {
             return;
         }
 
-        // fix 节点本身不做复杂路由，只负责把需要的上下文拼好，
-        // 然后交给 debuggerAgent 给出整文件修复结果。
-        handleFix(
-                data.codes,
-                data.pendingFixLog,
-                data.pendingErrorType,
-                data.contract,
-                Path.of(data.projectPath),
-                data.validationWarnings,
-                logger);
+        RepairDecision decision = failureTriageService.decide(data);
+        logger.accept("9. Failure triage: " + decision.reason());
+        if (!decision.retryable() || !decision.llmAllowed()) {
+            data.shouldFix = false;
+            runJournalService.recordRepair(data, decision, false, List.of(), decision.reason());
+            return;
+        }
+
+        Map<String, String> before = snapshotCodes(data.codes);
+        if (decision.target() == RepairTarget.TESTS) {
+            regenerateTests(data, logger);
+        } else if (decision.target() == RepairTarget.IMPLEMENTATION
+                && findReferencedProductionFile(data.codes, data.pendingFixLog) != null) {
+            repairImplementation(data, logger);
+        } else {
+            handleFix(
+                    data.codes,
+                    data.pendingFixLog,
+                    data.pendingErrorType,
+                    data.contract,
+                    data.projectPath == null ? null : Path.of(data.projectPath),
+                    data.validationWarnings,
+                    logger);
+        }
         data.currentAttempt++;
+
+        List<String> changedFiles = changedFiles(before, snapshotCodes(data.codes));
+        boolean changed = !changedFiles.isEmpty();
+        if (!changed) {
+            // 修复没有产生实际变化时停止，避免下一轮再次发送相同上下文。
+            data.noChangeStopCount++;
+            data.repairStopRequested = true;
+            data.shouldFix = false;
+        }
+        runJournalService.recordRepair(
+                data, decision, changed, changedFiles,
+                changed ? "修复已更新 " + changedFiles.size() + " 个文件。" : "修复没有产生实际文件变化。");
     }
 
     private void handleFix(List<SourceCode> codes,
@@ -98,7 +145,120 @@ public class ProjectRepairService {
             sourceCodePathService.applyCodeFix(codes, normalizedFilename, fix.newCode());
             normalizedFixes.add(normalizedFix);
         }
-        workspaceService.applyFixesToDisk(projectPath, normalizedFixes, logger);
+        if (projectPath != null) {
+            workspaceService.applyFixesToDisk(projectPath, normalizedFixes, logger);
+        }
+    }
+
+    /**
+     * 测试编译或测试发现失败时复用 TestWriter 的一次调用，并消耗同一份修复预算。
+     */
+    private void regenerateTests(SoftwareStudioWorkflowData data, Consumer<String> logger) {
+        logger.accept("9. Regenerating tests for a test-owned failure.");
+        TestClassesResult result = testWriterAgent.rewriteTests(
+                data.prd,
+                data.structure,
+                data.contract,
+                codeContextBuilderService.buildCodeContextForTester(data.codes),
+                data.pendingFixLog);
+        if (result == null || result.testFiles() == null || result.testFiles().isEmpty()) {
+            logger.accept("TestWriter did not return concrete test files.");
+            return;
+        }
+
+        List<CodeFix> diskFixes = new ArrayList<>();
+        for (SourceCode testFile : result.testFiles()) {
+            if (testFile == null) {
+                continue;
+            }
+            String filename = sourceCodePathService.normalizeGeneratedFilename(testFile.filename(), testFile.code());
+            sourceCodePathService.upsertSourceCode(data.codes, filename, testFile.code());
+            diskFixes.add(new CodeFix(filename, "TestWriter 按失败分类重新生成测试", testFile.code()));
+        }
+        if (data.projectPath != null && !diskFixes.isEmpty()) {
+            workspaceService.applyFixesToDisk(Path.of(data.projectPath), diskFixes, logger);
+        }
+    }
+
+    /**
+     * 编译日志能稳定定位生产文件时交给 Developer 单文件修复，避免 Debugger 无边界修改多处代码。
+     */
+    private void repairImplementation(SoftwareStudioWorkflowData data, Consumer<String> logger) {
+        SourceCode target = findReferencedProductionFile(data.codes, data.pendingFixLog);
+        if (target == null) {
+            return;
+        }
+        String filename = sourceCodePathService.normalizeGeneratedFilename(target.filename(), target.code());
+        logger.accept("9. Routing implementation-owned failure to Developer: " + filename);
+        SourceCode repaired = developerAgent.writeCode(
+                data.prd,
+                data.structure,
+                data.contract,
+                codeContextBuilderService.buildOptimizedCodeContext(
+                        data.codes, data.pendingFixLog, data.pendingErrorType),
+                filename,
+                "Repair the referenced production file for this failure: " + data.pendingFixLog,
+                "Preserve existing public contracts and implement the complete corrected file.",
+                "Failure repair; do not modify unrelated files.");
+        if (repaired == null || repaired.code() == null) {
+            logger.accept("Developer did not return a concrete implementation fix.");
+            return;
+        }
+        sourceCodePathService.upsertSourceCode(data.codes, filename, repaired.code());
+        if (data.projectPath != null) {
+            workspaceService.applyFixesToDisk(
+                    Path.of(data.projectPath),
+                    List.of(new CodeFix(filename, "Developer 按实现失败分类修复", repaired.code())),
+                    logger);
+        }
+    }
+
+    private SourceCode findReferencedProductionFile(List<SourceCode> codes, String failureLog) {
+        if (codes == null || failureLog == null || failureLog.isBlank()) {
+            return null;
+        }
+        for (SourceCode code : codes) {
+            if (code == null) {
+                continue;
+            }
+            String filename = sourceCodePathService.normalizeGeneratedFilename(code.filename(), code.code());
+            if (!filename.startsWith("src/main/") || sourceCodePathService.isFrontendFile(filename)) {
+                continue;
+            }
+            String pureName = Path.of(filename).getFileName().toString();
+            if (failureLog.contains(filename) || failureLog.contains(filename.replace('/', '\\'))
+                    || failureLog.contains(pureName)) {
+                return code;
+            }
+        }
+        return null;
+    }
+
+    private Map<String, String> snapshotCodes(List<SourceCode> codes) {
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        if (codes == null) {
+            return snapshot;
+        }
+        for (SourceCode code : codes) {
+            if (code == null) {
+                continue;
+            }
+            String filename = sourceCodePathService.normalizeGeneratedFilename(code.filename(), code.code());
+            snapshot.put(filename, code.code() == null ? "" : code.code());
+        }
+        return snapshot;
+    }
+
+    private List<String> changedFiles(Map<String, String> before, Map<String, String> after) {
+        List<String> changed = new ArrayList<>();
+        java.util.LinkedHashSet<String> filenames = new java.util.LinkedHashSet<>(before.keySet());
+        filenames.addAll(after.keySet());
+        for (String filename : filenames) {
+            if (!java.util.Objects.equals(before.get(filename), after.get(filename))) {
+                changed.add(filename);
+            }
+        }
+        return List.copyOf(changed);
     }
 
     /**
@@ -112,7 +272,9 @@ public class ProjectRepairService {
         // 同时把中间轻量校验发现的问题一起给 debugger，减少来回试错。
         StringBuilder builder = new StringBuilder(executionResult == null ? "" : executionResult);
 
-        if ("COMPILATION ERROR".equals(errorType)) {
+        if ("COMPILATION ERROR".equals(errorType)
+                || "MAIN_COMPILE".equals(errorType)
+                || "TEST_COMPILE".equals(errorType)) {
             String classification = classifyCompilationErrors(executionResult == null ? "" : executionResult, codes);
             if (!classification.isBlank()) {
                 builder.append("\n\n=== COMPILATION ERROR CLASSIFIER ===\n").append(classification);

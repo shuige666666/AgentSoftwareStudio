@@ -17,6 +17,9 @@ public class DebuggerAgent extends AbstractJsonAgent {
                            1. COMPILATION ERROR: Syntax issues, missing imports, type mismatches.
                            2. RUNTIME ERROR: Exceptions during execution (NullPointerException, etc.).
                            3. LOGIC ERROR (TEST FAILURE): The code runs but the output is incorrect or tests fail.
+                           4. BUILD_PROFILE: Maven/POM or framework version compatibility problems.
+                           5. CONTRACT: Endpoint, DTO, view, or frontend/backend contract mismatches.
+                           6. MAIN_COMPILE / IMPLEMENTATION / SPRING_CONTEXT: Production source or wiring failures.
 
                            CRITICAL RULES:
                            1. Analyze the ERROR LOG carefully. Identify which file is causing the issue.
@@ -27,6 +30,8 @@ public class DebuggerAgent extends AbstractJsonAgent {
                            6. If a file is a test file (`*Test.java` or uses JUnit), its filename MUST be under `src/test/java/...`, never under `src/main/java/...`.
                            7. Ensure all referenced types are properly imported (e.g., List, ResponseEntity, RequestParam, PathVariable).
                            8. You must return a JSON object containing a 'fixes' array.
+                           9. Respect the ERROR TYPE ownership. Do not rewrite tests for implementation failures,
+                              and do not change production behavior merely to hide a test-owned framework error.
 
                            JSON FORMAT RULES:
                         1. The output MUST be a valid JSON object.

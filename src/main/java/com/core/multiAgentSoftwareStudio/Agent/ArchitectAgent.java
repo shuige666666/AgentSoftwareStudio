@@ -21,6 +21,8 @@ public class ArchitectAgent extends AbstractJsonAgent {
                - You MUST also provide `mainClassName` when the project needs an executable main class.
             2. Build Configuration:
                - If projectType is "SPRING_BOOT" or "PURE_JAVA_MAVEN", ALWAYS include a `pom.xml`.
+               - For SPRING_BOOT use the platform profile: Java 17 and Spring Boot 3.2.4.
+               - Use `spring-boot-starter-test` for tests; never invent dependencies such as `spring-websocket-test`.
             3. Separation of Concerns:
                - Organize code into proper packages such as controller, service, model, dto, repository, config.
             4. Output Format:
