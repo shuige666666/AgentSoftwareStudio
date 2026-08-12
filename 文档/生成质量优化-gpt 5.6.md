@@ -79,11 +79,11 @@
 ```
 Invoke-RestMethod 'http://127.0.0.1:8080/api/SoftwareStudio/benchmarks/run' `
   -Method Post -ContentType 'application/json' `
-  -Body '{ "caseIds": ["calculator-web-basic"], "maxRetries": 2 }'
+  -Body '{ "caseIds": ["calculator-web-basic"] }'
 ```
 
 - 指定一个 `caseId`，就真实生成并验证 1 个项目。不传 `caseIds`，就依次跑全部 3 个项目。
-- 每个项目当前默认 `maxRetries=2`，表示一次初始生成后，最多再经历一次修复回环；它不是重复抽样两次。
+- 修复预算由实际切片数量和 `RepairBudgetConfig` 统一计算，请求不再接收旧 `maxRetries` 参数。
 
 （下方的信息为旧的信息，可能和现在的实际信息有所不同）
 

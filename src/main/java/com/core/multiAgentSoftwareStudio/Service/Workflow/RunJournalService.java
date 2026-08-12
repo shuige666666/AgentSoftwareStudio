@@ -9,6 +9,7 @@ import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowJournalEntry;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowJournalEventType;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowRunSummary;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.SliceDeliverySummary;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -24,6 +25,21 @@ import java.util.stream.Collectors;
  */
 @Service
 public class RunJournalService {
+
+    public void recordSliceStarted(SoftwareStudioWorkflowData data) {
+        add(data, WorkflowJournalEventType.SLICE_STARTED, FailureKind.NONE, null,
+                true, null, List.of(), List.of(), "slice-started");
+    }
+
+    public void recordSliceAccepted(SoftwareStudioWorkflowData data) {
+        add(data, WorkflowJournalEventType.SLICE_ACCEPTED, FailureKind.NONE, null,
+                true, null, List.of(), List.of(), "slice-accepted");
+    }
+
+    public void recordRegressionFailure(SoftwareStudioWorkflowData data) {
+        add(data, WorkflowJournalEventType.SLICE_REGRESSION_FAILED, data.pendingFailureKind, null,
+                false, null, List.of(), List.of(), "accepted-slice-regression");
+    }
 
     public void recordPreflight(SoftwareStudioWorkflowData data, ProjectQualityPolicyResult result) {
         List<String> failedGateIds = result == null ? List.of() : result.blockingFindings().stream()
@@ -95,9 +111,46 @@ public class RunJournalService {
                 .filter(entry -> entry.eventType() == WorkflowJournalEventType.PREFLIGHT)
                 .flatMap(entry -> entry.gateIds().stream())
                 .collect(Collectors.groupingBy(Function.identity(), LinkedHashMap::new, Collectors.counting()));
+        int acceptedSlices = (int) data.runJournal.stream()
+                .filter(entry -> entry.eventType() == WorkflowJournalEventType.SLICE_ACCEPTED).count();
+        int regressionFailures = (int) data.runJournal.stream()
+                .filter(entry -> entry.eventType() == WorkflowJournalEventType.SLICE_REGRESSION_FAILED).count();
+        int firstPassAccepted = (int) data.runJournal.stream()
+                .filter(entry -> entry.eventType() == WorkflowJournalEventType.SLICE_ACCEPTED)
+                .filter(entry -> data.repairBudget == null
+                        || data.repairBudget.sliceRepairCounts().getOrDefault(entry.sliceId(), 0) == 0)
+                .count();
+        SliceDeliverySummary sliceSummary = new SliceDeliverySummary(
+                data.sliceDeliveryPlan == null ? 0 : data.sliceDeliveryPlan.slices().size(),
+                acceptedSlices,
+                firstPassAccepted,
+                regressionFailures,
+                data.repairRollbackCount,
+                data.repeatedRegressionStopCount,
+                data.repairBudget == null ? 0 : data.repairBudget.usedLlmRepairs(),
+                data.repairBudget == null ? 0 : data.repairBudget.maxLlmRepairs(),
+                data.repairBudget == null ? 0 : data.repairBudget.maxRepairsPerSlice(),
+                data.repairBudget == null ? 0 : data.repairBudget.reservedForFinalVerification(),
+                data.repairBudget == null ? 0 : data.repairBudget.finalRepairCount(),
+                data.repairBudget != null && data.repairBudget.finalReserveBorrowed(),
+                data.repairBudget == null ? Map.of() : data.repairBudget.sliceRepairCounts(),
+                data.repairBudget == null ? null : data.repairBudget.exhaustedAt(),
+                data.repairStoppedAt,
+                data.repairStopReason,
+                data.generatedTestFileCount,
+                data.admittedTestFileCount,
+                data.acceptedTestFiles.size(),
+                data.skippedFutureTypeTestCount,
+                data.skippedFutureResourceTestCount,
+                data.skippedAcceptedTestFileCount,
+                data.repairBudget == null ? "" : data.repairBudget.policyVersion(),
+                data.sliceDeliveryPlan == null ? "" : data.sliceDeliveryPlan.policyVersion(),
+                data.structure == null ? "" : data.structure.projectType(),
+                data.projectProfile == null ? "" : data.projectProfile.projectType(),
+                data.projectProfile == null ? "" : data.projectProfile.id());
         return new WorkflowRunSummary(preflightChecks, verificationSteps, repairAttempts,
                 normalizedFileChanges, data.repeatedFailureStopCount, data.noChangeStopCount,
-                failures, repairTargets, failedGateCounts);
+                failures, repairTargets, failedGateCounts, sliceSummary);
     }
 
     private void add(
@@ -114,6 +167,7 @@ public class RunJournalService {
                 data.runJournal.size() + 1,
                 Instant.now().toString(),
                 eventType,
+                data.currentSliceId(),
                 data.currentAttempt,
                 failureKind == null ? FailureKind.UNKNOWN : failureKind,
                 repairTarget,

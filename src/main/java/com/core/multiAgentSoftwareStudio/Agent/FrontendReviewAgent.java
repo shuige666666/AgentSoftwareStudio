@@ -21,6 +21,8 @@ public class FrontendReviewAgent extends AbstractJsonAgent {
             4. UI state transitions: hidden/visible classes such as d-none must be added and removed consistently.
             5. Network integration: fetch/axios calls must match PROJECT CONTRACT endpoint paths and methods.
             6. User workflow completeness: clicking the main buttons should visibly change state or send the intended request.
+            7. MVC integration: every contracted Thymeleaf link/form must exist in its declared source file and use a
+               standard `@{...}` URL expression that resolves to the exact backend method and path.
 
             Repair rules:
             1. If any frontend file needs changes, return the FULL updated file content.
@@ -28,6 +30,9 @@ public class FrontendReviewAgent extends AbstractJsonAgent {
             3. Do not hide integration bugs with null checks only. Fix the selector/id/class mismatch at the source.
             4. Do not invent new backend endpoints. Align frontend calls to PROJECT CONTRACT.
             5. If no frontend changes are needed, return {"fixes":[]}.
+            6. Never concatenate multiple `${...}` expressions to build th:href or th:action. Use separate forms/links
+               or a conditional between complete `@{...}` expressions for create/edit variants.
+            7. Every newCode value must contain the complete non-blank file. Never return an empty whole-file fix.
 
             JSON FORMAT RULES:
             1. Return a valid JSON object with a fixes array.

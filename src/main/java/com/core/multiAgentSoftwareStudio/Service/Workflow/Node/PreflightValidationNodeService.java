@@ -7,6 +7,7 @@ import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFix;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
 import com.core.multiAgentSoftwareStudio.Service.Contract.ProjectProfileService;
+import com.core.multiAgentSoftwareStudio.Service.Generation.SliceProductionScopeService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.RunJournalService;
@@ -28,16 +29,19 @@ public class PreflightValidationNodeService {
     private final WorkspaceService workspaceService;
     private final SourceCodePathService sourceCodePathService;
     private final RunJournalService runJournalService;
+    private final SliceProductionScopeService sliceProductionScopeService;
 
     public PreflightValidationNodeService(
             ProjectProfileService projectProfileService,
             WorkspaceService workspaceService,
             SourceCodePathService sourceCodePathService,
-            RunJournalService runJournalService) {
+            RunJournalService runJournalService,
+            SliceProductionScopeService sliceProductionScopeService) {
         this.projectProfileService = projectProfileService;
         this.workspaceService = workspaceService;
         this.sourceCodePathService = sourceCodePathService;
         this.runJournalService = runJournalService;
+        this.sliceProductionScopeService = sliceProductionScopeService;
     }
 
     /**
@@ -49,8 +53,13 @@ public class PreflightValidationNodeService {
         List<String> normalizedFiles = projectProfileService.applySafeDefaults(data.projectProfile, data.codes);
         syncNormalizedFiles(data, normalizedFiles, logger);
 
+        var activeContract = data.currentSlice() == null || data.finalVerificationStarted
+                ? data.contract
+                : data.currentSlice().contract();
         ProjectQualityPolicyResult result = projectProfileService.evaluate(
-                data.projectProfile, data.codes, data.contract, normalizedFiles);
+                data.projectProfile, data.codes, activeContract, normalizedFiles);
+        result = applySliceProductionScopeGate(data, result);
+        result = applySliceTestDiscoveryGate(data, result);
         data.qualityPolicyResult = result;
         runJournalService.recordPreflight(data, result);
         // Profile/结构错误仍在 Docker 前阻断；语义契约错误延后到技术验证通过后处理，
@@ -83,20 +92,81 @@ public class PreflightValidationNodeService {
             return data;
         }
 
-        FailureKind primaryFailure = technicalBlockers.getFirst().failureKind() == null
-                ? FailureKind.UNKNOWN
-                : technicalBlockers.getFirst().failureKind();
+        FailureKind primaryFailure = technicalBlockers.stream()
+                .map(finding -> finding.failureKind() == null ? FailureKind.UNKNOWN : finding.failureKind())
+                .min(java.util.Comparator.comparingInt(this::failurePriority))
+                .orElse(FailureKind.UNKNOWN);
         data.pendingFailureKind = primaryFailure;
         data.pendingErrorType = primaryFailure.name();
         data.pendingFixLog = technicalBlockers.stream()
                 .map(finding -> finding.gate() + ": " + finding.evidence())
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse("Preflight validation failed");
-        data.shouldFix = !data.repairStopRequested && data.currentAttempt < data.maxRetries;
+        data.shouldFix = data.canRepairNow();
         if (!data.shouldFix) {
+            data.markRepairBudgetUnavailable();
             logger.accept("   Preflight failed and the shared repair budget is exhausted.");
         }
         return data;
+    }
+
+    /**
+     * 当前切片引用未来类型时在 Docker 前阻断，并把问题稳定路由到生产实现修复。
+     */
+    private ProjectQualityPolicyResult applySliceProductionScopeGate(
+            SoftwareStudioWorkflowData data,
+            ProjectQualityPolicyResult result) {
+        List<String> references = sliceProductionScopeService.findFutureTypeReferences(data);
+        if (references.isEmpty()) {
+            return result;
+        }
+        List<QualityPolicyFinding> findings = new ArrayList<>();
+        findings.add(new QualityPolicyFinding(
+                "SLICE_FUTURE_TYPE_REFERENCE",
+                QualityGateSeverity.BLOCK,
+                FailureKind.MAIN_COMPILE,
+                String.join("; ", references)));
+        // 测试生成因生产越界被主动跳过时，测试缺失只是派生现象，不能抢占真实根因。
+        result.findings().stream()
+                .filter(finding -> !"PROFILE_TEST_SOURCE".equals(finding.gate()))
+                .filter(finding -> !"PROFILE_SPRING_CONTEXT_TEST".equals(finding.gate()))
+                .forEach(findings::add);
+        return new ProjectQualityPolicyResult(false, findings, result.normalizedFiles());
+    }
+
+    /**
+     * 每个切片必须拥有自己的聚焦验收测试，不能只依赖之前切片的绿色回归结果被误接受。
+     */
+    private ProjectQualityPolicyResult applySliceTestDiscoveryGate(
+            SoftwareStudioWorkflowData data,
+            ProjectQualityPolicyResult result) {
+        if (data.finalVerificationStarted || data.currentSlice() == null || !data.currentSliceTestFiles.isEmpty()) {
+            return result;
+        }
+        if (result.findings().stream().anyMatch(finding -> "SLICE_FUTURE_TYPE_REFERENCE".equals(finding.gate()))) {
+            return result;
+        }
+        List<QualityPolicyFinding> findings = new ArrayList<>(result.findings());
+        findings.add(new QualityPolicyFinding(
+                "SLICE_TEST_DISCOVERY",
+                QualityGateSeverity.BLOCK,
+                FailureKind.TEST_DISCOVERY,
+                "Current vertical slice did not produce a focused test file."));
+        return new ProjectQualityPolicyResult(false, findings, result.normalizedFiles());
+    }
+
+    /**
+     * 生产构建根因优先于测试缺失和语义契约，确保有限预算先修复可编译性。
+     */
+    private int failurePriority(FailureKind failureKind) {
+        return switch (failureKind) {
+            case BUILD_PROFILE -> 0;
+            case MAIN_COMPILE, IMPLEMENTATION, SPRING_CONTEXT -> 1;
+            case TEST_COMPILE, TEST_CODE -> 2;
+            case TEST_DISCOVERY, TEST_ASSERTION -> 3;
+            case CONTRACT -> 4;
+            default -> 5;
+        };
     }
 
     /**
@@ -106,7 +176,7 @@ public class PreflightValidationNodeService {
             SoftwareStudioWorkflowData data,
             List<String> normalizedFiles,
             Consumer<String> logger) {
-        if (data.projectPath == null || normalizedFiles == null || normalizedFiles.isEmpty()) {
+        if (normalizedFiles == null || normalizedFiles.isEmpty()) {
             return;
         }
         List<CodeFix> fixes = new ArrayList<>();
@@ -118,9 +188,15 @@ public class PreflightValidationNodeService {
                     .orElse(null);
             if (source != null) {
                 fixes.add(new CodeFix(filename, "ProjectProfile 兼容性归一化", source.code()));
+                if (!data.finalVerificationStarted && data.currentSlice() != null
+                        && filename.startsWith("src/test/")
+                        && !data.currentSliceTestFiles.contains(filename)) {
+                    // 确定性新增的 Context 测试属于当前切片，必须进入本轮验证并在验收后成为回归基线。
+                    data.currentSliceTestFiles.add(filename);
+                }
             }
         }
-        if (!fixes.isEmpty()) {
+        if (data.projectPath != null && !fixes.isEmpty()) {
             workspaceService.applyFixesToDisk(Path.of(data.projectPath), fixes, logger);
         }
     }

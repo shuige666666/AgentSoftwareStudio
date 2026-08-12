@@ -15,7 +15,8 @@ public record WorkflowRunSummary(
         int noChangeStops,
         Map<FailureKind, Long> failureCounts,
         Map<RepairTarget, Long> repairTargetCounts,
-        Map<String, Long> failedGateCounts) implements Serializable {
+        Map<String, Long> failedGateCounts,
+        SliceDeliverySummary sliceDelivery) implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -23,6 +24,7 @@ public record WorkflowRunSummary(
         failureCounts = failureCounts == null ? Map.of() : Map.copyOf(failureCounts);
         repairTargetCounts = repairTargetCounts == null ? Map.of() : Map.copyOf(repairTargetCounts);
         failedGateCounts = failedGateCounts == null ? Map.of() : Map.copyOf(failedGateCounts);
+        sliceDelivery = sliceDelivery == null ? SliceDeliverySummary.empty() : sliceDelivery;
     }
 
     /**
@@ -38,7 +40,8 @@ public record WorkflowRunSummary(
             Map<FailureKind, Long> failureCounts,
             Map<RepairTarget, Long> repairTargetCounts) {
         this(preflightChecks, verificationSteps, repairAttempts, normalizedFileChanges,
-                repeatedFailureStops, noChangeStops, failureCounts, repairTargetCounts, Map.of());
+                repeatedFailureStops, noChangeStops, failureCounts, repairTargetCounts, Map.of(),
+                SliceDeliverySummary.empty());
     }
 
     /**
@@ -52,10 +55,27 @@ public record WorkflowRunSummary(
             int noChangeStops,
             Map<FailureKind, Long> failureCounts) {
         this(preflightChecks, verificationSteps, repairAttempts, 0,
-                repeatedFailureStops, noChangeStops, failureCounts, Map.of(), Map.of());
+                repeatedFailureStops, noChangeStops, failureCounts, Map.of(), Map.of(),
+                SliceDeliverySummary.empty());
+    }
+
+    public WorkflowRunSummary(
+            int preflightChecks,
+            int verificationSteps,
+            int repairAttempts,
+            int normalizedFileChanges,
+            int repeatedFailureStops,
+            int noChangeStops,
+            Map<FailureKind, Long> failureCounts,
+            Map<RepairTarget, Long> repairTargetCounts,
+            Map<String, Long> failedGateCounts) {
+        this(preflightChecks, verificationSteps, repairAttempts, normalizedFileChanges,
+                repeatedFailureStops, noChangeStops, failureCounts, repairTargetCounts, failedGateCounts,
+                SliceDeliverySummary.empty());
     }
 
     public static WorkflowRunSummary empty() {
-        return new WorkflowRunSummary(0, 0, 0, 0, 0, 0, Map.of(), Map.of(), Map.of());
+        return new WorkflowRunSummary(0, 0, 0, 0, 0, 0, Map.of(), Map.of(), Map.of(),
+                SliceDeliverySummary.empty());
     }
 }

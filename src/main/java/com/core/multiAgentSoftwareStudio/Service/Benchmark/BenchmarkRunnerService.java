@@ -8,9 +8,12 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkModelInfo;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkVerificationSummary;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunConfiguration;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRepairBudgetConfiguration;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunRequest;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
+import com.core.multiAgentSoftwareStudio.Config.RepairBudgetConfig;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +30,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -56,6 +61,7 @@ public class BenchmarkRunnerService {
 
     private static final Path REPORT_ROOT = Path.of("benchmark-results");
     private static final long PROGRESS_HEARTBEAT_SECONDS = 30;
+    private static final int MAX_REPETITIONS = 10;
 
     private final BenchmarkCaseRegistry caseRegistry;
     private final BenchmarkQualityEvaluator qualityEvaluator;
@@ -82,10 +88,23 @@ public class BenchmarkRunnerService {
         return caseRegistry.allCases();
     }
 
+    /**
+     * 将当前集中配置的修复预算策略写入报告，避免继续记录已经不控制运行行为的旧重试参数。
+     */
+    private BenchmarkRepairBudgetConfiguration repairBudgetConfiguration() {
+        return new BenchmarkRepairBudgetConfiguration(
+                RepairBudget.POLICY_VERSION,
+                RepairBudgetConfig.MAX_PROJECT_LLM_REPAIRS,
+                RepairBudgetConfig.EXTRA_REPAIRS_BEYOND_SLICE_COUNT,
+                RepairBudgetConfig.MAX_REPAIRS_PER_SLICE,
+                RepairBudgetConfig.RESERVED_FOR_FINAL_VERIFICATION);
+    }
+
     public BenchmarkRunReport run(BenchmarkRunRequest request) {
         long batchStartedNanos = System.nanoTime();
-        List<BenchmarkCase> cases = caseRegistry.select(request == null ? List.of() : request.caseIds());
-        int maxRetries = request == null || request.maxRetries() == null ? 2 : Math.max(1, request.maxRetries());
+        List<BenchmarkCase> selectedCases = caseRegistry.select(request == null ? List.of() : request.caseIds());
+        int repetitions = resolveRepetitions(request == null ? null : request.repetitions());
+        List<BenchmarkCase> cases = repeatCases(selectedCases, repetitions);
         Map<String, String> releaseLabels = request == null || request.modelReleaseLabels() == null
                 ? Map.of()
                 : request.modelReleaseLabels();
@@ -94,49 +113,72 @@ public class BenchmarkRunnerService {
         Map<String, BenchmarkModelInfo> models = modelInfo(releaseLabels);
         List<AgentModelAssignment> agentModelAssignments = agentModelAssignments();
         GitSnapshot gitSnapshot = resolveGitSnapshot();
+        Path reportPath = reportPathFor(started).toAbsolutePath();
         BenchmarkRunConfiguration benchmarkConfig = new BenchmarkRunConfiguration(
-                cases.stream().map(BenchmarkCase::id).toList(), maxRetries,
+                selectedCases.stream().map(BenchmarkCase::id).toList(), repetitions, repairBudgetConfiguration(),
                 gitSnapshot.commit(), gitSnapshot.dirty(), gitSnapshot.workingTreeFingerprint());
 
-        System.out.println("[Benchmark] 质量基准测试进度：0/" + cases.size() + "，准备执行。");
+        System.out.println("[Benchmark] 质量基准测试进度：0/" + cases.size()
+                + "，每个案例重复 " + repetitions + " 次，准备执行。");
         for (int index = 0; index < cases.size(); index++) {
             BenchmarkCase benchmarkCase = cases.get(index);
-            results.add(runCase(benchmarkCase, maxRetries, index + 1, cases.size()));
+            int repetitionIndex = index % repetitions + 1;
+            results.add(runCase(benchmarkCase, repetitionIndex, repetitions, index + 1, cases.size()));
+            // 每个重复样本完成后立即覆盖检查点；后续超时或进程中断不会丢失已经完成的结果。
+            BenchmarkRunReport checkpoint = buildReport(
+                    started, Instant.now(), models, agentModelAssignments, benchmarkConfig, results, reportPath);
+            persist(checkpoint, reportPath);
+            System.out.println("[Benchmark] 已保存检查点：" + results.size() + "/" + cases.size()
+                    + "，报告=" + reportPath);
         }
 
         Instant finished = Instant.now();
-        int platformSuccessCount = (int) results.stream().filter(BenchmarkCaseResult::platformSuccess).count();
-        int independentPassCount = (int) results.stream().filter(BenchmarkCaseResult::independentQualityPassed).count();
-        int falseSuccessCount = (int) results.stream()
-                .filter(result -> result.platformSuccess() && !result.independentQualityPassed())
-                .count();
-        Double falseSuccessRate = platformSuccessCount == 0 ? null : (double) falseSuccessCount / platformSuccessCount;
-
-        BenchmarkRunReport withoutPath = new BenchmarkRunReport(
-                started.toString(), finished.toString(), models, agentModelAssignments, benchmarkConfig,
-                List.copyOf(results), platformSuccessCount,
-                independentPassCount, falseSuccessCount, falseSuccessRate, null);
-        String reportPath = reportPathFor(started).toAbsolutePath().toString();
-        persist(new BenchmarkRunReport(
-                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.models(),
-                withoutPath.agentModelAssignments(), withoutPath.benchmarkConfig(), withoutPath.cases(),
-                withoutPath.platformSuccessCount(), withoutPath.independentQualityPassCount(),
-                withoutPath.falseSuccessCount(), withoutPath.falseSuccessRate(), reportPath),
-                Path.of(reportPath));
+        BenchmarkRunReport finalReport = buildReport(
+                started, finished, models, agentModelAssignments, benchmarkConfig, results, reportPath);
+        persist(finalReport, reportPath);
         long totalElapsedMillis = elapsedMillis(batchStartedNanos);
         System.out.println("[Benchmark] 质量基准测试进度：" + cases.size() + "/" + cases.size()
                 + "，全部任务已完成，整批总用时 " + formatTotalElapsed(totalElapsedMillis) + "。");
+        return finalReport;
+    }
+
+    /**
+     * 根据当前已完成样本构建可独立读取的报告，供中途检查点和最终结果共用。
+     */
+    static BenchmarkRunReport buildReport(
+            Instant started,
+            Instant finished,
+            Map<String, BenchmarkModelInfo> models,
+            List<AgentModelAssignment> agentModelAssignments,
+            BenchmarkRunConfiguration benchmarkConfig,
+            List<BenchmarkCaseResult> results,
+            Path reportPath) {
+        List<BenchmarkCaseResult> completedResults = List.copyOf(results);
+        int platformSuccessCount = (int) completedResults.stream()
+                .filter(BenchmarkCaseResult::platformSuccess).count();
+        int independentPassCount = (int) completedResults.stream()
+                .filter(BenchmarkCaseResult::independentQualityPassed).count();
+        int falseSuccessCount = (int) completedResults.stream()
+                .filter(result -> result.platformSuccess() && !result.independentQualityPassed())
+                .count();
+        Double falseSuccessRate = platformSuccessCount == 0
+                ? null
+                : (double) falseSuccessCount / platformSuccessCount;
         return new BenchmarkRunReport(
-                withoutPath.startedAt(), withoutPath.finishedAt(), withoutPath.models(),
-                withoutPath.agentModelAssignments(), withoutPath.benchmarkConfig(), withoutPath.cases(),
-                withoutPath.platformSuccessCount(), withoutPath.independentQualityPassCount(),
-                withoutPath.falseSuccessCount(), withoutPath.falseSuccessRate(), reportPath);
+                started.toString(), finished.toString(), models, agentModelAssignments, benchmarkConfig,
+                completedResults, platformSuccessCount, independentPassCount,
+                falseSuccessCount, falseSuccessRate, reportPath.toString());
     }
 
     /**
      * 执行单个基准任务，并持续输出当前任务序号和耗时，避免长时间 LLM 调用看起来像控制台失去响应。
      */
-    private BenchmarkCaseResult runCase(BenchmarkCase benchmarkCase, int maxRetries, int currentCase, int totalCases) {
+    private BenchmarkCaseResult runCase(
+            BenchmarkCase benchmarkCase,
+            int repetitionIndex,
+            int repetitionCount,
+            int currentCase,
+            int totalCases) {
         long started = System.nanoTime();
         printProgress(benchmarkCase.id(), currentCase, totalCases, "正在执行", started);
         ScheduledExecutorService progressExecutor = Executors.newSingleThreadScheduledExecutor();
@@ -149,11 +191,11 @@ public class BenchmarkRunnerService {
             WorkflowExecutionResult execution = workflowService.generateProjectWithResult(
                     benchmarkCase.prompt(),
                     message -> System.out.println("[Benchmark " + currentCase + "/" + totalCases + " "
-                            + benchmarkCase.id() + "] " + message),
-                    maxRetries);
+                            + benchmarkCase.id() + "] " + message));
             BenchmarkQualityResult quality = qualityEvaluator.evaluate(benchmarkCase, execution);
             return new BenchmarkCaseResult(
-                    benchmarkCase.id(), execution.platformSuccess(), quality.passed(), "NOT_REVIEWED",
+                    benchmarkCase.id(), repetitionIndex, repetitionCount,
+                    execution.platformSuccess(), quality.passed(), "NOT_REVIEWED",
                     execution.projectPath(), elapsedMillis(started), quality, execution.usage(),
                     execution.attemptsUsed(), resolveFinalFailure(execution),
                     execution.validationWarnings().size(),
@@ -161,7 +203,8 @@ public class BenchmarkRunnerService {
         } catch (Exception e) {
             BenchmarkQualityResult quality = new BenchmarkQualityResult(false, List.of());
             return new BenchmarkCaseResult(
-                    benchmarkCase.id(), false, false, "NOT_REVIEWED", null, elapsedMillis(started), quality,
+                    benchmarkCase.id(), repetitionIndex, repetitionCount,
+                    false, false, "NOT_REVIEWED", null, elapsedMillis(started), quality,
                     llmUsageMetricsService.snapshot(),
                     0, com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind.UNKNOWN, 0,
                     BenchmarkVerificationSummary.empty(),
@@ -173,6 +216,30 @@ public class BenchmarkRunnerService {
             progressExecutor.shutdown();
             printProgress(benchmarkCase.id(), currentCase, totalCases, "已完成", started);
         }
+    }
+
+    /**
+     * 校验每个案例的重复次数，避免误传过大数值造成不可控的模型调用和等待时间。
+     */
+    static int resolveRepetitions(Integer requestedRepetitions) {
+        int repetitions = requestedRepetitions == null ? 1 : requestedRepetitions;
+        if (repetitions < 1 || repetitions > MAX_REPETITIONS) {
+            throw new IllegalArgumentException("repetitions must be between 1 and " + MAX_REPETITIONS);
+        }
+        return repetitions;
+    }
+
+    /**
+     * 将每个选中案例连续展开指定次数，便于在一个请求中获得可区分的重复样本。
+     */
+    static List<BenchmarkCase> repeatCases(List<BenchmarkCase> selectedCases, int repetitions) {
+        List<BenchmarkCase> repeated = new ArrayList<>();
+        for (BenchmarkCase benchmarkCase : selectedCases) {
+            for (int repetition = 0; repetition < repetitions; repetition++) {
+                repeated.add(benchmarkCase);
+            }
+        }
+        return List.copyOf(repeated);
     }
 
     /**
@@ -188,10 +255,21 @@ public class BenchmarkRunnerService {
         return REPORT_ROOT.resolve(name);
     }
 
-    private void persist(BenchmarkRunReport report, Path reportPath) {
+    void persist(BenchmarkRunReport report, Path reportPath) {
         try {
             Files.createDirectories(REPORT_ROOT);
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(reportPath.toFile(), report);
+            Path parent = reportPath.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Path temporaryReport = reportPath.resolveSibling(reportPath.getFileName() + ".tmp");
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(temporaryReport.toFile(), report);
+            try {
+                Files.move(temporaryReport, reportPath,
+                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(temporaryReport, reportPath, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to persist benchmark report", e);
         }

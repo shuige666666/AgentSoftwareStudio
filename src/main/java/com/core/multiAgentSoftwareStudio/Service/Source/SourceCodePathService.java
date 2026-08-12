@@ -63,7 +63,7 @@ public class SourceCodePathService {
      * 适用于 BatchGeneration、TestGeneration 等场景，生成阶段文件名已经过规范化。
      */
     public void upsertSourceCode(List<SourceCode> codes, String filename, String code) {
-        String safeCode = code == null ? "" : code;
+        String safeCode = normalizeGeneratedCode(filename, code);
         String normalizedCandidate = normalizeGeneratedFilename(filename, safeCode);
         String language = detectLanguageFromFilename(normalizedCandidate);
         for (int i = 0; i < codes.size(); i++) {
@@ -81,7 +81,11 @@ public class SourceCodePathService {
      * 适用于 Debugger / FrontendReview 等修复场景，模型可能只返回类名而非完整路径。
      */
     public void applyCodeFix(List<SourceCode> codes, String filename, String code) {
-        String safeCode = code == null ? "" : code;
+        String safeCode = normalizeGeneratedCode(filename, code);
+        // applyCodeFix 只用于整文件修复；空白响应必须视为无效，不能清空已有内存源码。
+        if (safeCode.isBlank()) {
+            return;
+        }
         String normalizedFixFilename = normalizeGeneratedFilename(filename, safeCode);
         String fixPureName = Path.of(normalizedFixFilename).getFileName().toString();
         String language = detectLanguageFromFilename(normalizedFixFilename);
@@ -190,6 +194,34 @@ public class SourceCodePathService {
             return "js";
         }
         return "text";
+    }
+
+    /**
+     * 修正模型把整份 Java 源码双引号再次转义的情况，同时保留正常字符串内部的合法转义。
+     */
+    public String normalizeGeneratedCode(String filename, String code) {
+        String safeCode = code == null ? "" : code;
+        if (filename == null || !filename.toLowerCase().endsWith(".java") || safeCode.isBlank()) {
+            return safeCode;
+        }
+        boolean hasEscapedQuote = false;
+        boolean hasPlainQuote = false;
+        for (int index = 0; index < safeCode.length(); index++) {
+            if (safeCode.charAt(index) != '"') {
+                continue;
+            }
+            int precedingBackslashes = 0;
+            for (int cursor = index - 1; cursor >= 0 && safeCode.charAt(cursor) == '\\'; cursor--) {
+                precedingBackslashes++;
+            }
+            if (precedingBackslashes % 2 == 1) {
+                hasEscapedQuote = true;
+            } else {
+                hasPlainQuote = true;
+            }
+        }
+        // 正常 Java 字符串一定有未转义的边界引号；完全没有时才可安全解除这一层转义。
+        return hasEscapedQuote && !hasPlainQuote ? safeCode.replace("\\\"", "\"") : safeCode;
     }
 
     // ==================== 通用字符串工具 ====================

@@ -3,6 +3,7 @@ package com.core.multiAgentSoftwareStudio.Service.Generation;
 import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
 import com.core.multiAgentSoftwareStudio.Model.Generation.FileBlueprint;
 import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationBatch;
+import com.core.multiAgentSoftwareStudio.Model.Generation.DeliverySlice;
 import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
 import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
@@ -14,7 +15,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -30,16 +33,19 @@ public class BatchGenerationService {
     private final DeveloperAgent developerAgent;
     private final CodeContextBuilderService codeContextBuilderService;
     private final SourceCodePathService sourceCodePathService;
+    private final SliceProductionScopeService sliceProductionScopeService;
 
     /**
      * 注入批次代码生成所需的 Agent 和上下文辅助服务。
      */
     public BatchGenerationService(DeveloperAgent developerAgent,
             CodeContextBuilderService codeContextBuilderService,
-            SourceCodePathService sourceCodePathService) {
+            SourceCodePathService sourceCodePathService,
+            SliceProductionScopeService sliceProductionScopeService) {
         this.developerAgent = developerAgent;
         this.codeContextBuilderService = codeContextBuilderService;
         this.sourceCodePathService = sourceCodePathService;
+        this.sliceProductionScopeService = sliceProductionScopeService;
     }
 
     /**
@@ -51,13 +57,33 @@ public class BatchGenerationService {
             return;
         }
 
-        logger.accept("4." + (data.currentBatchIndex + 1) + " Generating batch `" + batch.name() + "` (" + batch.layer()
-                + ").");
+        generate(data, batch, data.contract, data.structure, logger);
+    }
+
+    /**
+     * 生成当前垂直切片内的生产文件；已验收切片代码作为只读依赖上下文继续可见。
+     */
+    public void generateSlice(SoftwareStudioWorkflowData data, Consumer<String> logger) {
+        DeliverySlice slice = data.currentSlice();
+        if (slice == null) {
+            return;
+        }
+        generate(data, slice.asGenerationBatch(), slice.contract(), sliceProductionScopeService.activeStructure(data), logger);
+    }
+
+    private void generate(
+            SoftwareStudioWorkflowData data,
+            GenerationBatch batch,
+            ProjectContract activeContract,
+            ProjectStructure activeStructure,
+            Consumer<String> logger) {
+
+        logger.accept("4." + (data.currentSlice() == null ? data.currentBatchIndex + 1 : data.currentSliceIndex + 1)
+                + " Generating delivery unit `" + batch.name() + "` (" + batch.layer() + ").");
         String batchContext = describeBatch(batch);
 
-        // 同一批次内的文件，默认认为依赖关系已经足够松，可以并发生成。
-        // 批次之间的先后顺序，已经在 plan_batches 阶段提前处理好了。
-        // 这样做的目的，是把“并发收益”放在文件生成阶段，而不是把复杂性堆到运行时调度里。
+        // 同一交付单元先按显式依赖拆成波次，波次内再做受限并发。
+        // 这样既保留并发收益，也能让下游文件看到上游已经生成的真实代码。
         List<FileBlueprint> batchFiles = batch.files().stream()
                 .sorted(Comparator.comparing(FileBlueprint::targetPath))
                 .toList();
@@ -65,31 +91,77 @@ public class BatchGenerationService {
         ExecutorService batchExecutor = Executors.newFixedThreadPool(concurrency);
         try {
             logger.accept("   Batch LLM concurrency: " + concurrency);
-            List<SourceCode> codeSnapshot = new ArrayList<>(data.codes);
-            List<CompletableFuture<SourceCode>> futures = batchFiles.stream()
-                    .map(fileBlueprint -> CompletableFuture.supplyAsync(
-                            () -> {
-                                String relevantCodeContext = codeContextBuilderService.buildRelevantCodeContext(
-                                        codeSnapshot, data.structure, fileBlueprint);
-                                return generateSourceFile(data.prd, data.structure, relevantCodeContext, batchContext,
-                                        fileBlueprint, data.contract);
-                            },
-                            batchExecutor))
-                    .toList();
-
-            List<SourceCode> generatedFiles = futures.stream()
-                    .map(CompletableFuture::join)
-                    .toList();
-
-            for (int i = 0; i < batchFiles.size(); i++) {
-                FileBlueprint blueprint = batchFiles.get(i);
-                SourceCode generatedFile = generatedFiles.get(i);
-                sourceCodePathService.upsertSourceCode(data.codes, generatedFile.filename(), generatedFile.code());
-                logger.accept("   Generated: " + blueprint.targetPath());
+            List<List<FileBlueprint>> waves = dependencyWaves(batchFiles);
+            for (int waveIndex = 0; waveIndex < waves.size(); waveIndex++) {
+                List<FileBlueprint> wave = waves.get(waveIndex);
+                logger.accept("   Dependency wave " + (waveIndex + 1) + ": " + wave.size() + " file(s).");
+                // 每一波都重新快照，确保上游实体、服务等真实代码会进入下游文件 Prompt。
+                List<SourceCode> codeSnapshot = new ArrayList<>(data.codes);
+                List<CompletableFuture<SourceCode>> futures = wave.stream()
+                        .map(fileBlueprint -> CompletableFuture.supplyAsync(
+                                () -> {
+                                    String relevantCodeContext = codeContextBuilderService.buildRelevantCodeContext(
+                                            codeSnapshot, activeStructure, fileBlueprint);
+                                    return generateSourceFile(
+                                            data.prd, activeStructure, relevantCodeContext, batchContext,
+                                            fileBlueprint, activeContract);
+                                },
+                                batchExecutor))
+                        .toList();
+                List<SourceCode> generatedFiles = futures.stream().map(CompletableFuture::join).toList();
+                for (int i = 0; i < wave.size(); i++) {
+                    FileBlueprint blueprint = wave.get(i);
+                    SourceCode generatedFile = generatedFiles.get(i);
+                    sourceCodePathService.upsertSourceCode(data.codes, generatedFile.filename(), generatedFile.code());
+                    logger.accept("   Generated: " + blueprint.targetPath());
+                }
             }
         } finally {
             batchExecutor.shutdown();
         }
+    }
+
+    /**
+     * 将同一垂直切片按显式文件依赖拆成拓扑波次；循环依赖安全退化为最后一波。
+     */
+    private List<List<FileBlueprint>> dependencyWaves(List<FileBlueprint> files) {
+        List<FileBlueprint> remaining = new ArrayList<>(files);
+        Set<String> slicePaths = files.stream()
+                .map(FileBlueprint::targetPath)
+                .map(sourceCodePathService::normalizePath)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> completed = new LinkedHashSet<>();
+        List<List<FileBlueprint>> waves = new ArrayList<>();
+        while (!remaining.isEmpty()) {
+            List<FileBlueprint> dependencyReady = remaining.stream()
+                    .filter(file -> file.dependsOn().stream()
+                            .map(sourceCodePathService::normalizePath)
+                            .filter(slicePaths::contains)
+                            .allMatch(completed::contains))
+                    .toList();
+            if (dependencyReady.isEmpty()) {
+                dependencyReady = List.copyOf(remaining);
+            }
+            // 架构师未填写 dependsOn 时，用稳定的层级顺序补足最基本的依赖关系。
+            int nextLayer = dependencyReady.stream().mapToInt(this::layerOrder).min().orElse(0);
+            List<FileBlueprint> ready = dependencyReady.stream()
+                    .filter(file -> layerOrder(file) == nextLayer)
+                    .toList();
+            waves.add(ready);
+            ready.forEach(file -> completed.add(sourceCodePathService.normalizePath(file.targetPath())));
+            remaining.removeAll(ready);
+        }
+        return List.copyOf(waves);
+    }
+
+    private int layerOrder(FileBlueprint file) {
+        return switch (file.effectiveLayer()) {
+            case "repository", "persistence" -> 1;
+            case "service" -> 2;
+            case "controller", "api" -> 3;
+            case "frontend", "view", "template" -> 4;
+            default -> 0;
+        };
     }
 
     /**

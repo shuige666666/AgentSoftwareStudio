@@ -3,7 +3,13 @@ package com.core.multiAgentSoftwareStudio.Service.Workflow;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectQualityPolicyResult;
 import com.core.multiAgentSoftwareStudio.Model.Generation.QualityGateSeverity;
 import com.core.multiAgentSoftwareStudio.Model.Generation.QualityPolicyFinding;
+import com.core.multiAgentSoftwareStudio.Model.Generation.DeliverySlice;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SliceDeliveryPlan;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectProfile;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairDecision;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairTarget;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
@@ -23,7 +29,7 @@ class RunJournalServiceTest {
     void summarizesVerificationAndRepairEvents() {
         RunJournalService service = new RunJournalService();
         VerificationResultService verificationService = new VerificationResultService();
-        SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test", 3);
+        SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
         var build = verificationService.toStep(
                 VerificationStage.BUILD,
                 new SandboxExecutionResult("mvn package", 1, "COMPILATION ERROR", 1, false, null));
@@ -49,7 +55,7 @@ class RunJournalServiceTest {
     @Test
     void summarizesFailedGateIdsWithoutEvidence() {
         RunJournalService service = new RunJournalService();
-        SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test", 3);
+        SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
         service.recordPreflight(data, new ProjectQualityPolicyResult(false, List.of(
                 new QualityPolicyFinding(
                         "FRONTEND_PAYLOAD_FIELDS", QualityGateSeverity.BLOCK,
@@ -59,5 +65,58 @@ class RunJournalServiceTest {
 
         assertEquals(1L, summary.failureCounts().get(FailureKind.CONTRACT));
         assertEquals(1L, summary.failedGateCounts().get("FRONTEND_PAYLOAD_FIELDS"));
+    }
+
+    /**
+     * 切片报告应聚合计划数、接受数、首轮通过数和全局修复预算，不保留失败明细。
+     */
+    @Test
+    void summarizesVerticalSliceDeliveryAndRepairBudget() {
+        RunJournalService service = new RunJournalService();
+        SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
+        ProjectContract emptyContract = new ProjectContract(List.of(), List.of(), List.of(), List.of());
+        data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of(
+                new DeliverySlice("poll", "Poll", List.of(), List.of(), emptyContract, List.of(), List.of()),
+                new DeliverySlice("result", "Result", List.of(), List.of(), emptyContract, List.of(), List.of())),
+                List.of(), "vertical-slice-test");
+        data.repairBudget = RepairBudget.forSlicePlan(2);
+        data.structure = new ProjectStructure("com.example", "spring boot mvc", "com.example.App", List.of());
+        data.projectProfile = ProjectProfile.java17SpringBoot();
+        data.generatedTestFileCount = 3;
+        data.admittedTestFileCount = 3;
+        data.acceptedTestFiles.add("src/test/java/com/example/PollTest.java");
+        data.acceptedTestFiles.add("src/test/java/com/example/ResultTest.java");
+        data.skippedFutureTypeTestCount = 1;
+        data.repairRollbackCount = 2;
+        data.repeatedRegressionStopCount = 1;
+        data.markRepairStopped("NO_CHANGE");
+        service.recordSliceStarted(data);
+        service.recordSliceAccepted(data);
+        data.currentSliceIndex = 1;
+        data.consumeRepairBudget();
+        service.recordSliceStarted(data);
+        service.recordSliceAccepted(data);
+        service.recordRegressionFailure(data);
+
+        var summary = service.summarize(data).sliceDelivery();
+
+        assertEquals(2, summary.plannedSlices());
+        assertEquals(2, summary.acceptedSlices());
+        assertEquals(1, summary.firstPassAcceptedSlices());
+        assertEquals(1, summary.regressionFailures());
+        assertEquals(2, summary.repairRollbackCount());
+        assertEquals(1, summary.repeatedRegressionStopCount());
+        assertEquals(1, summary.repairBudgetUsed());
+        assertEquals(4, summary.repairBudgetLimit());
+        assertEquals(4, summary.sliceRepairSafetyLimit());
+        assertEquals(1, summary.finalVerificationReserve());
+        assertEquals(1, summary.sliceRepairCounts().get("result"));
+        assertEquals("spring boot mvc", summary.declaredProjectType());
+        assertEquals("SPRING_BOOT", summary.effectiveProjectType());
+        assertEquals(3, summary.generatedTestFiles());
+        assertEquals(3, summary.admittedTestFiles());
+        assertEquals(2, summary.acceptedTestFiles());
+        assertEquals(1, summary.skippedFutureTypeTests());
+        assertEquals("NO_CHANGE", summary.repairStopReason());
     }
 }

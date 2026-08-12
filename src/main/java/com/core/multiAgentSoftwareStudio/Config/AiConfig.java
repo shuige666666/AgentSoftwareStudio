@@ -35,7 +35,7 @@ public class AiConfig {
         public static final boolean CODER_MODEL_JSON_OUTPUT_ENABLED = true;
 
         public static final String LOGIC_MODEL_BEAN_NAME = "logicModel";
-        public static final String LOGIC_MODEL_NAME = "qwen3.7-plus";
+        public static final String LOGIC_MODEL_NAME = "qwen3.7-plus-2026-05-26";
         public static final double LOGIC_MODEL_TEMPERATURE = 0.5;
         public static final int LOGIC_MODEL_MAX_OUTPUT_TOKENS = 8192;
         public static final Duration LOGIC_MODEL_TIMEOUT = Duration.ofMinutes(5);
@@ -114,9 +114,7 @@ public class AiConfig {
                 return new ArchitectAgent(model, promptExecutor, objectMapper);
         }
 
-        /**
-         * 创建开发工程师 Agent
-         */
+
         /**
          * 创建接口契约 Agent
          */
@@ -127,6 +125,9 @@ public class AiConfig {
                 return new ContractAgent(model, promptExecutor, objectMapper);
         }
 
+        /**
+         * 创建开发工程师 Agent
+         */
         @Bean
         DeveloperAgent developerAgent(@Qualifier(CODER_MODEL_BEAN_NAME) ChatLanguageModel model,
                         LangGraphPromptExecutor promptExecutor,

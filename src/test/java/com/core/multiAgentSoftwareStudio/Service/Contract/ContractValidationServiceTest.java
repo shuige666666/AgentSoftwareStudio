@@ -153,4 +153,308 @@ class ContractValidationServiceTest {
         assertFalse(warnings.stream().anyMatch(value -> value.startsWith("Thymeleaf template risk")));
         assertFalse(warnings.stream().anyMatch(value -> value.contains("source file does not issue that request")));
     }
+
+    /**
+     * 创建和编辑共用表单时，条件表达式必须包含两个完整的 Thymeleaf URL，确保两条契约调用都可验证。
+     */
+    @Test
+    void acceptsConditionalThymeleafFormActions() {
+        ProjectContract contract = new ProjectContract(
+                List.of(
+                        new ApiEndpointContract("POST", "/articles", "ArticleForm", "View",
+                                "ArticleController", "create"),
+                        new ApiEndpointContract("POST", "/articles/{id}/edit", "ArticleForm", "View",
+                                "ArticleController", "update")),
+                List.of(),
+                List.of(
+                        new FrontendCallContract("src/main/resources/templates/article-form.html", "POST",
+                                "/articles", "create article"),
+                        new FrontendCallContract("src/main/resources/templates/article-form.html", "POST",
+                                "/articles/{id}/edit", "update article")),
+                List.of());
+        List<SourceCode> codes = List.of(
+                new SourceCode("src/main/java/com/example/ArticleController.java", "java", """
+                        package com.example;
+                        import org.springframework.stereotype.Controller;
+                        import org.springframework.web.bind.annotation.*;
+                        @Controller
+                        public class ArticleController {
+                            @PostMapping("/articles") public String create() { return "index"; }
+                            @PostMapping("/articles/{id}/edit")
+                            public String update(@PathVariable Long id) { return "index"; }
+                        }
+                        """),
+                new SourceCode("src/main/resources/templates/article-form.html", "html", """
+                        <form th:action="${articleId != null}
+                                ? @{/articles/{id}/edit(id=${articleId})}
+                                : @{/articles}" method="post"></form>
+                        """));
+
+        List<String> warnings = service.validateProject(codes, contract);
+
+        assertFalse(warnings.stream().anyMatch(value -> value.contains("source file does not issue that request")),
+                warnings.toString());
+    }
+
+    /**
+     * JavaScript 字符串拼接的动态路径应能匹配带路径变量的契约，避免把真实 DELETE 调用判成缺失。
+     */
+    @Test
+    void acceptsConcatenatedDynamicFetchPath() {
+        ProjectContract contract = new ProjectContract(
+                List.of(new ApiEndpointContract(
+                        "DELETE", "/urls/{shortCode}", "", "", "UrlController", "delete")),
+                List.of(),
+                List.of(new FrontendCallContract(
+                        "src/main/resources/templates/metadata.html", "DELETE", "/urls/{shortCode}", "delete")),
+                List.of());
+        List<SourceCode> codes = List.of(
+                new SourceCode("src/main/java/com/example/UrlController.java", "java", """
+                        package com.example;
+                        import org.springframework.web.bind.annotation.*;
+                        @RestController
+                        public class UrlController {
+                            @DeleteMapping("/urls/{shortCode}")
+                            public void delete(@PathVariable String shortCode) {}
+                        }
+                        """),
+                new SourceCode("src/main/resources/templates/metadata.html", "html", """
+                        <form id="deleteForm"><button id="deleteBtn">Delete</button></form>
+                        <script>
+                        const shortCode = 'ABC123';
+                        fetch('/urls/' + shortCode, { method: 'DELETE' });
+                        </script>
+                        """));
+
+        List<String> warnings = service.validateProject(codes, contract);
+
+        assertFalse(warnings.stream().anyMatch(value -> value.contains("source file does not issue that request")),
+                warnings.toString());
+    }
+
+    /**
+     * 模板声明 th:object 时必须存在同名 MVC 模型属性，否则渲染首页时会直接抛出模板异常。
+     */
+    @Test
+    void detectsMissingThymeleafModelAttribute() {
+        List<SourceCode> codes = List.of(
+                new SourceCode("src/main/java/com/example/HomeController.java", "java", """
+                        package com.example;
+                        import org.springframework.stereotype.Controller;
+                        import org.springframework.web.bind.annotation.GetMapping;
+                        @Controller
+                        public class HomeController {
+                            @GetMapping("/") public String home() { return "index"; }
+                        }
+                        """),
+                new SourceCode("src/main/resources/templates/index.html", "html",
+                        "<form th:object=\"${createUrlRequest}\"></form>"));
+
+        List<String> warnings = service.validateProject(codes, null);
+
+        assertTrue(warnings.stream().anyMatch(value -> value.startsWith("Thymeleaf model attribute `createUrlRequest`")));
+    }
+
+    /**
+     * 相同方法和动态路径由两个 Controller 重复声明时必须在 Spring 启动前阻断。
+     */
+    @Test
+    void detectsDuplicateControllerMappingsAcrossSlices() {
+        List<SourceCode> codes = List.of(
+                new SourceCode("src/main/java/com/example/UrlController.java", "java", """
+                        package com.example;
+                        import org.springframework.web.bind.annotation.*;
+                        @RestController
+                        public class UrlController {
+                            @GetMapping("/{code}") public void redirect(String code) {}
+                        }
+                        """),
+                new SourceCode("src/main/java/com/example/RedirectController.java", "java", """
+                        package com.example;
+                        import org.springframework.web.bind.annotation.*;
+                        @RestController
+                        public class RedirectController {
+                            @GetMapping("/{shortCode}") public void redirect(String shortCode) {}
+                        }
+                        """));
+
+        List<String> warnings = service.validateProject(codes, null);
+
+        assertTrue(warnings.stream().anyMatch(value -> value.startsWith("Duplicate controller mapping `GET /{}`")));
+    }
+
+    /**
+     * 组件构造器注入项目内普通类时必须存在组件注解或 @Bean 工厂方法。
+     */
+    @Test
+    void detectsUnregisteredConcreteSpringDependency() {
+        List<SourceCode> invalid = List.of(
+                new SourceCode("src/main/java/com/example/SnakeGame.java", "java", """
+                        package com.example;
+                        public class SnakeGame {}
+                        """),
+                new SourceCode("src/main/java/com/example/SnakeHandler.java", "java", """
+                        package com.example;
+                        import org.springframework.stereotype.Component;
+                        @Component
+                        public class SnakeHandler {
+                            public SnakeHandler(SnakeGame game) {}
+                        }
+                        """));
+        List<SourceCode> valid = List.of(
+                invalid.get(0), invalid.get(1),
+                new SourceCode("src/main/java/com/example/GameConfig.java", "java", """
+                        package com.example;
+                        import org.springframework.context.annotation.*;
+                        @Configuration
+                        public class GameConfig {
+                            @Bean public SnakeGame snakeGame() { return new SnakeGame(); }
+                        }
+                        """));
+
+        List<String> invalidWarnings = service.validateProject(invalid, null);
+        List<String> validWarnings = service.validateProject(valid, null);
+
+        assertTrue(invalidWarnings.stream().anyMatch(value -> value.startsWith("Spring bean dependency `SnakeGame`")));
+        assertFalse(validWarnings.stream().anyMatch(value -> value.startsWith("Spring bean dependency `SnakeGame`")));
+    }
+
+    /**
+     * 已在真实批次中出现过的 Spring API 误用应在编译前被拦截，标准 builder 链不应误报。
+     */
+    @Test
+    void detectsKnownInvalidSpringApisWithoutRejectingValidBuilders() {
+        List<SourceCode> invalid = List.of(new SourceCode(
+                "src/main/java/com/example/UrlController.java", "java", """
+                        package com.example;
+                        import java.net.URI;
+                        import org.springframework.http.ResponseEntity;
+                        import org.springframework.web.util.UriComponentsBuilder;
+                        class UrlController {
+                            Object redirect(URI uri) { return ResponseEntity.temporaryRedirect(uri).build(); }
+                            URI expand() { return UriComponentsBuilder.fromPath("/{code}").toUri(); }
+                        }
+                        """));
+        List<SourceCode> valid = List.of(new SourceCode(
+                "src/main/java/com/example/UrlController.java", "java", """
+                        package com.example;
+                        import java.net.URI;
+                        import org.springframework.http.*;
+                        import org.springframework.web.util.UriComponentsBuilder;
+                        class UrlController {
+                            Object redirect(URI uri) {
+                                return ResponseEntity.status(HttpStatus.TEMPORARY_REDIRECT).location(uri).build();
+                            }
+                            URI expand() {
+                                return UriComponentsBuilder.fromPath("/{code}").buildAndExpand("abc").toUri();
+                            }
+                        }
+                        """));
+
+        List<String> invalidWarnings = service.validateProject(invalid, null);
+        List<String> validWarnings = service.validateProject(valid, null);
+
+        assertTrue(invalidWarnings.stream().filter(value -> value.startsWith("Invalid Spring API usage")).count() >= 2);
+        assertFalse(validWarnings.stream().anyMatch(value -> value.startsWith("Invalid Spring API usage")),
+                validWarnings.toString());
+    }
+
+    /**
+     * 声明为重定向的 GET 端点不能返回 void 丢弃 URL；直接写 HttpServletResponse 时允许通过。
+     */
+    @Test
+    void detectsVoidRedirectEndpointWithoutExplicitHttpResponse() {
+        ProjectContract contract = new ProjectContract(
+                List.of(new ApiEndpointContract("GET", "/{shortCode}", "", "", "UrlController", "redirect")),
+                List.of(), List.of(), List.of());
+        SourceCode invalid = new SourceCode("src/main/java/com/example/UrlController.java", "java", """
+                package com.example;
+                import org.springframework.web.bind.annotation.*;
+                @RestController
+                public class UrlController {
+                    @GetMapping("/{shortCode}")
+                    public void redirectToOriginal(@PathVariable String shortCode) { service(shortCode); }
+                    private void service(String code) {}
+                }
+                """);
+        SourceCode valid = new SourceCode("src/main/java/com/example/UrlController.java", "java", """
+                package com.example;
+                import jakarta.servlet.http.HttpServletResponse;
+                import org.springframework.web.bind.annotation.*;
+                @RestController
+                public class UrlController {
+                    @GetMapping("/{shortCode}")
+                    public void redirectToOriginal(@PathVariable String shortCode, HttpServletResponse response)
+                            throws java.io.IOException {
+                        response.sendRedirect("https://example.com");
+                    }
+                }
+                """);
+
+        List<String> invalidWarnings = service.validateProject(List.of(invalid), contract);
+        List<String> validWarnings = service.validateProject(List.of(valid), contract);
+
+        assertTrue(invalidWarnings.stream().anyMatch(value -> value.startsWith("Redirect endpoint `GET /{}`")));
+        assertFalse(validWarnings.stream().anyMatch(value -> value.startsWith("Redirect endpoint")),
+                validWarnings.toString());
+    }
+
+    /**
+     * 服务层抛出的资源不存在异常必须有 404 映射，避免接口测试观察到 500 或 ServletException。
+     */
+    @Test
+    void detectsMissingNotFoundExceptionMapping() {
+        SourceCode serviceFile = new SourceCode("src/main/java/com/example/UrlService.java", "java", """
+                package com.example;
+                class UrlService {
+                    String find(String code) { throw new ShortCodeNotFoundException(code); }
+                }
+                class ShortCodeNotFoundException extends RuntimeException {
+                    ShortCodeNotFoundException(String code) { super(code); }
+                }
+                """);
+        SourceCode mappedException = new SourceCode(
+                "src/main/java/com/example/ShortCodeNotFoundException.java", "java", """
+                        package com.example;
+                        import org.springframework.http.HttpStatus;
+                        import org.springframework.web.bind.annotation.ResponseStatus;
+                        @ResponseStatus(HttpStatus.NOT_FOUND)
+                        class ShortCodeNotFoundException extends RuntimeException {}
+                        """);
+        SourceCode responseStatusException = new SourceCode(
+                "src/main/java/com/example/PollService.java", "java", """
+                        package com.example;
+                        import org.springframework.http.HttpStatus;
+                        import org.springframework.web.server.ResponseStatusException;
+                        class PollService {
+                            Object find() {
+                                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "poll not found");
+                            }
+                        }
+                        """);
+        SourceCode lambdaFactory = new SourceCode(
+                "src/main/java/com/example/LookupService.java", "java", """
+                        package com.example;
+                        class LookupService {
+                            Object find(java.util.Optional<Object> value) {
+                                return value.orElseThrow(() -> new RuntimeException("short code not found"));
+                            }
+                        }
+                        """);
+
+        List<String> invalidWarnings = service.validateProject(List.of(serviceFile), null);
+        List<String> lambdaWarnings = service.validateProject(List.of(lambdaFactory), null);
+        List<String> validWarnings = service.validateProject(List.of(serviceFile, mappedException), null);
+        List<String> explicitStatusWarnings = service.validateProject(List.of(responseStatusException), null);
+
+        assertTrue(invalidWarnings.stream()
+                .anyMatch(value -> value.startsWith("Not-found exception mapping missing")));
+        assertTrue(lambdaWarnings.stream()
+                .anyMatch(value -> value.startsWith("Not-found exception mapping missing")));
+        assertFalse(validWarnings.stream()
+                .anyMatch(value -> value.startsWith("Not-found exception mapping missing")), validWarnings.toString());
+        assertFalse(explicitStatusWarnings.stream()
+                .anyMatch(value -> value.startsWith("Not-found exception mapping missing")),
+                explicitStatusWarnings.toString());
+    }
 }

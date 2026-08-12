@@ -41,11 +41,15 @@ public class VerificationNodeService {
     public SoftwareStudioWorkflowData run(SoftwareStudioWorkflowData data, Consumer<String> logger) {
         // 真正的编译/运行检查放在这里统一做。
         // 前面阶段只做轻量约束，避免每一层都进入昂贵的沙箱执行。
-        logger.accept(
-                "7. Running final compile/runtime verification in the sandbox. Attempt " + data.currentAttempt + ".");
+        String scope = data.finalVerificationStarted ? "final project" : "slice `" + data.currentSliceId() + "`";
+        logger.accept("7. Running compile/runtime verification for " + scope
+                + " in the sandbox. Attempt " + data.currentAttempt + ".");
+        String effectiveProjectType = data.projectProfile == null
+                ? data.structure.projectType()
+                : data.projectProfile.projectType();
         SandboxExecutionResult execution = sandboxService.runCodeInSandboxWithResult(
                 Path.of(data.projectPath),
-                data.structure.projectType(),
+                effectiveProjectType,
                 data.structure.mainClassName());
         data.executionResult = execution.output();
         VerificationStepResult build = verificationResultService.toStep(VerificationStage.BUILD, execution);
@@ -64,7 +68,9 @@ public class VerificationNodeService {
      */
     public VerificationStepResult runTests(SoftwareStudioWorkflowData data) {
         SandboxExecutionResult execution = sandboxService.runTestsInSandboxWithResult(
-                Path.of(data.projectPath), data.structure.projectType());
+                Path.of(data.projectPath),
+                data.projectProfile == null ? data.structure.projectType() : data.projectProfile.projectType(),
+                data.activeTestFiles());
         data.testResult = execution.output();
         return verificationResultService.toStep(VerificationStage.TEST, execution);
     }

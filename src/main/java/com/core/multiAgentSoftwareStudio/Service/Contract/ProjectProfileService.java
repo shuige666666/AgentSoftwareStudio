@@ -38,7 +38,13 @@ public class ProjectProfileService {
     private static final Pattern INVALID_WEBSOCKET_TEST_DEPENDENCY = Pattern.compile(
             "(?s)\\s*<dependency>\\s*<groupId>org\\.springframework</groupId>\\s*"
                     + "<artifactId>spring-websocket-test</artifactId>.*?</dependency>");
+    private static final Pattern PACKAGE_DECLARATION = Pattern.compile("(?m)^\\s*package\\s+([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)\\s*;");
+    private static final Pattern PUBLIC_CLASS = Pattern.compile("\\bpublic\\s+class\\s+([A-Za-z_$][\\w$]*)\\b");
     private static final String STARTER_TEST_ARTIFACT = "<artifactId>spring-boot-starter-test</artifactId>";
+    private static final String STARTER_DATA_JPA_ARTIFACT = "<artifactId>spring-boot-starter-data-jpa</artifactId>";
+    private static final String STARTER_VALIDATION_ARTIFACT = "<artifactId>spring-boot-starter-validation</artifactId>";
+    private static final String STARTER_THYMELEAF_ARTIFACT = "<artifactId>spring-boot-starter-thymeleaf</artifactId>";
+    private static final String H2_ARTIFACT = "<artifactId>h2</artifactId>";
     private static final String STARTER_TEST_DEPENDENCY = """
             
                     <dependency>
@@ -63,10 +69,48 @@ public class ProjectProfileService {
      * 根据架构结果选择固定工程 Profile；当前 Spring Boot 基准统一使用 Java 17 模板。
      */
     public ProjectProfile resolve(ProjectStructure structure) {
-        String projectType = structure == null ? null : structure.projectType();
+        String projectType = normalizeProjectType(structure);
         return "SPRING_BOOT".equals(projectType)
                 ? ProjectProfile.java17SpringBoot()
                 : ProjectProfile.generic(projectType);
+    }
+
+    /**
+     * 将架构师可能返回的大小写、空格或扩展写法归一为平台支持的三种项目类型。
+     * 当声明值不可识别时，仅使用明确的 Spring/Maven 蓝图证据进行安全推断。
+     */
+    public String normalizeProjectType(ProjectStructure structure) {
+        if (structure == null) {
+            return "UNKNOWN";
+        }
+        String raw = structure.projectType() == null ? "" : structure.projectType().trim();
+        String normalized = raw.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        if ("SPRING_BOOT".equals(normalized) || normalized.startsWith("SPRING_BOOT_")) {
+            return "SPRING_BOOT";
+        }
+        if ("PURE_JAVA_MAVEN".equals(normalized) || normalized.contains("MAVEN")) {
+            return "PURE_JAVA_MAVEN";
+        }
+        if ("PURE_JAVA_NATIVE".equals(normalized) || normalized.endsWith("_NATIVE")) {
+            return "PURE_JAVA_NATIVE";
+        }
+
+        List<String> paths = structure.files().stream()
+                .map(file -> sourceCodePathService.normalizePath(file.targetPath()).toLowerCase(Locale.ROOT))
+                .toList();
+        boolean springBlueprint = paths.stream().anyMatch(path ->
+                path.endsWith("application.properties") || path.endsWith("application.yml")
+                        || path.endsWith("application.yaml") || path.contains("/templates/"))
+                && (structure.mainClassName() != null && structure.mainClassName().endsWith("Application")
+                        || paths.stream().anyMatch(path -> path.endsWith("application.java")));
+        if (springBlueprint) {
+            return "SPRING_BOOT";
+        }
+        if (paths.stream().anyMatch(path -> path.equals("pom.xml"))) {
+            return "PURE_JAVA_MAVEN";
+        }
+        return normalized.isBlank() ? "UNKNOWN" : normalized;
     }
 
     /**
@@ -80,10 +124,11 @@ public class ProjectProfileService {
         List<String> changedFiles = new ArrayList<>();
         SourceCode pom = findByPath(codes, "pom.xml");
         if (pom == null || pom.code() == null || pom.code().isBlank()) {
-            sourceCodePathService.upsertSourceCode(codes, "pom.xml", loadTemplate());
+            sourceCodePathService.upsertSourceCode(codes, "pom.xml", addRequiredDependencies(loadTemplate(), codes));
             changedFiles.add("pom.xml");
         } else {
             String normalizedPom = normalizePom(pom.code(), profile);
+            normalizedPom = addRequiredDependencies(normalizedPom, codes);
             if (!normalizedPom.equals(pom.code())) {
                 sourceCodePathService.upsertSourceCode(codes, "pom.xml", normalizedPom);
                 changedFiles.add("pom.xml");
@@ -92,21 +137,82 @@ public class ProjectProfileService {
 
         for (int index = 0; index < codes.size(); index++) {
             SourceCode source = codes.get(index);
-            if (source == null || source.code() == null || !isTestJava(source.filename())) {
+            if (source == null || source.code() == null) {
                 continue;
             }
-            String normalized = source.code()
-                    .replace("org.springframework.boot.test.mock.bean.MockBean",
-                            "org.springframework.boot.test.mock.mockito.MockBean")
-                    .replace("org.springframework.test.context.bean.override.mockito.MockitoBean",
-                            "org.springframework.boot.test.mock.mockito.MockBean")
-                    .replace("@MockitoBean", "@MockBean");
+            String normalized = source.code();
+            if (isTestJava(source.filename())) {
+                normalized = normalized
+                        .replace("org.springframework.boot.test.mock.bean.MockBean",
+                                "org.springframework.boot.test.mock.mockito.MockBean")
+                        .replace("org.springframework.test.context.bean.override.mockito.MockitoBean",
+                                "org.springframework.boot.test.mock.mockito.MockBean")
+                        .replace("@MockitoBean", "@MockBean");
+            } else if (isMainJava(source.filename())) {
+                normalized = normalizeKnownSpringApiUsage(normalized);
+            }
             if (!normalized.equals(source.code())) {
                 codes.set(index, new SourceCode(source.filename(), source.language(), normalized));
                 changedFiles.add(sourceCodePathService.normalizePath(source.filename()));
             }
         }
+        addMissingSpringContextTest(codes, changedFiles);
         return List.copyOf(changedFiles);
+    }
+
+    /**
+     * 将无歧义的 Spring API 误用改写为等价合法写法，避免为固定拼写错误消耗 LLM 修复预算。
+     */
+    private String normalizeKnownSpringApiUsage(String code) {
+        return code.replaceAll(
+                "\\bResponseEntity\\s*\\.\\s*temporaryRedirect\\s*\\(",
+                "ResponseEntity.status(org.springframework.http.HttpStatus.TEMPORARY_REDIRECT).location(");
+    }
+
+    /**
+     * 根据现有 Spring Boot 入口确定性补充最小上下文测试，不调用 LLM，也不改写已有业务测试。
+     */
+    private void addMissingSpringContextTest(List<SourceCode> codes, List<String> changedFiles) {
+        boolean alreadyPresent = codes.stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(source -> isTestJava(source.filename()))
+                .map(SourceCode::code).filter(java.util.Objects::nonNull)
+                .anyMatch(code -> code.contains("@SpringBootTest"));
+        if (alreadyPresent) {
+            return;
+        }
+        SourceCode application = codes.stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(source -> source.code() != null && source.code().contains("@SpringBootApplication"))
+                .findFirst().orElse(null);
+        if (application == null) {
+            return;
+        }
+        Matcher classMatcher = PUBLIC_CLASS.matcher(application.code());
+        if (!classMatcher.find()) {
+            return;
+        }
+        String applicationClass = classMatcher.group(1);
+        Matcher packageMatcher = PACKAGE_DECLARATION.matcher(application.code());
+        String packageName = packageMatcher.find() ? packageMatcher.group(1) : "";
+        String testClass = applicationClass + "ContextTest";
+        String packagePath = packageName.isBlank() ? "" : packageName.replace('.', '/') + "/";
+        String filename = "src/test/java/" + packagePath + testClass + ".java";
+        String packageLine = packageName.isBlank() ? "" : "package " + packageName + ";\n\n";
+        String code = packageLine + """
+                import org.junit.jupiter.api.Test;
+                import org.springframework.boot.test.context.SpringBootTest;
+
+                @SpringBootTest(classes = %s.class)
+                class %s {
+
+                    @Test
+                    void contextLoads() {
+                    }
+                }
+                """.formatted(applicationClass, testClass);
+        sourceCodePathService.upsertSourceCode(codes, filename, code);
+        changedFiles.add(filename);
     }
 
     /**
@@ -119,6 +225,11 @@ public class ProjectProfileService {
             List<String> normalizedFiles) {
         List<QualityPolicyFinding> findings = new ArrayList<>();
         List<SourceCode> safeCodes = codes == null ? List.of() : codes;
+
+        if (profile == null || !isSupportedProjectType(profile.projectType())) {
+            block(findings, "PROFILE_PROJECT_TYPE", FailureKind.BUILD_PROFILE,
+                    "项目类型无法归一为 SPRING_BOOT、PURE_JAVA_MAVEN 或 PURE_JAVA_NATIVE。");
+        }
 
         if (profile != null && "SPRING_BOOT".equals(profile.projectType())) {
             evaluateSpringProfile(profile, safeCodes, findings);
@@ -137,6 +248,12 @@ public class ProjectProfileService {
 
         boolean passed = findings.stream().noneMatch(finding -> finding.severity() == QualityGateSeverity.BLOCK);
         return new ProjectQualityPolicyResult(passed, findings, normalizedFiles);
+    }
+
+    private boolean isSupportedProjectType(String projectType) {
+        return "SPRING_BOOT".equals(projectType)
+                || "PURE_JAVA_MAVEN".equals(projectType)
+                || "PURE_JAVA_NATIVE".equals(projectType);
     }
 
     private void evaluateSpringProfile(
@@ -207,6 +324,64 @@ public class ProjectProfileService {
         return normalized;
     }
 
+    /**
+     * 根据已经生成的明确 import 和资源类型补齐固定 Spring Starter，避免把依赖缺失交给源码修复。
+     */
+    private String addRequiredDependencies(String pom, List<SourceCode> codes) {
+        String normalized = pom;
+        boolean usesJpa = codes.stream().filter(java.util.Objects::nonNull)
+                .map(SourceCode::code).filter(java.util.Objects::nonNull)
+                .anyMatch(code -> code.contains("jakarta.persistence")
+                        || code.contains("org.springframework.data.jpa.repository")
+                        || code.contains("@Entity"));
+        boolean usesValidation = codes.stream().filter(java.util.Objects::nonNull)
+                .map(SourceCode::code).filter(java.util.Objects::nonNull)
+                .anyMatch(code -> code.contains("jakarta.validation") || code.contains("@Valid"));
+        boolean usesThymeleaf = codes.stream().filter(java.util.Objects::nonNull)
+                .anyMatch(code -> sourceCodePathService.normalizePath(code.filename())
+                        .startsWith("src/main/resources/templates/")
+                        || code.code() != null && code.code().contains("org.thymeleaf"));
+        if (usesJpa) {
+            normalized = ensureDependency(normalized, STARTER_DATA_JPA_ARTIFACT, """
+                    <dependency>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-starter-data-jpa</artifactId>
+                    </dependency>
+                    """);
+            normalized = ensureDependency(normalized, H2_ARTIFACT, """
+                    <dependency>
+                        <groupId>com.h2database</groupId>
+                        <artifactId>h2</artifactId>
+                        <scope>runtime</scope>
+                    </dependency>
+                    """);
+        }
+        if (usesValidation) {
+            normalized = ensureDependency(normalized, STARTER_VALIDATION_ARTIFACT, """
+                    <dependency>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-starter-validation</artifactId>
+                    </dependency>
+                    """);
+        }
+        if (usesThymeleaf) {
+            normalized = ensureDependency(normalized, STARTER_THYMELEAF_ARTIFACT, """
+                    <dependency>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-starter-thymeleaf</artifactId>
+                    </dependency>
+                    """);
+        }
+        return normalized;
+    }
+
+    private String ensureDependency(String pom, String artifactMarker, String dependency) {
+        if (pom.contains(artifactMarker) || !pom.contains("</dependencies>")) {
+            return pom;
+        }
+        return pom.replace("</dependencies>", dependency.indent(8) + "    </dependencies>");
+    }
+
     private String replaceGroup(Pattern pattern, String value, String replacementValue) {
         Matcher matcher = pattern.matcher(value);
         if (!matcher.find() || replacementValue == null) {
@@ -253,8 +428,14 @@ public class ProjectProfileService {
                 || lower.startsWith("frontend file")
                 || lower.startsWith("frontend request body field mismatch")
                 || lower.startsWith("controller path variable")
+                || lower.startsWith("duplicate controller mapping")
+                || lower.startsWith("spring bean dependency")
+                || lower.startsWith("invalid spring api usage")
+                || lower.startsWith("redirect endpoint")
+                || lower.startsWith("not-found exception mapping")
                 || lower.startsWith("static index route conflict")
-                || lower.startsWith("thymeleaf template risk");
+                || lower.startsWith("thymeleaf template risk")
+                || lower.startsWith("thymeleaf model attribute");
     }
 
     /**
@@ -268,11 +449,29 @@ public class ProjectProfileService {
         if (lower.startsWith("controller path variable")) {
             return "CONTROLLER_PATH_VARIABLE_USAGE";
         }
+        if (lower.startsWith("duplicate controller mapping")) {
+            return "DUPLICATE_CONTROLLER_MAPPING";
+        }
+        if (lower.startsWith("spring bean dependency")) {
+            return "SPRING_BEAN_DEPENDENCY";
+        }
+        if (lower.startsWith("invalid spring api usage")) {
+            return "SPRING_API_USAGE";
+        }
+        if (lower.startsWith("redirect endpoint")) {
+            return "REDIRECT_RESPONSE";
+        }
+        if (lower.startsWith("not-found exception mapping")) {
+            return "NOT_FOUND_EXCEPTION_MAPPING";
+        }
         if (lower.startsWith("static index route conflict")) {
             return "STATIC_INDEX_ROUTE";
         }
         if (lower.startsWith("thymeleaf template risk")) {
             return "THYMELEAF_TEMPLATE";
+        }
+        if (lower.startsWith("thymeleaf model attribute")) {
+            return "THYMELEAF_MODEL_ATTRIBUTE";
         }
         if (lower.startsWith("contract frontend call")) {
             return "CONTRACT_FRONTEND_CALL";
@@ -293,6 +492,11 @@ public class ProjectProfileService {
 
     private boolean isTestJava(String filename) {
         return sourceCodePathService.normalizePath(filename).startsWith("src/test/java/")
+                && sourceCodePathService.normalizePath(filename).endsWith(".java");
+    }
+
+    private boolean isMainJava(String filename) {
+        return sourceCodePathService.normalizePath(filename).startsWith("src/main/java/")
                 && sourceCodePathService.normalizePath(filename).endsWith(".java");
     }
 

@@ -28,7 +28,7 @@ import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
  */
 @Component
 public class LangGraphPromptExecutor {
-    private static final int MAX_TIMEOUT_RETRIES = 2;
+    private static final int MAX_TIMEOUT_RETRIES = 1;
     private static final long RETRY_BACKOFF_MILLIS = 1500L;
 
     private final LlmUsageMetricsService metricsService;
@@ -94,6 +94,9 @@ public class LangGraphPromptExecutor {
                 if (!isTimeoutError(e) || attempt > MAX_TIMEOUT_RETRIES) {
                     throw e;
                 }
+                System.out.println("[LLM超时重试] 阶段=" + inferCallerAgentName()
+                        + " timeout retry " + attempt + "/" + MAX_TIMEOUT_RETRIES
+                        + "，即将发起第 " + (attempt + 1) + " 次物理调用。");
                 sleepQuietly(RETRY_BACKOFF_MILLIS * attempt);
             }
         }

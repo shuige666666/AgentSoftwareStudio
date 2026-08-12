@@ -105,9 +105,26 @@ public class DockerSandboxService {
      * 在沙箱中执行测试，并保留测试命令的真实退出码和耗时。
      */
     public SandboxExecutionResult runTestsInSandboxWithResult(Path projectPath, String projectType) {
+        return runTestsInSandboxWithResult(projectPath, projectType, List.of());
+    }
+
+    /**
+     * 执行当前切片及已验收切片的聚焦回归测试；空集合仍表示最终全量测试。
+     */
+    public SandboxExecutionResult runTestsInSandboxWithResult(
+            Path projectPath,
+            String projectType,
+            List<String> selectedTestFiles) {
         String cmd;
         if ("SPRING_BOOT".equals(projectType) || "PURE_JAVA_MAVEN".equals(projectType)) {
-            cmd = "mvn test";
+            String selectors = selectedTestFiles == null ? "" : selectedTestFiles.stream()
+                    .map(path -> Path.of(path.replace('\\', '/')).getFileName().toString())
+                    .map(name -> name.replaceFirst("\\.java$", ""))
+                    .filter(name -> name.matches("[A-Za-z0-9_$]+"))
+                    .distinct()
+                    .sorted()
+                    .collect(java.util.stream.Collectors.joining(","));
+            cmd = selectors.isBlank() ? "mvn test" : "mvn -Dtest=" + selectors + " test";
         } else {
             // PURE_JAVA_NATIVE 的测试比较复杂，暂且尝试运行所有带 Test 结尾的类
             cmd = "find . -name \"*.java\" > sources.txt && javac -d . @sources.txt && java -cp . org.junit.runner.JUnitCore $(find . -name \"*Test.class\" | sed 's/\\.\\///;s/\\.class//;s/\\//./g')";

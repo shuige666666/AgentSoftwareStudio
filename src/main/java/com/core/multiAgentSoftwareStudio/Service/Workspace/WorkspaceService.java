@@ -13,6 +13,7 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -42,18 +43,41 @@ public class WorkspaceService {
      * 将本轮生成出来的所有源码文件保存到一个带时间戳的本地项目目录中，并通过统一日志回调输出过程信息。
      */
     public Path saveProjectToDisk(String projectName, List<SourceCode> sourceCodes, Consumer<String> logger) {
+        Path projectDir = initializeProjectWorkspace(projectName, logger);
+        writeSourceFilesToDisk(projectDir, sourceCodes, logger);
+        return projectDir;
+    }
+
+    /**
+     * 为一次垂直切片运行只创建一个稳定工作区，后续切片都向该目录增量写入。
+     */
+    public Path initializeProjectWorkspace(String projectName, Consumer<String> logger) {
         Consumer<String> safeLogger = logger == null ? message -> {
         } : logger;
         try {
-            // 1. 创建本次生成任务独立的项目目录，避免覆盖历史生成结果。
             String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
             String safeProjectName = safePathSegment(projectName, "GeneratedProject");
             Path projectDir = Paths.get(WORKSPACE_ROOT, safeProjectName + "_" + timestamp);
             Files.createDirectories(projectDir);
+            safeLogger.accept("💾 已初始化切片交付工作区: " + projectDir.toAbsolutePath());
+            return projectDir;
+        } catch (IOException e) {
+            throw new RuntimeException("无法创建本地项目工作区", e);
+        }
+    }
 
-            safeLogger.accept("💾 开始持久化代码到: " + projectDir.toAbsolutePath());
-
-            // 2. 逐个写入生成文件；对空记录、空文件名、空代码内容做防御性处理。
+    /**
+     * 将一个切片产生的源码增量写入既有工作区，不创建新的时间戳目录。
+     */
+    public void writeSourceFilesToDisk(Path projectDir, List<SourceCode> sourceCodes, Consumer<String> logger) {
+        Consumer<String> safeLogger = logger == null ? message -> {
+        } : logger;
+        try {
+            if (projectDir == null) {
+                throw new IllegalArgumentException("Project workspace path is required");
+            }
+            Files.createDirectories(projectDir);
+            safeLogger.accept("💾 开始增量持久化代码到: " + projectDir.toAbsolutePath());
             List<SourceCode> safeSourceCodes = sourceCodes == null ? List.of() : sourceCodes;
             for (int i = 0; i < safeSourceCodes.size(); i++) {
                 SourceCode sourceCode = safeSourceCodes.get(i);
@@ -86,7 +110,6 @@ public class WorkspaceService {
                 }
             }
 
-            return projectDir;
         } catch (IOException e) {
             throw new RuntimeException("无法保存代码到本地磁盘", e);
         }
@@ -112,6 +135,12 @@ public class WorkspaceService {
                 CodeFix fix = safeFixes.get(i);
                 if (fix == null) {
                     safeLogger.accept("   跳过空修复记录: index=" + i);
+                    continue;
+                }
+
+                // 修复接口采用整文件覆盖语义；空白结果只能视为无效响应，不能清空现有项目文件。
+                if (fix.newCode() == null || fix.newCode().isBlank()) {
+                    safeLogger.accept("   跳过空白整文件修复: " + fix.filename());
                     continue;
                 }
 
@@ -146,6 +175,43 @@ public class WorkspaceService {
             }
         } catch (IOException e) {
             throw new RuntimeException("应用代码修复失败", e);
+        }
+    }
+
+    /**
+     * 将候选修复涉及的文件恢复到内存快照版本；候选新增文件则按精确路径删除。
+     */
+    public void restoreRepairSnapshot(Path projectDir,
+            Map<String, String> baseline,
+            List<String> changedFiles,
+            Consumer<String> logger) {
+        Consumer<String> safeLogger = logger == null ? message -> { } : logger;
+        if (projectDir == null || baseline == null || changedFiles == null) {
+            return;
+        }
+        Path normalizedRoot = projectDir.toAbsolutePath().normalize();
+        try {
+            for (String filename : changedFiles) {
+                String baselineCode = baseline.get(filename);
+                String pathCode = baselineCode == null ? "" : baselineCode;
+                Path target = normalizedRoot.resolve(resolveSmartPath(filename, pathCode)).normalize();
+                if (!target.startsWith(normalizedRoot)) {
+                    throw new IllegalArgumentException("Repair rollback path escapes project directory: " + target);
+                }
+                if (baseline.containsKey(filename)) {
+                    if (target.getParent() != null) {
+                        Files.createDirectories(target.getParent());
+                    }
+                    Files.writeString(target, baselineCode == null ? "" : baselineCode, StandardCharsets.UTF_8);
+                    safeLogger.accept("   ↩ 已恢复修复前文件: " + filename);
+                } else {
+                    // 只删除本次候选修复新建且快照中不存在的精确文件，绝不扩大删除范围。
+                    Files.deleteIfExists(target);
+                    safeLogger.accept("   ↩ 已移除失败候选新增文件: " + filename);
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("恢复候选修复快照失败", e);
         }
     }
 

@@ -6,14 +6,14 @@ import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
 import com.core.multiAgentSoftwareStudio.Service.Repair.ProjectRepairService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ArchitectureNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.BatchPlanNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.BatchValidationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ContractNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.EvaluationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.FrontendReviewNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PersistenceNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PreflightValidationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.RequirementNodeService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.SliceAcceptanceNodeService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.SlicePlanNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.TestGenerationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.VerificationNodeService;
 import org.bsc.langgraph4j.CompileConfig;
@@ -40,15 +40,15 @@ public class SoftwareStudioWorkflowService {
     private final RequirementNodeService requirementNodeService;
     private final ArchitectureNodeService architectureNodeService;
     private final ContractNodeService contractNodeService;
-    private final BatchPlanNodeService batchPlanNodeService;
+    private final SlicePlanNodeService slicePlanNodeService;
     private final BatchGenerationService batchGenerationService;
-    private final BatchValidationNodeService batchValidationNodeService;
     private final TestGenerationNodeService testGenerationNodeService;
     private final FrontendReviewNodeService frontendReviewNodeService;
     private final PersistenceNodeService persistenceNodeService;
     private final PreflightValidationNodeService preflightValidationNodeService;
     private final VerificationNodeService verificationNodeService;
     private final EvaluationNodeService evaluationNodeService;
+    private final SliceAcceptanceNodeService sliceAcceptanceNodeService;
     private final ProjectRepairService projectRepairService;
     private final LlmUsageMetricsService llmUsageMetricsService;
     private final RunJournalService runJournalService;
@@ -59,30 +59,30 @@ public class SoftwareStudioWorkflowService {
     public SoftwareStudioWorkflowService(RequirementNodeService requirementNodeService,
             ArchitectureNodeService architectureNodeService,
             ContractNodeService contractNodeService,
-            BatchPlanNodeService batchPlanNodeService,
+            SlicePlanNodeService slicePlanNodeService,
             BatchGenerationService batchGenerationService,
-            BatchValidationNodeService batchValidationNodeService,
             TestGenerationNodeService testGenerationNodeService,
             FrontendReviewNodeService frontendReviewNodeService,
             PreflightValidationNodeService preflightValidationNodeService,
             PersistenceNodeService persistenceNodeService,
             VerificationNodeService verificationNodeService,
             EvaluationNodeService evaluationNodeService,
+            SliceAcceptanceNodeService sliceAcceptanceNodeService,
             ProjectRepairService projectRepairService,
             LlmUsageMetricsService llmUsageMetricsService,
             RunJournalService runJournalService) {
         this.requirementNodeService = requirementNodeService;
         this.architectureNodeService = architectureNodeService;
         this.contractNodeService = contractNodeService;
-        this.batchPlanNodeService = batchPlanNodeService;
+        this.slicePlanNodeService = slicePlanNodeService;
         this.batchGenerationService = batchGenerationService;
-        this.batchValidationNodeService = batchValidationNodeService;
         this.testGenerationNodeService = testGenerationNodeService;
         this.frontendReviewNodeService = frontendReviewNodeService;
         this.preflightValidationNodeService = preflightValidationNodeService;
         this.persistenceNodeService = persistenceNodeService;
         this.verificationNodeService = verificationNodeService;
         this.evaluationNodeService = evaluationNodeService;
+        this.sliceAcceptanceNodeService = sliceAcceptanceNodeService;
         this.projectRepairService = projectRepairService;
         this.llmUsageMetricsService = llmUsageMetricsService;
         this.runJournalService = runJournalService;
@@ -91,22 +91,25 @@ public class SoftwareStudioWorkflowService {
     /**
      * 启动完整的项目生成工作流
      */
-    public List<SourceCode> generateProject(String userRequest, Consumer<String> eventListener, int maxRetries) {
-        return generateProjectWithResult(userRequest, eventListener, maxRetries).codes();
+    public List<SourceCode> generateProject(String userRequest, Consumer<String> eventListener) {
+        return generateProjectWithResult(userRequest, eventListener).codes();
     }
 
     /**
      * 执行真实工作流，并返回质量基准所需的平台结论、验证证据和产物位置。
      */
-    public WorkflowExecutionResult generateProjectWithResult(String userRequest, Consumer<String> eventListener, int maxRetries) {
+    public WorkflowExecutionResult generateProjectWithResult(String userRequest, Consumer<String> eventListener) {
         Consumer<String> logger = eventListener != null ? eventListener : message -> {
         };
-        SoftwareStudioWorkflowData initialData = new SoftwareStudioWorkflowData(userRequest, maxRetries);
+        SoftwareStudioWorkflowData initialData = new SoftwareStudioWorkflowData(userRequest);
         llmUsageMetricsService.beginTask();
         try {
             SoftwareStudioWorkflowData finalData = runWorkflowGraph(initialData, logger);
             if (!finalData.success) {
-                logger.accept("Project generation finished without a clean pass after " + maxRetries + " repair attempts.");
+                int usedRepairs = finalData.repairBudget == null ? 0 : finalData.repairBudget.usedLlmRepairs();
+                int repairLimit = finalData.repairBudget == null ? 0 : finalData.repairBudget.maxLlmRepairs();
+                logger.accept("Project generation finished without a clean pass after "
+                        + usedRepairs + "/" + repairLimit + " LLM repair calls.");
             }
             return new WorkflowExecutionResult(
                     List.copyOf(finalData.codes),
@@ -151,51 +154,60 @@ public class SoftwareStudioWorkflowService {
         NodeAction<SoftwareStudioWorkflowGraphState> pmNode = createNodeAction(requirementNodeService::execute, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> architectNode = createNodeAction(architectureNodeService::execute, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> contractNode = createNodeAction(contractNodeService::execute, logger);
-        NodeAction<SoftwareStudioWorkflowGraphState> planNode = createNodeAction(batchPlanNodeService::execute, logger);
-        NodeAction<SoftwareStudioWorkflowGraphState> generateBatchNode = createNodeAction(this::executeGenerateBatch, logger);
-        NodeAction<SoftwareStudioWorkflowGraphState> validateBatchNode = createNodeAction(batchValidationNodeService::execute, logger);
-        NodeAction<SoftwareStudioWorkflowGraphState> generateTestsNode = createNodeAction(testGenerationNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> planNode = createNodeAction(slicePlanNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> initializeWorkspaceNode = createNodeAction(
+                persistenceNodeService::initializeWorkspace, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> generateSliceNode = createNodeAction(this::executeGenerateSlice, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> generateTestsNode = createNodeAction(
+                testGenerationNodeService::executeCurrentSlice, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> frontendReviewNode = createNodeAction(frontendReviewNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> snapshotSliceNode = createNodeAction(
+                this::executeSnapshotSlice, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> preflightNode = createNodeAction(preflightValidationNodeService::execute, logger);
-        NodeAction<SoftwareStudioWorkflowGraphState> persistNode = createNodeAction(persistenceNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> persistNode = createNodeAction(
+                persistenceNodeService::persistCurrentSlice, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> runNode = createNodeAction(verificationNodeService::run, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> evaluateNode = createNodeAction(evaluationNodeService::execute, logger);
         NodeAction<SoftwareStudioWorkflowGraphState> fixNode = createNodeAction(this::executeFix, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> acceptSliceNode = createNodeAction(
+                sliceAcceptanceNodeService::execute, logger);
+        NodeAction<SoftwareStudioWorkflowGraphState> prepareFinalNode = createNodeAction(
+                sliceAcceptanceNodeService::prepareFinalVerification, logger);
 
         try {
             // 整体图的职责：
             // 1. 先产出 PRD 和架构蓝图
-            // 2. 再做批次规划
-            // 3. 按批次生成代码，每个批次生成后只做轻量校验
-            // 4. 所有批次结束后统一生成测试，并先通过 Profile 硬门禁再落盘验证
-            // 5. 失败按责任阶段分流，共享同一份修复预算后重新经过前置门禁
+            // 2. 将架构文件按业务能力组织成垂直切片
+            // 3. 每个切片依次完成代码、测试、门禁、落盘和真实验证
+            // 4. 已接受切片的测试持续参与后续回归，失败只能修改当前切片或共享文件
+            // 5. 全部切片接受后再做一次完整项目门禁和全量验证
             var graph = new StateGraph<>(SoftwareStudioWorkflowGraphState.SCHEMA, SoftwareStudioWorkflowGraphState::new)
                     .addNode("pm", node_async(pmNode))
                     .addNode("architect", node_async(architectNode))
                     .addNode("contract", node_async(contractNode))
-                    .addNode("plan_batches", node_async(planNode))
-                    .addNode("generate_batch", node_async(generateBatchNode))
-                    .addNode("validate_batch", node_async(validateBatchNode))
-                    .addNode("generate_tests", node_async(generateTestsNode))
+                    .addNode("plan_slices", node_async(planNode))
+                    .addNode("initialize_workspace", node_async(initializeWorkspaceNode))
+                    .addNode("generate_slice", node_async(generateSliceNode))
+                    .addNode("generate_slice_tests", node_async(generateTestsNode))
                     .addNode("frontend_review", node_async(frontendReviewNode))
+                    .addNode("snapshot_slice", node_async(snapshotSliceNode))
                     .addNode("preflight", node_async(preflightNode))
                     .addNode("persist", node_async(persistNode))
                     .addNode("run", node_async(runNode))
                     .addNode("evaluate", node_async(evaluateNode))
                     .addNode("fix", node_async(fixNode))
+                    .addNode("accept_slice", node_async(acceptSliceNode))
+                    .addNode("prepare_final", node_async(prepareFinalNode))
                     .addEdge(START, "pm")
                     .addEdge("pm", "architect")
                     .addEdge("architect", "contract")
-                    .addEdge("contract", "plan_batches")
-                    .addEdge("plan_batches", "generate_batch")
-                    .addEdge("generate_batch", "validate_batch")
-                    .addConditionalEdges(
-                            "validate_batch",
-                            state -> java.util.concurrent.CompletableFuture.completedFuture(
-                                    state.workflowData().hasMoreBatches() ? "NEXT_BATCH" : "GENERATE_TESTS"),
-                            Map.of("NEXT_BATCH", "generate_batch", "GENERATE_TESTS", "generate_tests"))
-                    .addEdge("generate_tests", "frontend_review")
-                    .addEdge("frontend_review", "preflight")
+                    .addEdge("contract", "plan_slices")
+                    .addEdge("plan_slices", "initialize_workspace")
+                    .addEdge("initialize_workspace", "generate_slice")
+                    .addEdge("generate_slice", "generate_slice_tests")
+                    .addEdge("generate_slice_tests", "frontend_review")
+                    .addEdge("frontend_review", "snapshot_slice")
+                    .addEdge("snapshot_slice", "preflight")
                     .addConditionalEdges(
                             "preflight",
                             state -> java.util.concurrent.CompletableFuture.completedFuture(preflightRoute(state.workflowData())),
@@ -204,11 +216,22 @@ public class SoftwareStudioWorkflowService {
                     .addEdge("run", "evaluate")
                     .addConditionalEdges(
                             "evaluate",
-                            state -> java.util.concurrent.CompletableFuture.completedFuture(state.workflowData().shouldFix ? "FIX" : "END"),
-                            Map.of("FIX", "fix", "END", END))
-                    .addEdge("fix", "preflight")
+                            state -> java.util.concurrent.CompletableFuture.completedFuture(
+                                    evaluationRoute(state.workflowData())),
+                            Map.of("ACCEPT", "accept_slice", "FIX", "fix", "END", END))
+                    .addConditionalEdges(
+                            "fix",
+                            state -> java.util.concurrent.CompletableFuture.completedFuture(
+                                    state.workflowData().resumeSliceTestGeneration ? "GENERATE_TESTS" : "PREFLIGHT"),
+                            Map.of("GENERATE_TESTS", "generate_slice_tests", "PREFLIGHT", "preflight"))
+                    .addConditionalEdges(
+                            "accept_slice",
+                            state -> java.util.concurrent.CompletableFuture.completedFuture(
+                                    state.workflowData().hasMoreSlices() ? "NEXT_SLICE" : "FINAL_VERIFY"),
+                            Map.of("NEXT_SLICE", "generate_slice", "FINAL_VERIFY", "prepare_final"))
+                    .addEdge("prepare_final", "preflight")
                     // LangGraph4j 默认最大迭代数较小（25），
-                    // 我们这个工作流包含“按批次循环 +可选修复循环”，正常情况下也可能超过默认值。
+                    // 当前工作流包含“按切片循环 + 可选修复循环”，正常情况下也可能超过默认值。
                     // 提高最大迭代数上限以避免误判为死循环，同时仍保留兜底保护。
                     .compile(CompileConfig.builder()
                             .recursionLimit(calculateMaxIterations(initialData))
@@ -227,15 +250,25 @@ public class SoftwareStudioWorkflowService {
     }
 
     /**
-     * 生成当前批次内的全部源文件
+     * 生成当前垂直切片拥有的全部源码文件。
      */
-    private SoftwareStudioWorkflowData executeGenerateBatch(SoftwareStudioWorkflowData data, Consumer<String> logger) {
-        batchGenerationService.generateBatch(data, logger);
+    private SoftwareStudioWorkflowData executeGenerateSlice(SoftwareStudioWorkflowData data, Consumer<String> logger) {
+        batchGenerationService.generateSlice(data, logger);
         return data;
     }
 
     /**
-     * 执行最终修复节点并将修复结果写回工作区
+     * 保存门禁前诊断快照；测试替身未提供返回值时仍保持原工作流状态。
+     */
+    private SoftwareStudioWorkflowData executeSnapshotSlice(
+            SoftwareStudioWorkflowData data,
+            Consumer<String> logger) {
+        SoftwareStudioWorkflowData result = persistenceNodeService.snapshotCurrentSlice(data, logger);
+        return result == null ? data : result;
+    }
+
+    /**
+     * 执行当前切片或最终验证的修复节点，并将结果写回共享工作区。
      */
     private SoftwareStudioWorkflowData executeFix(SoftwareStudioWorkflowData data, Consumer<String> logger) {
         projectRepairService.repair(data, logger);
@@ -246,18 +279,17 @@ public class SoftwareStudioWorkflowService {
      * 估算一次完整流程的最大节点步数，避免默认 25 次迭代过早触发。
      */
     private int calculateMaxIterations(SoftwareStudioWorkflowData data) {
-        // 在 architect 完成前批次数未知，给一个保守基础值。
-        int estimatedBatchCount = 20;
-        if (data != null && data.generationPlan != null && data.generationPlan.batches() != null
-                && !data.generationPlan.batches().isEmpty()) {
-            estimatedBatchCount = data.generationPlan.batches().size();
+        // 在架构规划完成前切片数未知，给一个保守基础值。
+        int estimatedSliceCount = 20;
+        if (data != null && data.sliceDeliveryPlan != null && data.sliceDeliveryPlan.slices() != null
+                && !data.sliceDeliveryPlan.slices().isEmpty()) {
+            estimatedSliceCount = data.sliceDeliveryPlan.slices().size();
         }
 
-        int retries = data == null ? 5 : Math.max(1, data.maxRetries);
-        // 基础节点（pm/architect/plan/tests/persist/run/evaluate）约 8 步；
-        // 每批次有 generate+validate 两步；
-        // 每次修复回环有 fix+run+evaluate 三步。
-        int estimated = 8 + estimatedBatchCount * 2 + retries * 3;
+        int repairs = com.core.multiAgentSoftwareStudio.Config.RepairBudgetConfig.MAX_PROJECT_LLM_REPAIRS;
+        // 每个切片包含生成、测试、审查、门禁、持久化、验证、接受等节点；
+        // 每次修复还会重新经过门禁和验证，最终再预留一轮全量验证。
+        int estimated = 12 + estimatedSliceCount * 8 + repairs * 4;
         return Math.max(estimated, 200);
     }
 
@@ -271,6 +303,22 @@ public class SoftwareStudioWorkflowService {
         if (!data.preflightPassed) {
             return data.shouldFix ? "FIX" : "END";
         }
-        return data.projectPath == null ? "PERSIST" : "RUN";
+        if (data.finalVerificationStarted) {
+            return "RUN";
+        }
+        return data.currentSlicePersisted ? "RUN" : "PERSIST";
+    }
+
+    /**
+     * 切片通过真实验证后先进入接受节点；最终验证通过才结束整个工作流。
+     */
+    private String evaluationRoute(SoftwareStudioWorkflowData data) {
+        if (data.shouldFix) {
+            return "FIX";
+        }
+        if (data.currentSliceVerified && !data.finalVerificationStarted) {
+            return "ACCEPT";
+        }
+        return "END";
     }
 }

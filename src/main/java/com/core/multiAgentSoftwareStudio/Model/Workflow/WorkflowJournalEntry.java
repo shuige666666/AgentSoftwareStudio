@@ -10,6 +10,7 @@ public record WorkflowJournalEntry(
         int sequence,
         String timestamp,
         WorkflowJournalEventType eventType,
+        String sliceId,
         int attempt,
         FailureKind failureKind,
         RepairTarget repairTarget,
@@ -25,5 +26,6 @@ public record WorkflowJournalEntry(
         changedFiles = changedFiles == null ? List.of() : List.copyOf(changedFiles);
         gateIds = gateIds == null ? List.of() : List.copyOf(gateIds);
         evidence = evidence == null ? "" : evidence;
+        sliceId = sliceId == null ? "UNSCOPED" : sliceId;
     }
 }

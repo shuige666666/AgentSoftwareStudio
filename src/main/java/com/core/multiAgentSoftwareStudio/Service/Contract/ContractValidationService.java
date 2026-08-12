@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -37,6 +38,9 @@ public class ContractValidationService {
     private static final Pattern IMPORT_PATTERN = Pattern.compile("^\\s*import\\s+([a-zA-Z0-9_.]+)\\s*;", Pattern.MULTILINE);
     private static final Pattern MVC_VIEW_RETURN_PATTERN = Pattern.compile("\\breturn\\s+\"([A-Za-z0-9_./-]+)\"\\s*;");
     private static final Pattern REQUEST_MAPPING_PATTERN = Pattern.compile("@(?:RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\\s*(?:\\(\\s*)?(?:(?:value|path)\\s*=\\s*)?\"([^\"]+)\"");
+    private static final Pattern TYPED_REQUEST_MAPPING_PATTERN = Pattern.compile(
+            "@(RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)"
+                    + "\\s*(?:\\(\\s*)?(?:(?:value|path)\\s*=\\s*)?\"([^\"]+)\"");
     private static final Pattern FRONTEND_REQUEST_PATTERN = Pattern.compile(
             "\\b(?:fetch|axios\\.(?:get|post|put|delete|patch))\\s*\\(\\s*([`'\"])(.*?)\\1",
             Pattern.DOTALL);
@@ -49,6 +53,9 @@ public class ContractValidationService {
             "@PathVariable(?:\\s*\\([^)]*\\))?\\s+(?:final\\s+)?[A-Za-z0-9_$.<>?,]+\\s+([A-Za-z_$][A-Za-z0-9_$]*)");
     private static final Pattern THYMELEAF_NESTED_URL_PATTERN = Pattern.compile(
             "th:(?:action|href)\\s*=\\s*\"[^\"]*@\\{[^\"(]*\\$\\{");
+    private static final Pattern THYMELEAF_OBJECT_PATTERN = Pattern.compile(
+            "th:object\\s*=\\s*([\"'])\\s*\\$\\{([A-Za-z_$][A-Za-z0-9_$]*)}\\s*\\1",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern HTML_FORM_PATTERN = Pattern.compile(
             "<form\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern HTML_LINK_PATTERN = Pattern.compile(
@@ -134,9 +141,15 @@ public class ContractValidationService {
 
         validateMainDoesNotDependOnTest(mainJavaFiles, javaTypes, warnings);
         validateFrontendRequests(frontendFiles, backendEndpoints, warnings);
+        validateDuplicateControllerMappings(mainJavaFiles, warnings);
         validateControllerPathVariables(mainJavaFiles, warnings);
+        validateSpringBeanDependencies(mainJavaFiles, warnings);
+        validateKnownInvalidSpringApis(mainJavaFiles, warnings);
+        validateRedirectResponses(mainJavaFiles, contract, warnings);
+        validateNotFoundExceptionMappings(mainJavaFiles, warnings);
         validateStaticIndexRouteConflicts(mainJavaFiles, generatedFiles, warnings);
         validateThymeleafTemplates(generatedFiles, warnings);
+        validateThymeleafModelAttributes(mainJavaFiles, generatedFiles, warnings);
         validateFrontendPayloads(contract, generatedFiles, warnings);
         validateProjectContract(contract, generatedFiles, templateNames, backendEndpoints, warnings);
         return warnings;
@@ -339,13 +352,15 @@ public class ContractValidationService {
         }
 
         for (SourceCode frontendFile : frontendFiles) {
-            Matcher matcher = FRONTEND_REQUEST_PATTERN.matcher(frontendFile.code() == null ? "" : frontendFile.code());
+            String frontendCode = frontendFile.code() == null ? "" : frontendFile.code();
+            Matcher matcher = FRONTEND_REQUEST_PATTERN.matcher(frontendCode);
             while (matcher.find()) {
                 String requestPath = normalizeEndpoint(matcher.group(2));
                 if (isExternalUrl(requestPath) || requestPath.contains("+")) {
                     continue;
                 }
-                boolean matched = backendEndpoints.stream().anyMatch(endpoint -> endpointsMatch(endpoint, requestPath));
+                boolean matched = backendEndpoints.stream().anyMatch(endpoint -> endpointsMatch(endpoint, requestPath)
+                        || isConcatenatedDynamicPath(frontendCode, matcher, endpoint));
                 if (!matched) {
                     warnings.add("Frontend file " + frontendFile.filename() + " calls `" + requestPath
                             + "` but no matching controller mapping was found. Known backend endpoints: "
@@ -586,6 +601,295 @@ public class ContractValidationService {
         }
     }
 
+    /**
+     * 检查多个 Controller 是否声明了相同 HTTP 方法和规范化路径，避免 Spring 启动时才暴露 Ambiguous mapping。
+     */
+    private void validateDuplicateControllerMappings(List<SourceCode> mainJavaFiles, List<String> warnings) {
+        Map<String, String> ownerByMapping = new LinkedHashMap<>();
+        Set<String> reportedMappings = new LinkedHashSet<>();
+        for (SourceCode file : mainJavaFiles) {
+            String code = file.code() == null ? "" : file.code();
+            if (!code.contains("@Controller") && !code.contains("@RestController")) {
+                continue;
+            }
+            int classDeclarationIndex = code.indexOf(" class ");
+            String classPrefix = controllerClassPrefix(code);
+            Matcher mapping = TYPED_REQUEST_MAPPING_PATTERN.matcher(code);
+            while (mapping.find()) {
+                if (classDeclarationIndex < 0 || mapping.start() < classDeclarationIndex) {
+                    continue;
+                }
+                String method = mappingHttpMethod(mapping.group(1));
+                if (method == null) {
+                    continue;
+                }
+                String endpoint = canonicalEndpoint(joinEndpoint(classPrefix, mapping.group(2)));
+                String key = method + " " + endpoint;
+                String previousOwner = ownerByMapping.putIfAbsent(key, file.filename());
+                if (previousOwner != null && reportedMappings.add(key)) {
+                    warnings.add("Duplicate controller mapping `" + key + "` is declared by "
+                            + previousOwner + " and " + file.filename() + ".");
+                }
+            }
+        }
+    }
+
+    private String mappingHttpMethod(String annotationName) {
+        return switch (annotationName) {
+            case "GetMapping" -> "GET";
+            case "PostMapping" -> "POST";
+            case "PutMapping" -> "PUT";
+            case "DeleteMapping" -> "DELETE";
+            case "PatchMapping" -> "PATCH";
+            default -> null;
+        };
+    }
+
+    /**
+     * 检查 Spring 组件构造器注入的项目内具体类是否注册为 Bean，提前发现 NoSuchBeanDefinitionException。
+     */
+    private void validateSpringBeanDependencies(List<SourceCode> mainJavaFiles, List<String> warnings) {
+        Map<String, SourceCode> sourcesByType = new LinkedHashMap<>();
+        for (SourceCode file : mainJavaFiles) {
+            Matcher type = PUBLIC_TYPE_PATTERN.matcher(file.code() == null ? "" : file.code());
+            if (type.find()) {
+                sourcesByType.put(type.group(2), file);
+            }
+        }
+        String allSource = mainJavaFiles.stream()
+                .map(SourceCode::code)
+                .filter(java.util.Objects::nonNull)
+                .reduce("", (left, right) -> left + "\n" + right);
+        Set<String> reported = new LinkedHashSet<>();
+        for (Map.Entry<String, SourceCode> owner : sourcesByType.entrySet()) {
+            String ownerCode = owner.getValue().code() == null ? "" : owner.getValue().code();
+            if (!isSpringBeanType(ownerCode)) {
+                continue;
+            }
+            Pattern constructorPattern = Pattern.compile(
+                    "(?:public|protected|private)?\\s*" + Pattern.quote(owner.getKey()) + "\\s*\\(([^)]*)\\)");
+            Matcher constructor = constructorPattern.matcher(ownerCode);
+            while (constructor.find()) {
+                for (String parameter : constructor.group(1).split(",")) {
+                    String dependencyType = constructorDependencyType(parameter);
+                    SourceCode dependency = sourcesByType.get(dependencyType);
+                    if (dependency == null || dependency.code() == null
+                            || !dependency.code().contains(" class ")
+                            || isSpringBeanType(dependency.code())
+                            || hasBeanFactoryMethod(allSource, dependencyType)) {
+                        continue;
+                    }
+                    String key = owner.getKey() + "->" + dependencyType;
+                    if (reported.add(key)) {
+                        warnings.add("Spring bean dependency `" + dependencyType + "` injected into `"
+                                + owner.getKey() + "` is not registered as a component or @Bean.");
+                    }
+                }
+            }
+        }
+    }
+
+    private String constructorDependencyType(String parameter) {
+        String normalized = parameter == null ? "" : parameter
+                .replaceAll("@[A-Za-z0-9_$.]+(?:\\([^)]*\\))?", "")
+                .replaceAll("\\bfinal\\b", "")
+                .trim();
+        String[] components = normalized.split("\\s+");
+        if (components.length < 2 || components[components.length - 2].contains("<")) {
+            return "";
+        }
+        String type = components[components.length - 2].replaceAll("\\[\\]$", "");
+        int separator = Math.max(type.lastIndexOf('.'), type.lastIndexOf('$'));
+        return separator >= 0 ? type.substring(separator + 1) : type;
+    }
+
+    private boolean isSpringBeanType(String code) {
+        return code.contains("@Component") || code.contains("@Service") || code.contains("@Repository")
+                || code.contains("@Controller") || code.contains("@RestController")
+                || code.contains("@Configuration");
+    }
+
+    private boolean hasBeanFactoryMethod(String allSource, String typeName) {
+        return Pattern.compile("@Bean(?:\\s*\\([^)]*\\))?\\s+(?:public\\s+|protected\\s+|private\\s+)?"
+                + Pattern.quote(typeName) + "\\s+[A-Za-z_$][A-Za-z0-9_$]*\\s*\\(")
+                .matcher(allSource).find();
+    }
+
+    /**
+     * 阻断真实基准中重复出现的已知无效 Spring API，避免把确定性编译错误留给 Docker 才发现。
+     */
+    private void validateKnownInvalidSpringApis(List<SourceCode> mainJavaFiles, List<String> warnings) {
+        for (SourceCode file : mainJavaFiles) {
+            String code = file.code() == null ? "" : file.code();
+            if (Pattern.compile("\\bResponseEntity\\s*\\.\\s*temporaryRedirect\\s*\\(")
+                    .matcher(code).find()) {
+                warnings.add("Invalid Spring API usage in " + file.filename()
+                        + ": `ResponseEntity.temporaryRedirect(...)` does not exist; use `status(307)` or another explicit 3xx builder.");
+            }
+            Matcher uriBuilder = Pattern.compile(
+                    "(?s)\\bUriComponentsBuilder\\s*\\.[^;\\n]{0,600}?\\.\\s*toUri\\s*\\(")
+                    .matcher(code);
+            while (uriBuilder.find()) {
+                String chain = uriBuilder.group();
+                if (!chain.matches("(?s).*\\.\\s*(?:build|buildAndExpand)\\s*\\(.*")) {
+                    warnings.add("Invalid Spring API usage in " + file.filename()
+                            + ": `UriComponentsBuilder` must call `build()` or `buildAndExpand()` before `toUri()`.");
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * 重定向端点不能以 void 丢弃目标 URL；若直接操作 HttpServletResponse，则允许显式 sendRedirect/status 写法。
+     */
+    private void validateRedirectResponses(
+            List<SourceCode> mainJavaFiles,
+            ProjectContract contract,
+            List<String> warnings) {
+        for (SourceCode file : mainJavaFiles) {
+            String code = file.code() == null ? "" : file.code();
+            if (!code.contains("@Controller") && !code.contains("@RestController")) {
+                continue;
+            }
+            String classPrefix = controllerClassPrefix(code);
+            int classDeclarationIndex = code.indexOf(" class ");
+            Matcher mapping = TYPED_REQUEST_MAPPING_PATTERN.matcher(code);
+            while (mapping.find()) {
+                if (classDeclarationIndex < 0 || mapping.start() < classDeclarationIndex
+                        || !"GetMapping".equals(mapping.group(1))) {
+                    continue;
+                }
+                int bodyStart = code.indexOf('{', mapping.end());
+                if (bodyStart < 0 || bodyStart - mapping.end() > 1_000) {
+                    continue;
+                }
+                String header = code.substring(mapping.end(), bodyStart);
+                Matcher voidMethod = Pattern.compile("\\bvoid\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(")
+                        .matcher(header);
+                if (!voidMethod.find()) {
+                    continue;
+                }
+                int bodyEnd = findMatchingBrace(code, bodyStart);
+                String body = bodyEnd < 0 ? "" : code.substring(bodyStart + 1, bodyEnd);
+                String endpoint = canonicalEndpoint(joinEndpoint(classPrefix, mapping.group(2)));
+                boolean redirectIntent = voidMethod.group(1).toLowerCase(Locale.ROOT).contains("redirect")
+                        || hasRedirectContract(contract, endpoint);
+                boolean writesResponse = header.contains("HttpServletResponse")
+                        && (body.contains("sendRedirect(")
+                                || body.contains("setStatus(") && body.toLowerCase(Locale.ROOT).contains("location"));
+                if (redirectIntent && !writesResponse) {
+                    warnings.add("Redirect endpoint `GET " + endpoint + "` in " + file.filename()
+                            + " returns void without writing an explicit 3xx response and Location header.");
+                }
+            }
+        }
+    }
+
+    private boolean hasRedirectContract(ProjectContract contract, String endpoint) {
+        if (contract == null) {
+            return false;
+        }
+        return contract.endpoints().stream()
+                .filter(item -> "GET".equalsIgnoreCase(item.method()))
+                .filter(item -> canonicalEndpoint(item.path()).equals(endpoint))
+                .map(ApiEndpointContract::description)
+                .map(value -> value == null ? "" : value.toLowerCase(Locale.ROOT))
+                .anyMatch(value -> value.contains("redirect") || value.contains("跳转") || value.contains("重定向"));
+    }
+
+    /**
+     * 源码明确抛出 not-found 异常时必须存在 404 映射，防止 MockMvc 和真实请求得到 500 或 ServletException。
+     */
+    private void validateNotFoundExceptionMappings(List<SourceCode> mainJavaFiles, List<String> warnings) {
+        String allSource = mainJavaFiles.stream()
+                .map(SourceCode::code)
+                .filter(java.util.Objects::nonNull)
+                .reduce("", (left, right) -> left + "\n" + right);
+        Set<String> requiredMappings = new LinkedHashSet<>();
+        Matcher thrown = Pattern.compile(
+                "(?is)(?:throw\\s+new|->\\s*new)\\s+([A-Za-z_$][A-Za-z0-9_$.]*)\\s*\\(([^;]{0,400})\\)")
+                .matcher(allSource);
+        while (thrown.find()) {
+            String type = simpleTypeName(thrown.group(1));
+            String message = thrown.group(2).toLowerCase(Locale.ROOT);
+            // ResponseStatusException 已携带确定的 HTTP 状态，不需要再强制生成全局异常处理器。
+            if ("ResponseStatusException".equals(type) && message.contains("not_found")) {
+                continue;
+            }
+            if (type.toLowerCase(Locale.ROOT).contains("notfound") || message.contains("not found")) {
+                requiredMappings.add(type);
+            }
+        }
+        for (String exceptionType : requiredMappings) {
+            if (!hasNotFoundMapping(allSource, exceptionType)) {
+                warnings.add("Not-found exception mapping missing for `" + exceptionType
+                        + "`: generated code throws it for a missing resource but no HTTP 404 mapping exists.");
+            }
+        }
+    }
+
+    private boolean hasNotFoundMapping(String allSource, String exceptionType) {
+        Pattern responseStatus = Pattern.compile(
+                "(?s)@ResponseStatus\\s*\\([^)]*NOT_FOUND[^)]*\\)[^{}]{0,500}\\b(?:class|record)\\s+"
+                        + Pattern.quote(exceptionType) + "\\b");
+        if (responseStatus.matcher(allSource).find()) {
+            return true;
+        }
+        Matcher handler = Pattern.compile(
+                "(?s)@ExceptionHandler\\s*\\([^)]*\\b" + Pattern.quote(exceptionType)
+                        + "\\s*\\.\\s*class[^)]*\\)(.{0,1200})")
+                .matcher(allSource);
+        if (!handler.find()) {
+            return false;
+        }
+        String handlerCode = handler.group(1);
+        return handlerCode.contains("HttpStatus.NOT_FOUND")
+                || handlerCode.contains("ResponseEntity.notFound(")
+                || Pattern.compile("\\bstatus\\s*\\(\\s*(?:404|HttpStatus\\.NOT_FOUND)")
+                        .matcher(handlerCode).find();
+    }
+
+    /**
+     * 校验 th:object 引用的表单对象是否由 MVC Controller 放入模型，提前阻断模板运行期异常。
+     */
+    private void validateThymeleafModelAttributes(List<SourceCode> mainJavaFiles,
+            List<SourceCode> generatedFiles,
+            List<String> warnings) {
+        String controllerCode = mainJavaFiles.stream()
+                .map(SourceCode::code)
+                .filter(java.util.Objects::nonNull)
+                .filter(code -> code.contains("@Controller") && !code.contains("@RestController"))
+                .reduce("", (left, right) -> left + "\n" + right);
+        for (SourceCode file : generatedFiles) {
+            String filename = sourceCodePathService.normalizePath(file.filename());
+            if (!filename.startsWith("src/main/resources/templates/") || !filename.endsWith(".html")) {
+                continue;
+            }
+            Matcher object = THYMELEAF_OBJECT_PATTERN.matcher(file.code() == null ? "" : file.code());
+            while (object.find()) {
+                String attributeName = object.group(2);
+                if (!providesModelAttribute(controllerCode, attributeName)) {
+                    warnings.add("Thymeleaf model attribute `" + attributeName + "` used by " + filename
+                            + " is not provided by any MVC Controller.");
+                }
+            }
+        }
+    }
+
+    /**
+     * 兼容显式 addAttribute、显式命名和按参数名推导的 @ModelAttribute 三种常见写法。
+     */
+    private boolean providesModelAttribute(String controllerCode, String attributeName) {
+        String quotedName = Pattern.quote(attributeName);
+        return Pattern.compile("\\.addAttribute\\s*\\(\\s*[\"']" + quotedName + "[\"']")
+                .matcher(controllerCode).find()
+                || Pattern.compile("@ModelAttribute\\s*\\(\\s*(?:value|name)?\\s*=?\\s*[\"']"
+                        + quotedName + "[\"']\\s*\\)").matcher(controllerCode).find()
+                || Pattern.compile("@ModelAttribute(?:\\s*\\(\\s*\\))?[^,;{}()]*\\b"
+                        + quotedName + "\\b").matcher(controllerCode).find();
+    }
+
     private String controllerClassPrefix(String code) {
         int classDeclarationIndex = code.indexOf(" class ");
         if (classDeclarationIndex < 0) {
@@ -682,11 +986,36 @@ public class ContractValidationService {
         String safeCode = code == null ? "" : code;
         Matcher matcher = FRONTEND_REQUEST_PATTERN.matcher(safeCode);
         while (matcher.find()) {
-            if (endpointsMatch(matcher.group(2), expectedPath)) {
+            if (endpointsMatch(matcher.group(2), expectedPath)
+                    || isConcatenatedDynamicPath(safeCode, matcher, expectedPath)) {
                 return true;
             }
         }
         return containsHtmlFrontendCall(safeCode, expectedMethod, expectedPath);
+    }
+
+    /**
+     * 识别 fetch('/urls/' + shortCode) 这类字符串拼接路径，并与 /urls/{shortCode} 契约匹配。
+     */
+    private boolean isConcatenatedDynamicPath(String code, Matcher requestMatcher, String expectedPath) {
+        String expectedCanonical = canonicalEndpoint(expectedPath);
+        int parameterIndex = expectedCanonical.indexOf("{}");
+        if (parameterIndex < 0) {
+            return false;
+        }
+        String literalPrefix = requestMatcher.group(2);
+        String expectedPrefix = expectedCanonical.substring(0, parameterIndex);
+        if (!normalizeDynamicPrefix(literalPrefix).equals(normalizeDynamicPrefix(expectedPrefix))) {
+            return false;
+        }
+        int suffixEnd = Math.min(code.length(), requestMatcher.end() + 120);
+        String suffix = code.substring(requestMatcher.end(), suffixEnd);
+        return suffix.matches("(?s)^\\s*\\+\\s*[A-Za-z_$][A-Za-z0-9_$.]*.*$");
+    }
+
+    private String normalizeDynamicPrefix(String raw) {
+        String value = raw == null ? "" : raw.trim().replaceAll("/{2,}", "/");
+        return value.endsWith("/") ? value : value + "/";
     }
 
     /**

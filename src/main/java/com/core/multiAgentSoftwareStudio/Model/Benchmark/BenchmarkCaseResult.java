@@ -9,6 +9,8 @@ import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowRunSummary;
  */
 public record BenchmarkCaseResult(
         String caseId,
+        int repetitionIndex,
+        int repetitionCount,
         boolean platformSuccess,
         boolean independentQualityPassed,
         String manualVerdict,

@@ -27,7 +27,7 @@ public class SoftwareStudioService {
      * 同步执行项目生成流程并返回最终代码结果
      */
     public List<SourceCode> generateProject(String userRequest) {
-        return workflowService.generateProject(userRequest, System.out::println, 5);
+        return workflowService.generateProject(userRequest, System.out::println);
     }
 
     /**
@@ -39,6 +39,6 @@ public class SoftwareStudioService {
             if (eventListener != null) {
                 eventListener.accept(log);
             }
-        }, 5);
+        });
     }
 }

@@ -6,6 +6,8 @@ import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.RunJournalService;
+import com.core.multiAgentSoftwareStudio.Service.Repair.RepairRegressionGuardService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.function.Consumer;
@@ -18,15 +20,28 @@ public class EvaluationNodeService {
 
     private final VerificationNodeService verificationNodeService;
     private final RunJournalService runJournalService;
+    private final RepairRegressionGuardService repairRegressionGuardService;
 
     /**
      * 注入验证节点服务，用于在编译运行成功后继续执行测试。
      */
+    @Autowired
+    public EvaluationNodeService(
+            VerificationNodeService verificationNodeService,
+            RunJournalService runJournalService,
+            RepairRegressionGuardService repairRegressionGuardService) {
+        this.verificationNodeService = verificationNodeService;
+        this.runJournalService = runJournalService;
+        this.repairRegressionGuardService = repairRegressionGuardService;
+    }
+
+    /**
+     * 保留两参数构造器供现有轻量单元测试使用；生产环境由 Spring 注入完整回归保护服务。
+     */
     public EvaluationNodeService(
             VerificationNodeService verificationNodeService,
             RunJournalService runJournalService) {
-        this.verificationNodeService = verificationNodeService;
-        this.runJournalService = runJournalService;
+        this(verificationNodeService, runJournalService, null);
     }
 
     /**
@@ -41,6 +56,7 @@ public class EvaluationNodeService {
         data.pendingFixLog = null;
         data.pendingErrorType = null;
         data.pendingFailureKind = FailureKind.NONE;
+        data.currentSliceVerified = false;
 
         VerificationResult verification = data.verificationResult == null
                 ? VerificationResult.empty()
@@ -64,26 +80,104 @@ public class EvaluationNodeService {
                             .reduce((left, right) -> left + "\n" + right)
                             .orElse("Contract validation failed");
                     setPendingFailure(data, FailureKind.CONTRACT, contractEvidence);
-                    data.shouldFix = !data.repairStopRequested && data.currentAttempt < data.maxRetries;
+                    evaluateRepairCandidate(data, logger);
+                    data.shouldFix = data.canRepairNow();
+                    if (!data.shouldFix) {
+                        data.markRepairBudgetUnavailable();
+                    }
                     return data;
                 }
                 logger.accept("All generated tests passed.");
-                data.success = true;
+                if (data.finalVerificationStarted || data.currentSlice() == null) {
+                    data.success = true;
+                } else {
+                    data.currentSliceVerified = true;
+                }
+                commitRepairCandidate(data);
                 return data;
             }
-            setPendingFailure(data, data.verificationResult.primaryFailureKind(), data.testResult);
+            FailureKind testFailureKind = data.verificationResult.primaryFailureKind();
+            var contractBlockers = contractBlockers(data);
+            if (shouldPrioritizeContractBlockers(testFailureKind, contractBlockers)) {
+                // 测试已经暴露行为错误且确定性契约门禁同时阻断时，先修生产契约，避免额度全部用于重写测试。
+                logger.accept("Tests failed while deterministic contract gates are blocking; routing repair to contract ownership.");
+                setPendingFailure(data, FailureKind.CONTRACT,
+                        buildContractFailureLog(data.testResult, contractBlockers));
+            } else {
+                setPendingFailure(data, testFailureKind, data.testResult);
+            }
+            if (!data.finalVerificationStarted && regressionTestFailed(data)) {
+                runJournalService.recordRegressionFailure(data);
+            }
         } else {
             setPendingFailure(data, verification.primaryFailureKind(), data.executionResult);
         }
 
-        // 修复被刻意延后到“全项目生成完成之后”。
-        // 这样虽然最后一次修复看到的上下文更大，但总次数会少很多，
-        // 整体 token 成本通常比“每个阶段都修”更低。
-        data.shouldFix = !data.repairStopRequested && data.currentAttempt < data.maxRetries;
+        evaluateRepairCandidate(data, logger);
+
+        // 切片修复与最终修复共享一个硬预算，避免每个切片复制完整重试次数。
+        // 只有真实 LLM 修复调用才消费额度，确定性门禁和 Docker 验证不计入。
+        data.shouldFix = data.canRepairNow();
         if (!data.shouldFix) {
+            data.markRepairBudgetUnavailable();
             logger.accept("Reached the repair limit. Returning the latest generated code.");
         }
         return data;
+    }
+
+    /**
+     * 返回当前验证周期中的确定性契约阻塞项，供绿色测试和失败测试共用同一判断依据。
+     */
+    private java.util.List<QualityPolicyFinding> contractBlockers(SoftwareStudioWorkflowData data) {
+        return data.qualityPolicyResult == null
+                ? java.util.List.of()
+                : data.qualityPolicyResult.contractBlockingFindings();
+    }
+
+    /**
+     * 测试代码或行为断言失败时，若项目同时存在真实契约阻塞，优先修复生产契约。
+     * 测试编译和测试发现失败仍归测试所有，防止语义门禁掩盖测试基础设施问题。
+     */
+    private boolean shouldPrioritizeContractBlockers(
+            FailureKind testFailureKind,
+            java.util.List<QualityPolicyFinding> contractBlockers) {
+        return !contractBlockers.isEmpty()
+                && (testFailureKind == FailureKind.TEST_CODE
+                        || testFailureKind == FailureKind.TEST_ASSERTION);
+    }
+
+    /**
+     * 将测试失败和契约门禁证据一起交给 Debugger，避免修复契约时丢失运行期症状。
+     */
+    private String buildContractFailureLog(
+            String testLog,
+            java.util.List<QualityPolicyFinding> contractBlockers) {
+        String contractEvidence = contractBlockers.stream()
+                .map(finding -> finding.gate() + ": " + finding.evidence())
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("Contract validation failed");
+        return "=== TEST FAILURE ===\n" + (testLog == null ? "" : testLog)
+                + "\n=== CONTRACT BLOCKERS ===\n" + contractEvidence;
+    }
+
+    private void evaluateRepairCandidate(SoftwareStudioWorkflowData data, Consumer<String> logger) {
+        if (repairRegressionGuardService != null) {
+            repairRegressionGuardService.rollbackIfRegressed(data, logger);
+        }
+    }
+
+    private void commitRepairCandidate(SoftwareStudioWorkflowData data) {
+        if (repairRegressionGuardService != null) {
+            repairRegressionGuardService.commitCandidate(data);
+        }
+    }
+
+    private boolean regressionTestFailed(SoftwareStudioWorkflowData data) {
+        String output = data.testResult == null ? "" : data.testResult;
+        return data.acceptedTestFiles.stream()
+                .map(path -> java.nio.file.Path.of(path.replace('\\', '/')).getFileName().toString())
+                .map(name -> name.replaceFirst("\\.java$", ""))
+                .anyMatch(output::contains);
     }
 
     /**
