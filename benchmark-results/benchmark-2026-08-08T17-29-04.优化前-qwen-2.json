@@ -1,0 +1,417 @@
+{
+  "startedAt" : "2026-08-08T17:29:04.132708300Z",
+  "finishedAt" : "2026-08-08T18:33:52.549225600Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash-2026-07-15",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : "qwen3.7-flash-2026-07-15"
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.7-plus",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.5,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 300,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : "qwen3.7-plus-2026-05-26"
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "ArchitectAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "ContractAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "DebuggerAgent",
+    "modelRef" : "coderModel"
+  }, {
+    "agent" : "DeveloperAgent",
+    "modelRef" : "coderModel"
+  }, {
+    "agent" : "FrontendReviewAgent",
+    "modelRef" : "coderModel"
+  }, {
+    "agent" : "ProductManagerAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "TestWriterAgent",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "calculator-web-basic", "task-api-basic", "snake-websocket-basic", "url-shortener-basic", "poll-system-basic", "blog-system-basic" ],
+    "maxRetries" : 3,
+    "gitCommit" : "5ba9f3e09e9e95bd621b216fb846485a52752851"
+  },
+  "cases" : [ {
+    "caseId" : "calculator-web-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : true,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Simple_Calculator_Web_App_20260809_013509",
+    "elapsedMillis" : 433681,
+    "quality" : {
+      "passed" : true,
+      "findings" : [ {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      } ]
+    },
+    "usage" : {
+      "calls" : 18,
+      "successfulCalls" : 18,
+      "failedCalls" : 0,
+      "durationMillis" : 434631,
+      "inputCacheHitTokens" : 0,
+      "inputCacheMissTokens" : 38250,
+      "outputTokens" : 56723,
+      "totalTokens" : 94973,
+      "cacheMetricsAvailable" : false,
+      "finishReasonCounts" : {
+        "stop" : 18,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 0,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      }
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "task-api-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : true,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Task_Management_REST_API_20260809_014202",
+    "elapsedMillis" : 545409,
+    "quality" : {
+      "passed" : true,
+      "findings" : [ {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      } ]
+    },
+    "usage" : {
+      "calls" : 17,
+      "successfulCalls" : 17,
+      "failedCalls" : 0,
+      "durationMillis" : 466088,
+      "inputCacheHitTokens" : 0,
+      "inputCacheMissTokens" : 41651,
+      "outputTokens" : 57477,
+      "totalTokens" : 99128,
+      "cacheMetricsAvailable" : false,
+      "finishReasonCounts" : {
+        "stop" : 17,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 0,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      }
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "snake-websocket-basic",
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\WebSocket_Snake_Game_20260809_015510",
+    "elapsedMillis" : 708367,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=[INFO] Scanning for projects... [INFO] [INFO] -----------------------< com.example:snake-game >----------------------- [INFO] Building WebSocket Snake Game 1.0.0 [INFO] --------------------------------[ jar ]--------------------------------..."
+      } ]
+    },
+    "usage" : {
+      "calls" : 26,
+      "successfulCalls" : 26,
+      "failedCalls" : 0,
+      "durationMillis" : 812688,
+      "inputCacheHitTokens" : 0,
+      "inputCacheMissTokens" : 87638,
+      "outputTokens" : 98302,
+      "totalTokens" : 185940,
+      "cacheMetricsAvailable" : false,
+      "finishReasonCounts" : {
+        "stop" : 26,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 0,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      }
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "url-shortener-basic",
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Short_URL_Service_20260809_020642",
+    "elapsedMillis" : 678059,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output="
+      } ]
+    },
+    "usage" : {
+      "calls" : 26,
+      "successfulCalls" : 26,
+      "failedCalls" : 0,
+      "durationMillis" : 770965,
+      "inputCacheHitTokens" : 0,
+      "inputCacheMissTokens" : 111603,
+      "outputTokens" : 101384,
+      "totalTokens" : 212987,
+      "cacheMetricsAvailable" : false,
+      "finishReasonCounts" : {
+        "stop" : 26,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 0,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      }
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "poll-system-basic",
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Online_Voting_System_20260809_021749",
+    "elapsedMillis" : 768736,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=[INFO] Scanning for projects... [INFO] [INFO] ---------------------< com.example:voting-system >---------------------- [INFO] Building voting-system 0.0.1-SNAPSHOT [INFO] --------------------------------[ jar ]------------------------------..."
+      } ]
+    },
+    "usage" : {
+      "calls" : 27,
+      "successfulCalls" : 27,
+      "failedCalls" : 0,
+      "durationMillis" : 812173,
+      "inputCacheHitTokens" : 0,
+      "inputCacheMissTokens" : 146785,
+      "outputTokens" : 105472,
+      "totalTokens" : 252257,
+      "cacheMetricsAvailable" : false,
+      "finishReasonCounts" : {
+        "stop" : 27,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 0,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      }
+    },
+    "workflowError" : null
+  }, {
+    "caseId" : "blog-system-basic",
+    "platformSuccess" : true,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Simple_Blog_System_20260809_023100",
+    "elapsedMillis" : 754102,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : false,
+        "evidence" : "No @SpringBootTest was generated."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      } ]
+    },
+    "usage" : {
+      "calls" : 25,
+      "successfulCalls" : 25,
+      "failedCalls" : 0,
+      "durationMillis" : 852113,
+      "inputCacheHitTokens" : 0,
+      "inputCacheMissTokens" : 83216,
+      "outputTokens" : 103454,
+      "totalTokens" : 186670,
+      "cacheMetricsAvailable" : false,
+      "finishReasonCounts" : {
+        "stop" : 25,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 0,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      }
+    },
+    "workflowError" : null
+  } ],
+  "platformSuccessCount" : 3,
+  "independentQualityPassCount" : 2,
+  "falseSuccessCount" : 1,
+  "falseSuccessRate" : 0.3333333333333333,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-08-08T17-29-04.132708300Z.json"
+}

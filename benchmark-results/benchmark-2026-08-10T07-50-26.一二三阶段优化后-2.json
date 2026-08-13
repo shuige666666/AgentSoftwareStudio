@@ -1,0 +1,671 @@
+{
+  "startedAt": "2026-08-10T07:50:26.679799300Z",
+  "finishedAt": "2026-08-10T12:52:37.406846400Z(在第六个程序运行时程序有中断运行，时间不准确，可不参考）",
+  "models": {
+    "coderModel": {
+      "requestedName": "qwen3.7-flash-2026-07-15",
+      "reportedName": null,
+      "provider": "dashscope.aliyuncs.com",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature": 0.1,
+      "maxOutputTokens": 8192,
+      "timeoutSeconds": 480,
+      "jsonOutputEnabled": true,
+      "revision": "unknown",
+      "manualReleaseLabel": "qwen3.7-flash-2026-07-15"
+    },
+    "logicModel": {
+      "requestedName": "qwen3.7-plus",
+      "reportedName": null,
+      "provider": "dashscope.aliyuncs.com",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature": 0.5,
+      "maxOutputTokens": 8192,
+      "timeoutSeconds": 300,
+      "jsonOutputEnabled": true,
+      "revision": "unknown",
+      "manualReleaseLabel": "qwen3.7-plus-2026-05-26"
+    }
+  },
+  "agentModelAssignments": [
+    {
+      "agent": "ArchitectAgent",
+      "modelRef": "logicModel"
+    },
+    {
+      "agent": "ContractAgent",
+      "modelRef": "logicModel"
+    },
+    {
+      "agent": "DebuggerAgent",
+      "modelRef": "coderModel"
+    },
+    {
+      "agent": "DeveloperAgent",
+      "modelRef": "coderModel"
+    },
+    {
+      "agent": "FrontendReviewAgent",
+      "modelRef": "coderModel"
+    },
+    {
+      "agent": "ProductManagerAgent",
+      "modelRef": "logicModel"
+    },
+    {
+      "agent": "TestWriterAgent",
+      "modelRef": "coderModel"
+    }
+  ],
+  "benchmarkConfig": {
+    "caseIds": [
+      "calculator-web-basic",
+      "task-api-basic",
+      "snake-websocket-basic",
+      "url-shortener-basic",
+      "poll-system-basic",
+      "blog-system-basic"
+    ],
+    "maxRetries": 3,
+    "gitCommit": "8577cf39cedb7effe4df757a31b554e6b35b1035",
+    "gitDirty": false,
+    "workingTreeFingerprint": null
+  },
+  "cases": [
+    {
+      "caseId": "calculator-web-basic",
+      "platformSuccess": false,
+      "independentQualityPassed": false,
+      "manualVerdict": "NOT_REVIEWED",
+      "projectPath": "ai_generated_projects\\Simple_Calculator_Web_App_20260810_155805",
+      "elapsedMillis": 589013,
+      "quality": {
+        "passed": false,
+        "findings": [
+          {
+            "gate": "HAS_SPRING_CONTEXT_TEST",
+            "passed": true,
+            "evidence": "Generated Spring context test exists."
+          },
+          {
+            "gate": "HAS_TEST_SOURCE",
+            "passed": true,
+            "evidence": "Generated test source exists."
+          },
+          {
+            "gate": "TESTS_EXECUTED_AND_GREEN",
+            "passed": false,
+            "evidence": "Tests must execute and report Failures: 0 plus Errors: 0; output=[INFO] Scanning for projects... [INFO] [INFO] -----------------------< com.example:calculator >----------------------- [INFO] Building Simple Calculator Web App 0.0.1-SNAPSHOT [INFO] --------------------------------[ jar ]------------------..."
+          },
+          {
+            "gate": "NO_PLACEHOLDER_SOURCE",
+            "passed": true,
+            "evidence": "No known placeholder source was found."
+          },
+          {
+            "gate": "CONTRACT_GATES_PASSED",
+            "passed": true,
+            "evidence": "Final semantic contract gates passed."
+          }
+        ]
+      },
+      "usage": {
+        "calls": 22,
+        "successfulCalls": 22,
+        "failedCalls": 0,
+        "durationMillis": 583572,
+        "inputCacheHitTokens": 0,
+        "inputCacheMissTokens": 56704,
+        "outputTokens": 68173,
+        "totalTokens": 124877,
+        "cacheMetricsAvailable": false,
+        "finishReasonCounts": {
+          "stop": 22,
+          "length": 0,
+          "contentFilter": 0,
+          "toolCalls": 0,
+          "other": 0
+        },
+        "failureCounts": {
+          "timeout": 0,
+          "httpError": 0,
+          "interrupted": 0,
+          "responseParseError": 0,
+          "providerError": 0,
+          "unknown": 0
+        },
+        "outputValidationCounts": {
+          "emptyContent": 0,
+          "jsonParseError": 0,
+          "schemaValidationError": 0
+        }
+      },
+      "attemptsUsed": 3,
+      "finalFailureKind": "SPRING_CONTEXT",
+      "validationWarningCount": 6,
+      "verificationSummary": {
+        "buildExitCode": 0,
+        "testExitCode": 1,
+        "buildPassed": true,
+        "testPassed": false,
+        "testsRun": 12,
+        "failures": 0,
+        "errors": 2,
+        "buildDurationMillis": 13408,
+        "testDurationMillis": 17903,
+        "primaryFailureKind": "SPRING_CONTEXT"
+      },
+      "runSummary": {
+        "preflightChecks": 3,
+        "verificationSteps": 5,
+        "repairAttempts": 2,
+        "normalizedFileChanges": 0,
+        "repeatedFailureStops": 0,
+        "noChangeStops": 0,
+        "failureCounts": {
+          "TEST_ASSERTION": 1,
+          "MAIN_COMPILE": 1,
+          "SPRING_CONTEXT": 1
+        },
+        "repairTargetCounts": {
+          "IMPLEMENTATION": 2
+        },
+        "failedGateCounts": {}
+      },
+      "workflowError": null
+    },
+    {
+      "caseId": "task-api-basic",
+      "platformSuccess": false,
+      "independentQualityPassed": false,
+      "manualVerdict": "NOT_REVIEWED",
+      "projectPath": "ai_generated_projects\\Task_Management_REST_API_20260810_160601",
+      "elapsedMillis": 454904,
+      "quality": {
+        "passed": false,
+        "findings": [
+          {
+            "gate": "HAS_SPRING_CONTEXT_TEST",
+            "passed": true,
+            "evidence": "Generated Spring context test exists."
+          },
+          {
+            "gate": "HAS_TEST_SOURCE",
+            "passed": true,
+            "evidence": "Generated test source exists."
+          },
+          {
+            "gate": "TESTS_EXECUTED_AND_GREEN",
+            "passed": false,
+            "evidence": "Tests must execute and report Failures: 0 plus Errors: 0; output=[INFO] Scanning for projects... [INFO] [INFO] --------------------< com.example:task-management >--------------------- [INFO] Building task-management 0.0.1-SNAPSHOT [INFO] --------------------------------[ jar ]----------------------------..."
+          },
+          {
+            "gate": "NO_PLACEHOLDER_SOURCE",
+            "passed": true,
+            "evidence": "No known placeholder source was found."
+          },
+          {
+            "gate": "CONTRACT_GATES_PASSED",
+            "passed": true,
+            "evidence": "Final semantic contract gates passed."
+          }
+        ]
+      },
+      "usage": {
+        "calls": 15,
+        "successfulCalls": 15,
+        "failedCalls": 0,
+        "durationMillis": 399310,
+        "inputCacheHitTokens": 0,
+        "inputCacheMissTokens": 36102,
+        "outputTokens": 44994,
+        "totalTokens": 81096,
+        "cacheMetricsAvailable": false,
+        "finishReasonCounts": {
+          "stop": 15,
+          "length": 0,
+          "contentFilter": 0,
+          "toolCalls": 0,
+          "other": 0
+        },
+        "failureCounts": {
+          "timeout": 0,
+          "httpError": 0,
+          "interrupted": 0,
+          "responseParseError": 0,
+          "providerError": 0,
+          "unknown": 0
+        },
+        "outputValidationCounts": {
+          "emptyContent": 0,
+          "jsonParseError": 0,
+          "schemaValidationError": 0
+        }
+      },
+      "attemptsUsed": 3,
+      "finalFailureKind": "MAIN_COMPILE",
+      "validationWarningCount": 3,
+      "verificationSummary": {
+        "buildExitCode": 1,
+        "testExitCode": null,
+        "buildPassed": false,
+        "testPassed": false,
+        "testsRun": 0,
+        "failures": 0,
+        "errors": 0,
+        "buildDurationMillis": 8256,
+        "testDurationMillis": 0,
+        "primaryFailureKind": "MAIN_COMPILE"
+      },
+      "runSummary": {
+        "preflightChecks": 3,
+        "verificationSteps": 4,
+        "repairAttempts": 2,
+        "normalizedFileChanges": 0,
+        "repeatedFailureStops": 0,
+        "noChangeStops": 0,
+        "failureCounts": {
+          "MAIN_COMPILE": 2,
+          "TEST_ASSERTION": 1
+        },
+        "repairTargetCounts": {
+          "IMPLEMENTATION": 2
+        },
+        "failedGateCounts": {}
+      },
+      "workflowError": null
+    },
+    {
+      "caseId": "snake-websocket-basic",
+      "platformSuccess": false,
+      "independentQualityPassed": false,
+      "manualVerdict": "NOT_REVIEWED",
+      "projectPath": "ai_generated_projects\\WebSocket_Snake_Game_20260810_161738",
+      "elapsedMillis": 755874,
+      "quality": {
+        "passed": false,
+        "findings": [
+          {
+            "gate": "HAS_SPRING_CONTEXT_TEST",
+            "passed": true,
+            "evidence": "Generated Spring context test exists."
+          },
+          {
+            "gate": "HAS_TEST_SOURCE",
+            "passed": true,
+            "evidence": "Generated test source exists."
+          },
+          {
+            "gate": "TESTS_EXECUTED_AND_GREEN",
+            "passed": true,
+            "evidence": "Generated tests executed and reported zero failures and errors."
+          },
+          {
+            "gate": "NO_PLACEHOLDER_SOURCE",
+            "passed": true,
+            "evidence": "No known placeholder source was found."
+          },
+          {
+            "gate": "CONTRACT_GATES_PASSED",
+            "passed": false,
+            "evidence": "Final semantic contract gates contain 4 blocker(s): [CONTRACT_VALIDATION, CONTRACT_FRONTEND_CALL]"
+          }
+        ]
+      },
+      "usage": {
+        "calls": 22,
+        "successfulCalls": 22,
+        "failedCalls": 0,
+        "durationMillis": 809429,
+        "inputCacheHitTokens": 0,
+        "inputCacheMissTokens": 79038,
+        "outputTokens": 89997,
+        "totalTokens": 169035,
+        "cacheMetricsAvailable": false,
+        "finishReasonCounts": {
+          "stop": 22,
+          "length": 0,
+          "contentFilter": 0,
+          "toolCalls": 0,
+          "other": 0
+        },
+        "failureCounts": {
+          "timeout": 0,
+          "httpError": 0,
+          "interrupted": 0,
+          "responseParseError": 0,
+          "providerError": 0,
+          "unknown": 0
+        },
+        "outputValidationCounts": {
+          "emptyContent": 0,
+          "jsonParseError": 0,
+          "schemaValidationError": 0
+        }
+      },
+      "attemptsUsed": 3,
+      "finalFailureKind": "CONTRACT",
+      "validationWarningCount": 14,
+      "verificationSummary": {
+        "buildExitCode": 0,
+        "testExitCode": 0,
+        "buildPassed": true,
+        "testPassed": true,
+        "testsRun": 27,
+        "failures": 0,
+        "errors": 0,
+        "buildDurationMillis": 9958,
+        "testDurationMillis": 13601,
+        "primaryFailureKind": "NONE"
+      },
+      "runSummary": {
+        "preflightChecks": 3,
+        "verificationSteps": 5,
+        "repairAttempts": 2,
+        "normalizedFileChanges": 1,
+        "repeatedFailureStops": 0,
+        "noChangeStops": 0,
+        "failureCounts": {
+          "TEST_CODE": 1,
+          "CONTRACT": 3,
+          "TEST_COMPILE": 1
+        },
+        "repairTargetCounts": {
+          "TESTS": 2
+        },
+        "failedGateCounts": {
+          "CONTRACT_FRONTEND_CALL": 3,
+          "CONTRACT_VALIDATION": 9
+        }
+      },
+      "workflowError": null
+    },
+    {
+      "caseId": "url-shortener-basic",
+      "platformSuccess": false,
+      "independentQualityPassed": false,
+      "manualVerdict": "NOT_REVIEWED",
+      "projectPath": "ai_generated_projects\\URL_Shortener_Service_20260810_163037",
+      "elapsedMillis": 784585,
+      "quality": {
+        "passed": false,
+        "findings": [
+          {
+            "gate": "HAS_SPRING_CONTEXT_TEST",
+            "passed": true,
+            "evidence": "Generated Spring context test exists."
+          },
+          {
+            "gate": "HAS_TEST_SOURCE",
+            "passed": true,
+            "evidence": "Generated test source exists."
+          },
+          {
+            "gate": "TESTS_EXECUTED_AND_GREEN",
+            "passed": false,
+            "evidence": "Tests must execute and report Failures: 0 plus Errors: 0; output=[INFO] Scanning for projects... [INFO] [INFO] ---------------------< com.example:url-shortener >---------------------- [INFO] Building url-shortener 0.0.1-SNAPSHOT [INFO] --------------------------------[ jar ]------------------------------..."
+          },
+          {
+            "gate": "NO_PLACEHOLDER_SOURCE",
+            "passed": true,
+            "evidence": "No known placeholder source was found."
+          },
+          {
+            "gate": "CONTRACT_GATES_PASSED",
+            "passed": true,
+            "evidence": "Final semantic contract gates passed."
+          }
+        ]
+      },
+      "usage": {
+        "calls": 24,
+        "successfulCalls": 24,
+        "failedCalls": 0,
+        "durationMillis": 832275,
+        "inputCacheHitTokens": 0,
+        "inputCacheMissTokens": 70697,
+        "outputTokens": 97714,
+        "totalTokens": 168411,
+        "cacheMetricsAvailable": false,
+        "finishReasonCounts": {
+          "stop": 24,
+          "length": 0,
+          "contentFilter": 0,
+          "toolCalls": 0,
+          "other": 0
+        },
+        "failureCounts": {
+          "timeout": 0,
+          "httpError": 0,
+          "interrupted": 0,
+          "responseParseError": 0,
+          "providerError": 0,
+          "unknown": 0
+        },
+        "outputValidationCounts": {
+          "emptyContent": 0,
+          "jsonParseError": 0,
+          "schemaValidationError": 0
+        }
+      },
+      "attemptsUsed": 3,
+      "finalFailureKind": "TEST_ASSERTION",
+      "validationWarningCount": 6,
+      "verificationSummary": {
+        "buildExitCode": 0,
+        "testExitCode": 1,
+        "buildPassed": true,
+        "testPassed": false,
+        "testsRun": 16,
+        "failures": 2,
+        "errors": 0,
+        "buildDurationMillis": 13966,
+        "testDurationMillis": 21114,
+        "primaryFailureKind": "TEST_ASSERTION"
+      },
+      "runSummary": {
+        "preflightChecks": 3,
+        "verificationSteps": 5,
+        "repairAttempts": 2,
+        "normalizedFileChanges": 1,
+        "repeatedFailureStops": 0,
+        "noChangeStops": 0,
+        "failureCounts": {
+          "TEST_ASSERTION": 2,
+          "MAIN_COMPILE": 1,
+          "CONTRACT": 2
+        },
+        "repairTargetCounts": {
+          "IMPLEMENTATION": 2
+        },
+        "failedGateCounts": {
+          "CONTRACT_VALIDATION": 2
+        }
+      },
+      "workflowError": null
+    },
+    {
+      "caseId": "poll-system-basic",
+      "platformSuccess": false,
+      "independentQualityPassed": false,
+      "manualVerdict": "NOT_REVIEWED",
+      "projectPath": null,
+      "elapsedMillis": 14612551,
+      "quality": {
+        "passed": false,
+        "findings": []
+      },
+      "usage": {
+        "calls": 3,
+        "successfulCalls": 1,
+        "failedCalls": 2,
+        "durationMillis": 14611010,
+        "inputCacheHitTokens": 0,
+        "inputCacheMissTokens": 271,
+        "outputTokens": 1591,
+        "totalTokens": 1862,
+        "cacheMetricsAvailable": false,
+        "finishReasonCounts": {
+          "stop": 1,
+          "length": 0,
+          "contentFilter": 0,
+          "toolCalls": 0,
+          "other": 0
+        },
+        "failureCounts": {
+          "timeout": 1,
+          "httpError": 1,
+          "interrupted": 0,
+          "responseParseError": 0,
+          "providerError": 0,
+          "unknown": 0
+        },
+        "outputValidationCounts": {
+          "emptyContent": 0,
+          "jsonParseError": 0,
+          "schemaValidationError": 0
+        }
+      },
+      "attemptsUsed": 0,
+      "finalFailureKind": "UNKNOWN",
+      "validationWarningCount": 0,
+      "verificationSummary": {
+        "buildExitCode": null,
+        "testExitCode": null,
+        "buildPassed": false,
+        "testPassed": false,
+        "testsRun": 0,
+        "failures": 0,
+        "errors": 0,
+        "buildDurationMillis": 0,
+        "testDurationMillis": 0,
+        "primaryFailureKind": "NONE"
+      },
+      "runSummary": {
+        "preflightChecks": 0,
+        "verificationSteps": 0,
+        "repairAttempts": 0,
+        "normalizedFileChanges": 0,
+        "repeatedFailureStops": 0,
+        "noChangeStops": 0,
+        "failureCounts": {},
+        "repairTargetCounts": {},
+        "failedGateCounts": {}
+      },
+      "workflowError": "IllegalStateException: LangGraph4j workflow execution failed"
+    },
+    {
+      "caseId": "blog-system-basic",
+      "platformSuccess": false,
+      "independentQualityPassed": false,
+      "manualVerdict": "NOT_REVIEWED",
+      "projectPath": "ai_generated_projects\\Simple_Blog_System_20260810_204831",
+      "elapsedMillis": 933720,
+      "quality": {
+        "passed": false,
+        "findings": [
+          {
+            "gate": "HAS_SPRING_CONTEXT_TEST",
+            "passed": false,
+            "evidence": "No @SpringBootTest was generated."
+          },
+          {
+            "gate": "HAS_TEST_SOURCE",
+            "passed": true,
+            "evidence": "Generated test source exists."
+          },
+          {
+            "gate": "TESTS_EXECUTED_AND_GREEN",
+            "passed": true,
+            "evidence": "Generated tests executed and reported zero failures and errors."
+          },
+          {
+            "gate": "NO_PLACEHOLDER_SOURCE",
+            "passed": true,
+            "evidence": "No known placeholder source was found."
+          },
+          {
+            "gate": "CONTRACT_GATES_PASSED",
+            "passed": false,
+            "evidence": "Final semantic contract gates contain 3 blocker(s): [CONTRACT_FRONTEND_CALL]"
+          }
+        ]
+      },
+      "usage": {
+        "calls": 25,
+        "successfulCalls": 25,
+        "failedCalls": 0,
+        "durationMillis": 1050011,
+        "inputCacheHitTokens": 0,
+        "inputCacheMissTokens": 97093,
+        "outputTokens": 120782,
+        "totalTokens": 217875,
+        "cacheMetricsAvailable": false,
+        "finishReasonCounts": {
+          "stop": 25,
+          "length": 0,
+          "contentFilter": 0,
+          "toolCalls": 0,
+          "other": 0
+        },
+        "failureCounts": {
+          "timeout": 0,
+          "httpError": 0,
+          "interrupted": 0,
+          "responseParseError": 0,
+          "providerError": 0,
+          "unknown": 0
+        },
+        "outputValidationCounts": {
+          "emptyContent": 0,
+          "jsonParseError": 0,
+          "schemaValidationError": 0
+        }
+      },
+      "attemptsUsed": 3,
+      "finalFailureKind": "TEST_DISCOVERY",
+      "validationWarningCount": 21,
+      "verificationSummary": {
+        "buildExitCode": 0,
+        "testExitCode": 0,
+        "buildPassed": true,
+        "testPassed": true,
+        "testsRun": 22,
+        "failures": 0,
+        "errors": 0,
+        "buildDurationMillis": 11071,
+        "testDurationMillis": 28442,
+        "primaryFailureKind": "NONE"
+      },
+      "runSummary": {
+        "preflightChecks": 3,
+        "verificationSteps": 4,
+        "repairAttempts": 2,
+        "normalizedFileChanges": 0,
+        "repeatedFailureStops": 0,
+        "noChangeStops": 0,
+        "failureCounts": {
+          "TEST_ASSERTION": 1,
+          "TEST_DISCOVERY": 1,
+          "CONTRACT": 2
+        },
+        "repairTargetCounts": {
+          "CONTRACT": 1,
+          "IMPLEMENTATION": 1
+        },
+        "failedGateCounts": {
+          "PROFILE_SPRING_CONTEXT_TEST": 1,
+          "CONTRACT_FRONTEND_CALL": 17,
+          "CONTRACT_VALIDATION": 8,
+          "THYMELEAF_TEMPLATE": 2
+        }
+      },
+      "workflowError": null
+    }
+  ],
+  "platformSuccessCount": 0,
+  "independentQualityPassCount": 0,
+  "falseSuccessCount": 0,
+  "falseSuccessRate": null,
+  "reportPath": "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-08-10T07-50-26.679799300Z.json"
+}

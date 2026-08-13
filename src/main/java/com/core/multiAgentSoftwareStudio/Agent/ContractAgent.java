@@ -1,8 +1,8 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectContract;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
+import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 
@@ -31,6 +31,9 @@ public class ContractAgent extends AbstractJsonAgent {
             6. Every frontend call path MUST exactly match one backend endpoint path.
             7. Every MVC view returned by a controller MUST have a matching template file.
             8. additionalFiles MUST only contain files that are missing from the architecture skeleton but required by this contract.
+            9. frontendCalls.sourceFile MUST be the exact html/js file that issues the request through a link, form,
+               fetch, or axios call. For server-rendered MVC, include every user-reachable create, detail, edit,
+               submit, and delete interaction; never assign a frontend call to a Controller source file.
 
             JSON FORMAT RULES:
             1. Return a valid JSON object matching ProjectContract.

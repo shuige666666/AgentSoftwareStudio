@@ -1,7 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.ProjectStructure;
+import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 
@@ -21,10 +21,18 @@ public class ArchitectAgent extends AbstractJsonAgent {
                - You MUST also provide `mainClassName` when the project needs an executable main class.
             2. Build Configuration:
                - If projectType is "SPRING_BOOT" or "PURE_JAVA_MAVEN", ALWAYS include a `pom.xml`.
+               - For SPRING_BOOT use the platform profile: Java 17 and Spring Boot 3.2.4.
+               - Use `spring-boot-starter-test` for tests; never invent dependencies such as `spring-websocket-test`.
             3. Separation of Concerns:
                - Organize code into proper packages such as controller, service, model, dto, repository, config.
             4. Output Format:
                - For each file, provide `fileName`, `filePath`, `layer`, `batchName`, `functionalityDescription`, `keyMethods`, and `dependsOn`.
+               - `batchName` MUST identify a vertical business capability such as `article-publishing`,
+                 `article-comments`, or `poll-voting`; never use technical layers such as `service-layer` or `controllers`.
+               - Files from controller, service, repository, model, and frontend that jointly implement one
+                 user-visible capability MUST use the same `batchName`.
+               - A frontend file that calls more than one business capability MUST use `frontend-integration`
+                 and depend on the controller files that implement those capabilities.
             5. Testability:
                - DO NOT include any test files. Testing will be handled by another agent.
             6. Syntax Accuracy:
@@ -45,6 +53,13 @@ public class ArchitectAgent extends AbstractJsonAgent {
                - Keep `dependsOn` empty for independent files such as simple DTOs, entities, `pom.xml`, or static assets.
                - A controller should usually depend on service-layer files.
                - A service can depend on repository/model files.
+               - A nested capability such as comments under articles or votes under polls MUST depend on the
+                 parent resource capability files.
+               - Parent resource creation/query/management MUST be delivered before nested comments, votes,
+                 reactions, or results. Never make a nested capability the first slice when it renders or mutates
+                 the parent resource.
+               - A server-rendered template in one slice may contain only interactions owned by that slice or an
+                 explicitly declared earlier dependency. Do not place future edit/delete actions in an early detail page.
             10. Contract Boundaries:
                - Do NOT try to fully design API request/response details here.
                - Do NOT encode detailed frontend/backend interaction contracts in functionalityDescription.

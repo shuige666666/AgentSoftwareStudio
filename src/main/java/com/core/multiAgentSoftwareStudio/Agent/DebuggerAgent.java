@@ -1,61 +1,81 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.CodeFixResult;
+import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFixResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 
 /**
- * 角色 D: 测试/修复工程师 (The Tester/Fixer)
+ * 处理无法由单文件 Developer 或 TestWriter 闭环的跨文件修复，真实工具验证由平台负责。
  */
 public class DebuggerAgent extends AbstractJsonAgent {
 
     private static final String SYSTEM_PROMPT = """
-                           You are an Expert Java Debugger and Tester.
-                           Your task is to analyze errors and fix the provided source code.
+            You are the fallback repair engineer for a generated Java project.
+            The platform will compile and test every candidate after you return it. Treat the latest real tool output
+            as authoritative and repair the earliest remaining root cause, not old symptoms.
 
-                           Types of errors you handle:
-                           1. COMPILATION ERROR: Syntax issues, missing imports, type mismatches.
-                           2. RUNTIME ERROR: Exceptions during execution (NullPointerException, etc.).
-                           3. LOGIC ERROR (TEST FAILURE): The code runs but the output is incorrect or tests fail.
+            CORE RULES:
+            1. Use only types, methods, constructors, endpoints, and files shown in the supplied project context.
+            2. Return the smallest cross-file-consistent change that resolves the current failure.
+            3. Preserve working public behavior. Never delete required functionality or weaken tests to obtain green output.
+            4. Modify only supplied project-relative files. Do not invent speculative files, framework APIs, or dependencies.
+            5. A Java fix must contain the complete non-blank file, including its correct package and imports.
+            6. Keep callers and owners consistent: when changing a DTO, method, constructor, endpoint, or exception,
+               update every supplied affected file in the same response.
+            7. For implementation failures, do not modify tests. For test-owned failures, do not change production behavior.
+            8. If the evidence is insufficient for a safe concrete change, return an empty fixes array.
 
-                           CRITICAL RULES:
-                           1. Analyze the ERROR LOG carefully. Identify which file is causing the issue.
-                           2. If it's a TEST FAILURE, compare the expected vs actual output and fix the logic in the implementation files.
-                           3. You MUST provide the FULL, updated source code for the files that need fixing.
-                           4. YOU MUST INCLUDE the correct `package ...;` declaration at the top of the Java file.
-                           5. For non-abstract classes, methods and constructors MUST have method bodies. Never leave declarations ending with `;`.
-                           6. If a file is a test file (`*Test.java` or uses JUnit), its filename MUST be under `src/test/java/...`, never under `src/main/java/...`.
-                           7. Ensure all referenced types are properly imported (e.g., List, ResponseEntity, RequestParam, PathVariable).
-                           8. You must return a JSON object containing a 'fixes' array.
-
-                           JSON FORMAT RULES:
-                        1. The output MUST be a valid JSON object.
-                        2. The top-level object MUST have this exact shape:
-                           {"fixes":[{"filename":"src/main/java/.../ActualFile.java","explanation":"...","newCode":"..."}]}
-                        3. Every fix MUST include the exact project-relative `filename` copied from `=== CURRENT PROJECT FILES ===`.
-                        4. Never use placeholder filenames such as `Unknown.java`, `Main.java`, or an empty filename.
-                        5. Do NOT wrap the JSON in markdown code blocks (e.g., no ```json).
-                        6. CRITICAL: The `newCode` field MUST be a single string. All newlines in the code MUST be escaped as `\\n`. Do NOT use actual newlines inside the JSON string.
-                        7. Escape any double quotes (`"`) as `\\"` inside the code string.
-                           """;
+            OUTPUT:
+            Return only valid JSON with this shape:
+            {"fixes":[{"filename":"src/main/java/.../ActualFile.java","explanation":"...","newCode":"..."}]}
+            Every filename must be copied exactly from the supplied context. `newCode` is one JSON string with escaped
+            newlines and quotes. Do not use markdown or placeholder filenames.
+            """;
 
     public DebuggerAgent(ChatLanguageModel model,
-                         LangGraphPromptExecutor promptExecutor,
-                         ObjectMapper objectMapper) {
+            LangGraphPromptExecutor promptExecutor,
+            ObjectMapper objectMapper) {
         super(model, promptExecutor, objectMapper);
     }
 
+    /**
+     * 根据结构化失败类型只追加本轮需要的专项约束，避免永久携带所有历史案例规则。
+     */
     public CodeFixResult analyzeAndFix(String errorType, String errorLog, String currentCodeContext) {
         String userPrompt = """
-                === ERROR TYPE ===
+                === REPAIR OWNERSHIP ===
                 %s
 
-                === CURRENT PROJECT FILES ===
+                === TARGET-SPECIFIC POLICY ===
                 %s
 
-                === EXECUTION ERROR LOG ===
+                === LATEST REAL TOOL EVIDENCE ===
                 %s
-                """.formatted(errorType, currentCodeContext, errorLog);
+
+                === RELEVANT PROJECT CONTEXT ===
+                %s
+                """.formatted(errorType, policyFor(errorType), errorLog, currentCodeContext);
         return askJson(SYSTEM_PROMPT, userPrompt, CodeFixResult.class);
+    }
+
+    private String policyFor(String errorType) {
+        String type = errorType == null ? "UNKNOWN" : errorType;
+        return switch (type) {
+            case "MAIN_COMPILE", "IMPLEMENTATION", "SPRING_CONTEXT" -> """
+                    Repair production code only. Copy exact signatures from the supplied definitions and callers.
+                    For missing members or wiring, update the owning type and all supplied affected callers together.
+                    Do not replace declared DTOs with Map/Object or add speculative configuration.
+                    """;
+            case "CONTRACT" -> """
+                    Repair the supplied endpoint, DTO, exception, template, or frontend contract as one coherent change.
+                    Keep HTTP method/path, request/response shape, status, redirect Location, and error mapping aligned.
+                    Do not create a second Controller for an endpoint already owned by an existing Controller.
+                    """;
+            case "TEST_COMPILE", "TEST_DISCOVERY", "TEST_CODE", "TEST_ASSERTION" -> """
+                    Modify tests only when the evidence proves the test is malformed or makes an invalid infrastructure
+                    assumption. Otherwise repair the supplied production owner and preserve the behavioral assertion.
+                    """;
+            default -> "Trace the earliest failure across the supplied files and make one minimal coherent repair.";
+        };
     }
 }

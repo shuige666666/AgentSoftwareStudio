@@ -1,6 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Agent;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.PrdDocument;
+import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 

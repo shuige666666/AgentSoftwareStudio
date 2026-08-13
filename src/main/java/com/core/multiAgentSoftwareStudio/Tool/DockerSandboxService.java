@@ -1,12 +1,14 @@
 package com.core.multiAgentSoftwareStudio.Tool;
 
-import com.core.multiAgentSoftwareStudio.Pojo.teamCommunication.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.model.*;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
+import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -46,6 +48,18 @@ public class DockerSandboxService {
     }
 
     /**
+     * 轻量检查本地 Docker Daemon 是否可访问；检查失败只返回 false，不影响主应用启动。
+     */
+    public boolean isDockerAvailable() {
+        try {
+            dockerClient.pingCmd().exec();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * 运行指定路径下的项目代码
      * 
      * @param projectPath 已经持久化到本地的项目根路径
@@ -55,12 +69,20 @@ public class DockerSandboxService {
      * @return 运行日志
      */
     public String runCodeInSandbox(Path projectPath, String projectType, String mainClass) {
+        return runCodeInSandboxWithResult(projectPath, projectType, mainClass).output();
+    }
+
+    /**
+     * 在沙箱中构建生成项目，并同时返回退出码、耗时和基础设施错误。
+     */
+    public SandboxExecutionResult runCodeInSandboxWithResult(Path projectPath, String projectType, String mainClass) {
         String cmd;
         boolean needsPortBinding = false;
 
         if ("SPRING_BOOT".equals(projectType)) {
-            cmd = "mvn spring-boot:run";
-            needsPortBinding = true;
+            // spring-boot:run 启动成功后进程会常驻，验证节点会一直等待日志流结束。
+            // 这里用 package 做最终编译检查，让沙箱命令在成功后主动退出。
+            cmd = "mvn -DskipTests package";
         } else if ("PURE_JAVA_MAVEN".equals(projectType)) {
             cmd = "apt-get update && apt-get install -y xvfb && xvfb-run mvn compile exec:java -Dexec.mainClass=\""
                     + mainClass + "\"";
@@ -69,37 +91,167 @@ public class DockerSandboxService {
                     "find . -name \"*.java\" > sources.txt && javac -d . @sources.txt && java -cp . %s",
                     mainClass);
         }
-        return executeInDocker(projectPath, projectType, cmd, needsPortBinding);
+        return executeInDockerWithResult(projectPath, projectType, cmd, needsPortBinding);
+    }
+
+    /**
+     * 在修复会话中执行最小生产源码编译，快速把最新编译器证据反馈给修复器。
+     */
+    public SandboxExecutionResult runCompileInSandboxWithResult(Path projectPath, String projectType) {
+        String cmd = "SPRING_BOOT".equals(projectType) || "PURE_JAVA_MAVEN".equals(projectType)
+                ? "mvn -DskipTests compile"
+                : "find . -name \"*.java\" > sources.txt && javac -d . @sources.txt";
+        return executeInDockerWithResult(projectPath, projectType, cmd, false);
     }
 
     /**
      * 新增：在沙箱中运行测试
      */
     public String runTestsInSandbox(Path projectPath, String projectType) {
+        return runTestsInSandboxWithResult(projectPath, projectType).output();
+    }
+
+    /**
+     * 在沙箱中执行测试，并保留测试命令的真实退出码和耗时。
+     */
+    public SandboxExecutionResult runTestsInSandboxWithResult(Path projectPath, String projectType) {
+        return runTestsInSandboxWithResult(projectPath, projectType, List.of());
+    }
+
+    /**
+     * 执行当前切片及已验收切片的聚焦回归测试；空集合仍表示最终全量测试。
+     */
+    public SandboxExecutionResult runTestsInSandboxWithResult(
+            Path projectPath,
+            String projectType,
+            List<String> selectedTestFiles) {
         String cmd;
         if ("SPRING_BOOT".equals(projectType) || "PURE_JAVA_MAVEN".equals(projectType)) {
-            cmd = "mvn test";
+            String selectors = selectedTestFiles == null ? "" : selectedTestFiles.stream()
+                    .map(path -> Path.of(path.replace('\\', '/')).getFileName().toString())
+                    .map(name -> name.replaceFirst("\\.java$", ""))
+                    .filter(name -> name.matches("[A-Za-z0-9_$]+"))
+                    .distinct()
+                    .sorted()
+                    .collect(java.util.stream.Collectors.joining(","));
+            cmd = selectors.isBlank() ? "mvn test" : "mvn -Dtest=" + selectors + " test";
         } else {
             // PURE_JAVA_NATIVE 的测试比较复杂，暂且尝试运行所有带 Test 结尾的类
             cmd = "find . -name \"*.java\" > sources.txt && javac -d . @sources.txt && java -cp . org.junit.runner.JUnitCore $(find . -name \"*Test.class\" | sed 's/\\.\\///;s/\\.class//;s/\\//./g')";
         }
-        return executeInDocker(projectPath, projectType, cmd, false);
+        return executeInDockerWithResult(projectPath, projectType, cmd, false);
     }
 
-    private String executeInDocker(Path projectPath, String projectType, String cmd, boolean needsPortBinding) {
+    /**
+     * 启动一个常驻的 Spring Boot 预览容器，只负责创建和启动，不等待应用进程退出。
+     */
+    public String startSpringBootPreview(Path projectPath, int hostPort) {
+        if (projectPath == null || !Files.isDirectory(projectPath)) {
+            throw new IllegalArgumentException("项目路径不存在：" + projectPath);
+        }
+
+        String imageName = "maven:3.8.5-openjdk-17-slim";
+        ensureImageExists(imageName);
+
+        List<Bind> binds = new ArrayList<>();
+        binds.add(new Bind(projectPath.toAbsolutePath().toString(), new Volume("/app")));
+        Path hostMavenRepo = Paths.get(System.getProperty("user.home"), ".m2", "repository");
+        binds.add(new Bind(hostMavenRepo.toAbsolutePath().toString(), new Volume("/root/.m2/repository")));
+
+        HostConfig hostConfig = HostConfig.newHostConfig()
+                .withBinds(binds)
+                .withPortBindings(PortBinding.parse(hostPort + ":8080"))
+                .withAutoRemove(false);
+
+        CreateContainerResponse container = dockerClient.createContainerCmd(imageName)
+                .withWorkingDir("/app")
+                .withHostConfig(hostConfig)
+                .withExposedPorts(ExposedPort.tcp(8080))
+                .withCmd("sh", "-c", "mvn spring-boot:run")
+                .exec();
+        try {
+            dockerClient.startContainerCmd(container.getId()).exec();
+            return container.getId();
+        } catch (RuntimeException e) {
+            dockerClient.removeContainerCmd(container.getId()).withForce(true).exec();
+            throw e;
+        }
+    }
+
+    /**
+     * 获取预览容器截至当前的完整日志，用于判断 Spring Boot 是否已经就绪。
+     */
+    public String getContainerLogs(String containerId) {
+        StringBuilder logs = new StringBuilder();
+        try {
+            dockerClient.logContainerCmd(containerId)
+                    .withStdOut(true)
+                    .withStdErr(true)
+                    .withTailAll()
+                    .exec(new com.github.dockerjava.api.async.ResultCallback.Adapter<Frame>() {
+                        @Override
+                        public void onNext(Frame item) {
+                            logs.append(new String(item.getPayload(), StandardCharsets.UTF_8));
+                        }
+                    }).awaitCompletion(5, TimeUnit.SECONDS);
+            return logs.toString();
+        } catch (Exception e) {
+            return "无法读取容器日志：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 检查容器是否仍在运行；容器不存在时同样返回 false。
+     */
+    public boolean isContainerRunning(String containerId) {
+        try {
+            return Boolean.TRUE.equals(dockerClient.inspectContainerCmd(containerId).exec().getState().getRunning());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 停止并强制删除预览容器，确保异常启动也能释放端口。
+     */
+    public void stopAndRemoveContainer(String containerId) {
+        if (containerId == null || containerId.isBlank()) {
+            return;
+        }
+        try {
+            if (isContainerRunning(containerId)) {
+                dockerClient.stopContainerCmd(containerId).withTimeout(5).exec();
+            }
+        } catch (Exception ignored) {
+            // 容器可能已自行退出，仍继续尝试删除。
+        }
+        try {
+            dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+        } catch (Exception ignored) {
+            // 重复停止保持幂等，容器不存在时无需继续抛错。
+        }
+    }
+
+    private SandboxExecutionResult executeInDockerWithResult(
+            Path projectPath,
+            String projectType,
+            String cmd,
+            boolean needsPortBinding) {
+        long startedNanos = System.nanoTime();
         // 1. 校验路径
         if (projectPath == null || !Files.exists(projectPath)) {
-            return "❌ Error: 项目路径不存在: " + projectPath;
+            String error = "项目路径不存在: " + projectPath;
+            return new SandboxExecutionResult(cmd, null, error, elapsedMillis(startedNanos), false, error);
         }
 
         String imageName = ("SPRING_BOOT".equals(projectType) || "PURE_JAVA_MAVEN".equals(projectType))
                 ? "maven:3.8.5-openjdk-17-slim"
                 : "eclipse-temurin:17-jdk-alpine";
 
-        ensureImageExists(imageName);
-
         String containerId = null;
         try {
+            // 镜像检查和拉取也属于 Docker 基础设施阶段，失败时必须进入结构化结果。
+            ensureImageExists(imageName);
             System.out.println("🐳 准备挂载目录: " + projectPath.toAbsolutePath());
 
             // 3.1 准备基础挂载配置 (代码挂载)
@@ -115,7 +267,8 @@ public class DockerSandboxService {
 
             HostConfig hostConfig = HostConfig.newHostConfig()
                     .withBinds(binds)
-                    .withAutoRemove(true);
+                    // 先保留已退出容器，确保能够稳定读取退出码；finally 中再统一清理。
+                    .withAutoRemove(false);
 
             // 如果是 Spring Boot 项目，才映射端口
             if (needsPortBinding) {
@@ -142,28 +295,54 @@ public class DockerSandboxService {
             // 5. 等待执行结束并获取日志
             // 这里我们使用一个简单的 StringBuilder 来收集日志
             StringBuilder logs = new StringBuilder();
+            var logCallback = new com.github.dockerjava.api.async.ResultCallback.Adapter<Frame>() {
+                @Override
+                public void onNext(Frame item) {
+                    String logLine = new String(item.getPayload(), StandardCharsets.UTF_8);
+                    logs.append(logLine);
+                    System.out.print(logLine);
+                }
+            };
             dockerClient.logContainerCmd(containerId)
                     .withStdOut(true) // 捕获标准输出
                     .withStdErr(true) // 捕获错误输出（如编译错误）
                     .withFollowStream(true) // 实时跟随日志流
-                    .exec(new com.github.dockerjava.api.async.ResultCallback.Adapter<com.github.dockerjava.api.model.Frame>() {
-                        // 这是一个回调函数，每当容器打印一行字，这里就会被触发一次
-                        @Override
-                        public void onNext(com.github.dockerjava.api.model.Frame item) {
-                            // logs.append(new String(item.getPayload(), StandardCharsets.UTF_8));
-                            String logLine = new String(item.getPayload(), StandardCharsets.UTF_8);
-                            logs.append(logLine);
-                            // 🔥🔥🔥 关键点：直接打印到 IDEA 控制台，不再闷在 StringBuilder 里
-                            System.out.print(logLine);
-                        }
-                    }).awaitCompletion(10, TimeUnit.MINUTES);
+                    .exec(logCallback);
 
-            return logs.toString();
+            // 容器退出码是验证成功的唯一硬依据；日志只用于分类和诊断。
+            WaitContainerResultCallback waitCallback = new WaitContainerResultCallback();
+            dockerClient.waitContainerCmd(containerId).exec(waitCallback);
+            Integer exitCode = waitCallback.awaitStatusCode(10, TimeUnit.MINUTES);
+            boolean timedOut = exitCode == null;
+            if (timedOut) {
+                dockerClient.stopContainerCmd(containerId).withTimeout(5).exec();
+            }
+            logCallback.awaitCompletion(30, TimeUnit.SECONDS);
+
+            return new SandboxExecutionResult(
+                    cmd, exitCode, logs.toString(), elapsedMillis(startedNanos), timedOut, null);
 
         } catch (Exception e) {
             e.printStackTrace();
-            return "Docker Execution Error: " + e.getMessage();
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            String error = "Docker Execution Error: " + e.getMessage();
+            return new SandboxExecutionResult(
+                    cmd, null, error, elapsedMillis(startedNanos), false, error);
+        } finally {
+            if (containerId != null) {
+                try {
+                    dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+                } catch (Exception ignored) {
+                    // 容器可能已被 Docker 清理；验证结果已经保留，不覆盖原始失败。
+                }
+            }
         }
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return (System.nanoTime() - startedNanos) / 1_000_000;
     }
 
     /**

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Architecture review — agent-software-studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+  </script>
+  <style>
+    .seam { border-style: dashed; }
+    .deep { background: linear-gradient(135deg,#0f172a,#1e293b); color:white; }
+    .leak { color:#dc2626; }
+    .diagram { min-height: 315px; }
+  </style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-6xl mx-auto px-6 py-12 space-y-12">
+  <header class="border-b border-slate-300 pb-6">
+    <h1 class="text-3xl font-serif">Architecture review — agent-software-studio</h1>
+    <p class="mt-2 text-sm text-slate-500">2026-07-10 · 生成质量与修复闭环</p>
+    <div class="mt-4 flex flex-wrap gap-3 text-xs"><span class="border px-2 py-1">实线框 = Module</span><span class="border seam px-2 py-1">虚线 = Seam</span><span class="text-red-600 border border-red-200 px-2 py-1">红色 = 泄漏</span><span class="deep px-2 py-1">深色 = Deep module</span></div>
+  </header>
+
+  <section id="candidates" class="space-y-10">
+    <article id="slice-loop" class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+      <div class="flex items-center gap-2"><h2 class="text-2xl font-serif">把批次流水线深化为垂直切片交付 Module</h2><span class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-800">Strong</span><span class="rounded-full bg-indigo-100 px-3 py-1 text-xs text-indigo-800">in-process</span></div>
+      <p class="mt-3 font-mono text-xs text-slate-600">SoftwareStudioWorkflowService · BatchGenerationService · BatchValidationNodeService · PersistenceNodeService · TestGenerationNodeService</p>
+      <div class="mt-6 grid gap-5 md:grid-cols-2">
+        <div class="diagram rounded-xl border border-red-200 bg-red-50 p-4"><h3 class="text-xs uppercase tracking-wider text-red-700">Before</h3><pre class="mermaid">flowchart TD
+ A[Generate all files] --> B[Warnings only]
+ B --> C[Generate all tests]
+ C --> D[Persist once]
+ D --> E[Verify once]
+ E --> F[Final Debugger]
+ F --> E
+ B -. defects accumulate .-> E
+ classDef leak stroke:#dc2626,stroke-width:2px;
+ class B,E,F leak;</pre></div>
+        <div class="diagram rounded-xl border border-slate-700 bg-slate-50 p-4"><h3 class="text-xs uppercase tracking-wider">After</h3><pre class="mermaid">flowchart TD
+ A[Select vertical slice] --> B[Deep Slice Delivery Module]
+ B --> C[Implement + tests]
+ C --> D[Persist to workspace]
+ D --> E[Verify acceptance]
+ E -->|pass| F[Commit slice artifact]
+ E -->|typed failure| B
+ F --> G[Next slice]
+ classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+ class B deep;</pre></div>
+      </div>
+      <div class="mt-5 grid gap-4 md:grid-cols-3 text-sm"><div><b>Problem</b><p>反馈推迟到全项目末尾，错误跨多个 shallow module 扩散。</p></div><div><b>Solution</b><p>一个 Interface 完成切片生成、落盘、验证与接受；内部保留生成和测试 Seam。</p></div><div><b>Wins</b><ul class="mt-2 list-disc pl-5"><li>Locality：缺陷停在切片</li><li>Leverage：一个 Interface 验收</li><li>测试命中真实 Interface</li></ul></div></div>
+    </article>
+
+    <article id="verification" class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+      <div class="flex items-center gap-2"><h2 class="text-2xl font-serif">深化验证与失败分流 Module</h2><span class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-800">Strong</span><span class="rounded-full bg-indigo-100 px-3 py-1 text-xs text-indigo-800">ports &amp; adapters</span></div>
+      <p class="mt-3 font-mono text-xs text-slate-600">VerificationNodeService · EvaluationNodeService · ProjectRepairService · DockerSandboxService · SoftwareStudioWorkflowData</p>
+      <div class="mt-6 grid gap-5 md:grid-cols-2">
+        <div class="diagram rounded-xl border border-red-200 bg-red-50 p-4"><h3 class="text-xs uppercase tracking-wider text-red-700">Before</h3><div class="mt-6 space-y-3"><div class="border bg-white p-3">String logs</div><div class="text-center leak">↓ contains("BUILD SUCCESS")</div><div class="border bg-white p-3">String classifier</div><div class="text-center leak">↓ all failures</div><div class="border border-red-500 bg-white p-3">One Debugger prompt</div><div class="text-xs text-red-700">Interface = log formats + magic phrases + retry ordering</div></div></div>
+        <div class="diagram rounded-xl border border-slate-700 bg-slate-50 p-4"><h3 class="text-xs uppercase tracking-wider">After</h3><div class="deep mt-6 rounded-xl p-5"><div class="text-xs uppercase tracking-wider">Deep Verification Module</div><div class="mt-3 rounded bg-white/10 p-3">verify(workspace, acceptance) → VerificationResult</div><div class="mt-3 grid grid-cols-2 gap-2 text-xs"><span class="rounded bg-white/10 p-2">implementation</span><span class="rounded bg-white/10 p-2">test</span><span class="rounded bg-white/10 p-2">contract</span><span class="rounded bg-white/10 p-2">architecture</span><span class="rounded bg-white/10 p-2">environment</span><span class="rounded bg-white/10 p-2">evidence</span></div></div><p class="mt-3 text-xs">Docker 与本地执行是两个 Adapter，Seam 因真实变化而成立。</p></div>
+      </div>
+      <div class="mt-5 grid gap-4 md:grid-cols-3 text-sm"><div><b>Problem</b><p>日志文本、成功判断、错误分类和修复路由泄漏到多个 Module。</p></div><div><b>Solution</b><p>结构化 VerificationResult；Failure Triage 根据 failure kind 路由到正确阶段。</p></div><div><b>Wins</b><ul class="mt-2 list-disc pl-5"><li>Interface 不依赖 Maven 文案</li><li>Locality：分类集中</li><li>环境错误不改源码</li></ul></div></div>
+    </article>
+
+    <article id="quality-policy" class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+      <div class="flex items-center gap-2"><h2 class="text-2xl font-serif">把 warning 集合深化为可执行质量策略 Module</h2><span class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-800">Strong</span><span class="rounded-full bg-indigo-100 px-3 py-1 text-xs text-indigo-800">local-substitutable</span></div>
+      <p class="mt-3 font-mono text-xs text-slate-600">ContractValidationService · PersistenceNodeService · ProjectContract · ProjectStructure · generated pom/package metadata</p>
+      <div class="mt-6 grid gap-5 md:grid-cols-2">
+        <div class="diagram rounded-xl border border-red-200 bg-red-50 p-4"><h3 class="text-xs uppercase tracking-wider text-red-700">Before</h3><div class="mt-6 grid grid-cols-3 gap-2 text-center text-xs"><div class="border bg-white p-3">package ...</div><div class="border bg-white p-3">No tests</div><div class="border bg-white p-3">missing Bean</div></div><div class="my-6 text-center text-red-600">warnings → persist anyway → final compile</div><div class="h-16 border border-red-500 bg-white p-4 text-center">质量策略散落在 prompt、regex 与日志判断</div></div>
+        <div class="diagram rounded-xl border border-slate-700 bg-slate-50 p-4"><h3 class="text-xs uppercase tracking-wider">After</h3><div class="deep mt-6 rounded-xl p-5"><div class="text-xs uppercase tracking-wider">Deep Quality Policy Module</div><div class="mt-3 grid gap-2 text-xs"><div class="rounded bg-white/10 p-2">ProjectProfile: Java / Node / runtime</div><div class="rounded bg-white/10 p-2">Gate: source, tests, wiring, contract</div><div class="rounded bg-white/10 p-2">Decision: pass / block / needs-review</div></div></div><div class="mt-4 border seam border-slate-500 p-3 text-xs">Adapter: Java 8 Spring template · Java 17 WebSocket template · Node 14 frontend template</div></div>
+      </div>
+      <div class="mt-5 grid gap-4 md:grid-cols-3 text-sm"><div><b>Problem</b><p>可确定的错误只产生 warning，Interface 没有阻止坏产物进入下一步。</p></div><div><b>Solution</b><p>按 ProjectProfile 执行硬门禁；模板 Adapter 固化工程骨架与运行约束。</p></div><div><b>Wins</b><ul class="mt-2 list-disc pl-5"><li>Leverage：规则复用全部生成</li><li>Locality：策略集中</li><li>LLM 不再猜骨架</li></ul></div></div>
+    </article>
+
+    <article id="run-journal" class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+      <div class="flex items-center gap-2"><h2 class="text-2xl font-serif">深化运行状态为可回放 Run Journal Module</h2><span class="rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-800">Worth exploring</span><span class="rounded-full bg-indigo-100 px-3 py-1 text-xs text-indigo-800">ports &amp; adapters</span></div>
+      <p class="mt-3 font-mono text-xs text-slate-600">SoftwareStudioWorkflowData · SoftwareStudioWorkflowGraphState · SoftwareController · SSE logs · WorkspaceService</p>
+      <div class="mt-6 grid gap-5 md:grid-cols-2">
+        <div class="diagram rounded-xl border border-red-200 bg-red-50 p-4"><h3 class="text-xs uppercase tracking-wider text-red-700">Before</h3><pre class="mermaid">flowchart LR
+ A[Mutable workflow data] --> B[Raw SSE strings]
+ A --> C[Latest files]
+ A --> D[Latest error]
+ B -. no replay .-> X[Operator]
+ C -. no diff .-> X
+ D -. history lost .-> X</pre></div>
+        <div class="diagram rounded-xl border border-slate-700 bg-slate-50 p-4"><h3 class="text-xs uppercase tracking-wider">After</h3><pre class="mermaid">flowchart LR
+ A[Run Journal Module] --> B[Typed events]
+ A --> C[Artifact snapshots]
+ A --> D[Repair attempts]
+ A --> E[Gate evidence]
+ B --> F[SSE adapter]
+ C --> G[Filesystem adapter]
+ D --> H[Replay / compare]
+ classDef deep fill:#0f172a,color:#fff,stroke-width:3px;
+ class A deep;</pre></div>
+      </div>
+      <div class="mt-5 grid gap-4 md:grid-cols-3 text-sm"><div><b>Problem</b><p>共享状态只保存“最新值”，诊断和回归缺少历史 Locality。</p></div><div><b>Solution</b><p>记录 runId、node、artifact、gate evidence、repair diff 与决策。</p></div><div><b>Wins</b><ul class="mt-2 list-disc pl-5"><li>失败可回放</li><li>修复效果可比较</li><li>界面不解析日志</li></ul></div></div>
+    </article>
+  </section>
+
+  <section id="top-recommendation" class="deep rounded-2xl p-8 shadow-lg">
+    <p class="text-xs uppercase tracking-wider text-emerald-300">Top recommendation</p>
+    <h2 class="mt-2 text-2xl font-serif"><a class="underline decoration-emerald-400" href="#slice-loop">先建立垂直切片交付 Module</a></h2>
+    <p class="mt-2 text-slate-200">它把反馈提前，并迫使 VerificationResult、质量策略和正确返工路由在一个真实 Interface 上落地；其余候选都能作为该 Module 的内部 Depth 逐步加入。</p>
+  </section>
+</main>
+</body>
+</html>
