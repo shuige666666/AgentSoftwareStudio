@@ -73,6 +73,18 @@ public class PersistenceNodeService {
         return data;
     }
 
+    /**
+     * 将完整项目状态同步到唯一工作区，供编译器和测试工具连续验证同一份候选代码。
+     */
+    public SoftwareStudioWorkflowData persistWholeProject(SoftwareStudioWorkflowData data, Consumer<String> logger) {
+        if (data.projectPath == null) {
+            initializeWorkspace(data, logger);
+        }
+        workspaceService.writeSourceFilesToDisk(Path.of(data.projectPath), data.codes, logger);
+        logger.accept("6.5. Persisted complete generated project to the shared workspace.");
+        return data;
+    }
+
     private List<SourceCode> currentSliceCodes(SoftwareStudioWorkflowData data, boolean includeNormalizedFiles) {
         LinkedHashSet<String> selectedPaths = new LinkedHashSet<>(data.currentSlice().ownedFiles());
         selectedPaths.addAll(data.currentSliceTestFiles);

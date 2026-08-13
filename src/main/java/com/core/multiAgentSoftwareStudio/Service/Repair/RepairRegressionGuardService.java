@@ -95,6 +95,37 @@ public class RepairRegressionGuardService {
         }
     }
 
+    /**
+     * 候选修改没有带来真实工具进展时恢复本轮基线，保留此前已经验证过的最佳代码。
+     */
+    public void rollbackCandidateWithoutProgress(
+            SoftwareStudioWorkflowData data,
+            Consumer<String> logger,
+            String reason) {
+        if (data == null || data.repairBaselineCodes == null || data.repairBaselineCodes.isEmpty()) {
+            return;
+        }
+        Consumer<String> safeLogger = logger == null ? message -> { } : logger;
+        safeLogger.accept("   Repair candidate made no verified progress; restoring the best checkpoint."
+                + (reason == null || reason.isBlank() ? "" : " " + reason));
+        if (data.projectPath != null) {
+            workspaceService.restoreRepairSnapshot(
+                    Path.of(data.projectPath), data.repairBaselineCodes,
+                    data.repairCandidateChangedFiles, safeLogger);
+        }
+        restoreCodes(data, data.repairBaselineCodes);
+        data.validationWarnings = new ArrayList<>(data.repairBaselineValidationWarnings);
+        data.qualityPolicyResult = data.repairBaselineQualityPolicyResult;
+        data.verificationResult = data.repairBaselineVerificationResult;
+        data.executionResult = data.repairBaselineExecutionResult == null ? "" : data.repairBaselineExecutionResult;
+        data.testResult = data.repairBaselineTestResult == null ? "" : data.repairBaselineTestResult;
+        data.pendingFailureKind = safeFailure(data.repairBaselineFailureKind);
+        data.pendingErrorType = data.repairBaselineErrorType;
+        data.pendingFixLog = data.repairBaselineFixLog;
+        data.repairRollbackCount++;
+        clearCandidate(data);
+    }
+
     private void restoreCodes(SoftwareStudioWorkflowData data, Map<String, String> baseline) {
         data.codes = baseline.entrySet().stream()
                 .map(entry -> new SourceCode(

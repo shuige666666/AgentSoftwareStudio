@@ -18,7 +18,7 @@ import static org.mockito.Mockito.when;
 class SlicePlanNodeServiceTest {
 
     /**
-     * 切片计划生成后必须按真实切片数建立 v3 项目上限。
+     * 切片计划生成后仍保留旧节点的预算形状，但报告使用当前工具修复策略版本。
      */
     @Test
     void initializesProgressAwareRepairBudgetAfterPlanning() {
@@ -37,6 +37,6 @@ class SlicePlanNodeServiceTest {
         assertEquals(5, data.repairBudget.maxLlmRepairs());
         assertEquals(4, data.repairBudget.maxRepairsPerSlice());
         assertEquals(1, data.repairBudget.reservedForFinalVerification());
-        assertEquals("progress-aware-repair-budget-v3", data.repairBudget.policyVersion());
+        assertEquals("tool-driven-progress-budget-v4", data.repairBudget.policyVersion());
     }
 }

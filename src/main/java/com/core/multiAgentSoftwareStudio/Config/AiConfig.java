@@ -2,12 +2,14 @@ package com.core.multiAgentSoftwareStudio.Config;
 
 import com.core.multiAgentSoftwareStudio.Agent.ArchitectAgent;
 import com.core.multiAgentSoftwareStudio.Agent.ContractAgent;
+import com.core.multiAgentSoftwareStudio.Agent.ContractRepairAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
 import com.core.multiAgentSoftwareStudio.Agent.FrontendReviewAgent;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Metric.ObservedOpenAiCompatibleChatModel;
 import com.core.multiAgentSoftwareStudio.Agent.ProductManagerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
+import com.core.multiAgentSoftwareStudio.Agent.ImplementationRepairAgent;
 import com.core.multiAgentSoftwareStudio.Agent.TestWriterAgent;
 import com.core.multiAgentSoftwareStudio.Agent.LangGraphPromptExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,14 +33,14 @@ public class AiConfig {
         public static final String CODER_MODEL_NAME = "qwen3.7-flash-2026-07-15";
         public static final double CODER_MODEL_TEMPERATURE = 0.1;
         public static final int CODER_MODEL_MAX_OUTPUT_TOKENS = 8192;
-        public static final Duration CODER_MODEL_TIMEOUT = Duration.ofMinutes(8);
+        public static final Duration CODER_MODEL_TIMEOUT = Duration.ofMinutes(4);
         public static final boolean CODER_MODEL_JSON_OUTPUT_ENABLED = true;
 
         public static final String LOGIC_MODEL_BEAN_NAME = "logicModel";
         public static final String LOGIC_MODEL_NAME = "qwen3.7-plus-2026-05-26";
         public static final double LOGIC_MODEL_TEMPERATURE = 0.5;
         public static final int LOGIC_MODEL_MAX_OUTPUT_TOKENS = 8192;
-        public static final Duration LOGIC_MODEL_TIMEOUT = Duration.ofMinutes(5);
+        public static final Duration LOGIC_MODEL_TIMEOUT = Duration.ofMinutes(8);
         public static final boolean LOGIC_MODEL_JSON_OUTPUT_ENABLED = true;
 
         /**
@@ -163,5 +165,27 @@ public class AiConfig {
                         LangGraphPromptExecutor promptExecutor,
                         ObjectMapper objectMapper) {
                 return new DebuggerAgent(model, promptExecutor, objectMapper);
+        }
+
+        /**
+         * 创建真实编译反馈驱动的多文件实现修复 Agent。
+         */
+        @Bean
+        ImplementationRepairAgent implementationRepairAgent(
+                        @Qualifier(CODER_MODEL_BEAN_NAME) ChatLanguageModel model,
+                        LangGraphPromptExecutor promptExecutor,
+                        ObjectMapper objectMapper) {
+                return new ImplementationRepairAgent(model, promptExecutor, objectMapper);
+        }
+
+        /**
+         * 创建测试绿色后负责行为契约闭环的专项修复 Agent。
+         */
+        @Bean
+        ContractRepairAgent contractRepairAgent(
+                        @Qualifier(CODER_MODEL_BEAN_NAME) ChatLanguageModel model,
+                        LangGraphPromptExecutor promptExecutor,
+                        ObjectMapper objectMapper) {
+                return new ContractRepairAgent(model, promptExecutor, objectMapper);
         }
 }

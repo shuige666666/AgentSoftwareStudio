@@ -13,7 +13,6 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunRequest;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
-import com.core.multiAgentSoftwareStudio.Config.RepairBudgetConfig;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -92,12 +91,13 @@ public class BenchmarkRunnerService {
      * 将当前集中配置的修复预算策略写入报告，避免继续记录已经不控制运行行为的旧重试参数。
      */
     private BenchmarkRepairBudgetConfiguration repairBudgetConfiguration() {
+        RepairBudget budget = RepairBudget.forToolDrivenProject();
         return new BenchmarkRepairBudgetConfiguration(
-                RepairBudget.POLICY_VERSION,
-                RepairBudgetConfig.MAX_PROJECT_LLM_REPAIRS,
-                RepairBudgetConfig.EXTRA_REPAIRS_BEYOND_SLICE_COUNT,
-                RepairBudgetConfig.MAX_REPAIRS_PER_SLICE,
-                RepairBudgetConfig.RESERVED_FOR_FINAL_VERIFICATION);
+                budget.policyVersion(),
+                budget.maxLlmRepairs(),
+                0,
+                budget.maxRepairsPerSlice(),
+                budget.reservedForFinalVerification());
     }
 
     public BenchmarkRunReport run(BenchmarkRunRequest request) {

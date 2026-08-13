@@ -36,8 +36,11 @@ class DockerSandboxStructuredResultIntegrationTest {
 
         Path greenProject = tempDir.resolve("green-project");
         writeGreenMavenProject(greenProject);
+        SandboxExecutionResult compile = sandboxService.runCompileInSandboxWithResult(greenProject, "SPRING_BOOT");
         SandboxExecutionResult green = sandboxService.runTestsInSandboxWithResult(greenProject, "SPRING_BOOT");
 
+        assertEquals(0, compile.exitCode());
+        assertTrue(compile.command().contains("-DskipTests compile"));
         assertEquals(0, green.exitCode());
         assertTrue(green.output().contains("Tests run: 1"));
         assertTrue(new VerificationResultService().toStep(VerificationStage.TEST, green).passed());

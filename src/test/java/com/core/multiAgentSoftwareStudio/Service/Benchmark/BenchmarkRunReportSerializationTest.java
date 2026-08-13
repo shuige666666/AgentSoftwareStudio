@@ -92,8 +92,12 @@ class BenchmarkRunReportSerializationTest {
     void shouldDiscoverEveryAgentModelAssignmentFromAiConfig() {
         List<AgentModelAssignment> assignments = BenchmarkRunnerService.agentModelAssignments();
 
-        assertEquals(7, assignments.size());
-        assertEquals(7, assignments.stream().map(AgentModelAssignment::agent).distinct().count());
+        assertEquals(9, assignments.size());
+        assertEquals(9, assignments.stream().map(AgentModelAssignment::agent).distinct().count());
+        assertTrue(assignments.stream().anyMatch(assignment ->
+                assignment.agent().equals("ImplementationRepairAgent")));
+        assertTrue(assignments.stream().anyMatch(assignment ->
+                assignment.agent().equals("ContractRepairAgent")));
         assertTrue(assignments.stream().allMatch(assignment ->
                 assignment.modelRef().equals(AiConfig.CODER_MODEL_BEAN_NAME)
                         || assignment.modelRef().equals(AiConfig.LOGIC_MODEL_BEAN_NAME)));

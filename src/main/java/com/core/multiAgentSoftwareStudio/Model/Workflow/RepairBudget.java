@@ -12,7 +12,7 @@ import java.util.Map;
 public class RepairBudget implements Serializable {
 
     private static final long serialVersionUID = 1L;
-    public static final String POLICY_VERSION = "progress-aware-repair-budget-v3";
+    public static final String POLICY_VERSION = "tool-driven-progress-budget-v4";
 
     private final int maxLlmRepairs;
     private final int maxRepairsPerSlice;
@@ -41,6 +41,13 @@ public class RepairBudget implements Serializable {
         int sliceSafetyLimit = Math.min(RepairBudgetConfig.MAX_REPAIRS_PER_SLICE, projectLimit);
         int finalReserve = Math.min(RepairBudgetConfig.RESERVED_FOR_FINAL_VERIFICATION, projectLimit);
         return new RepairBudget(projectLimit, sliceSafetyLimit, finalReserve);
+    }
+
+    /**
+     * 完整项目工具修复共用四次硬额度：默认连续三次，只有真实验证有进展才会使用第四次。
+     */
+    public static RepairBudget forToolDrivenProject() {
+        return new RepairBudget(4, 4, 0);
     }
 
     public boolean canRepair(String sliceId, boolean finalVerification) {

@@ -1,7 +1,9 @@
 package com.core.multiAgentSoftwareStudio.Service.Repair;
 
 import com.core.multiAgentSoftwareStudio.Agent.DebuggerAgent;
+import com.core.multiAgentSoftwareStudio.Agent.ContractRepairAgent;
 import com.core.multiAgentSoftwareStudio.Agent.DeveloperAgent;
+import com.core.multiAgentSoftwareStudio.Agent.ImplementationRepairAgent;
 import com.core.multiAgentSoftwareStudio.Agent.TestWriterAgent;
 import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFix;
 import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFixResult;
@@ -20,6 +22,7 @@ import com.core.multiAgentSoftwareStudio.Service.Workflow.RunJournalService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -37,6 +40,8 @@ import static com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathSer
 public class ProjectRepairService {
 
     private final DebuggerAgent debuggerAgent;
+    private final ImplementationRepairAgent implementationRepairAgent;
+    private final ContractRepairAgent contractRepairAgent;
     private final DeveloperAgent developerAgent;
     private final TestWriterAgent testWriterAgent;
     private final WorkspaceService workspaceService;
@@ -50,7 +55,10 @@ public class ProjectRepairService {
     /**
      * 注入修复流程所需的调试 Agent、工作区服务和上下文辅助服务。
      */
+    @Autowired
     public ProjectRepairService(DebuggerAgent debuggerAgent,
+            ImplementationRepairAgent implementationRepairAgent,
+            ContractRepairAgent contractRepairAgent,
             DeveloperAgent developerAgent,
             TestWriterAgent testWriterAgent,
             WorkspaceService workspaceService,
@@ -61,6 +69,8 @@ public class ProjectRepairService {
             FailureTriageService failureTriageService,
             RunJournalService runJournalService) {
         this.debuggerAgent = debuggerAgent;
+        this.implementationRepairAgent = implementationRepairAgent;
+        this.contractRepairAgent = contractRepairAgent;
         this.developerAgent = developerAgent;
         this.testWriterAgent = testWriterAgent;
         this.workspaceService = workspaceService;
@@ -70,6 +80,24 @@ public class ProjectRepairService {
         this.sliceProductionScopeService = sliceProductionScopeService;
         this.failureTriageService = failureTriageService;
         this.runJournalService = runJournalService;
+    }
+
+    /**
+     * 保留旧构造器供现有轻量测试使用；缺少专项 Agent 时安全退回通用 Debugger。
+     */
+    public ProjectRepairService(DebuggerAgent debuggerAgent,
+            DeveloperAgent developerAgent,
+            TestWriterAgent testWriterAgent,
+            WorkspaceService workspaceService,
+            CodeContextBuilderService codeContextBuilderService,
+            SourceCodePathService sourceCodePathService,
+            SliceTestScopeService sliceTestScopeService,
+            SliceProductionScopeService sliceProductionScopeService,
+            FailureTriageService failureTriageService,
+            RunJournalService runJournalService) {
+        this(debuggerAgent, null, null, developerAgent, testWriterAgent, workspaceService,
+                codeContextBuilderService, sourceCodePathService, sliceTestScopeService,
+                sliceProductionScopeService, failureTriageService, runJournalService);
     }
 
     /**
@@ -99,12 +127,12 @@ public class ProjectRepairService {
         } else if (decision.target() == RepairTarget.IMPLEMENTATION
                 && (isFutureTypeBoundaryFailure(data.pendingFixLog)
                         || requiresCrossFileImplementationRepair(data))) {
-            // 未来类型和运行期测试失败通常跨越 Controller、Service、异常处理器或模板，
-            // 统一交给可返回多文件修复的 Debugger，避免连续单文件修改形成新的契约错位。
-            handleFix(data, logger);
+            handleImplementationFix(data, logger);
         } else if (decision.target() == RepairTarget.IMPLEMENTATION
                 && findReferencedProductionFile(data.codes, data.pendingFixLog, data) != null) {
             repairImplementation(data, logger);
+        } else if (decision.target() == RepairTarget.CONTRACT) {
+            handleContractFix(data, logger);
         } else {
             handleFix(data, logger);
         }
@@ -185,17 +213,56 @@ public class ProjectRepairService {
                 data.pendingErrorType, data.pendingFixLog, data.codes, data.validationWarnings);
 
         CodeFixResult fixResult = debuggerAgent.analyzeAndFix(data.pendingErrorType, enhancedErrorLog, currentCodeContext);
+        applyMultiFileFixes(data, logger, fixResult, "Debugger");
+    }
+
+    /**
+     * 多文件编译和 Spring 失败交给精简的实现修复器，避免通用 Debugger 同时承担契约与测试知识。
+     */
+    private void handleImplementationFix(SoftwareStudioWorkflowData data, Consumer<String> logger) {
+        if (implementationRepairAgent == null) {
+            handleFix(data, logger);
+            return;
+        }
+        logger.accept("9. Invoking implementation repair agent with real tool evidence.");
+        String context = codeContextBuilderService.buildOptimizedCodeContext(
+                data.codes, data.pendingFixLog, data.pendingErrorType);
+        CodeFixResult result = implementationRepairAgent.repair(data.pendingFixLog, context);
+        applyMultiFileFixes(data, logger, result, "Implementation repair");
+    }
+
+    /**
+     * 编译和测试已提供真实证据后，由契约专项修复器统一处理接口及前后端集成。
+     */
+    private void handleContractFix(SoftwareStudioWorkflowData data, Consumer<String> logger) {
+        if (contractRepairAgent == null) {
+            handleFix(data, logger);
+            return;
+        }
+        logger.accept("9. Invoking contract repair agent after real verification.");
+        String context = codeContextBuilderService.buildContractContext(activeContract(data))
+                + codeContextBuilderService.buildOptimizedCodeContext(
+                        data.codes, data.pendingFixLog, data.pendingErrorType);
+        CodeFixResult result = contractRepairAgent.repair(data.pendingFixLog, context);
+        applyMultiFileFixes(data, logger, result, "Contract repair");
+    }
+
+    private void applyMultiFileFixes(
+            SoftwareStudioWorkflowData data,
+            Consumer<String> logger,
+            CodeFixResult fixResult,
+            String agentName) {
         List<CodeFix> fixes = fixResult == null ? null : fixResult.fixes();
 
         if (fixes == null || fixes.isEmpty()) {
-            logger.accept("Debugger agent did not return a concrete fix.");
+            logger.accept(agentName + " agent did not return a concrete fix.");
             return;
         }
 
         // 默认只允许覆盖已经生成的文件；仅对契约门禁确认、且当前切片蓝图已声明的漏文件开放补建。
         Map<String, String> existingFiles = snapshotCodes(data.codes);
         List<CodeFix> normalizedFixes = new ArrayList<>();
-        logger.accept("Debugger agent returned " + fixes.size() + " fixes.");
+        logger.accept(agentName + " agent returned " + fixes.size() + " fixes.");
         for (CodeFix fix : fixes) {
             if (fix == null) {
                 logger.accept("   - 跳过空修复记录。");
@@ -247,7 +314,7 @@ public class ProjectRepairService {
             SoftwareStudioWorkflowData data,
             String filename,
             Map<String, String> existingFiles) {
-        if (data == null || data.currentSlice() == null || filename == null || existingFiles == null) {
+        if (data == null || filename == null || existingFiles == null) {
             return false;
         }
         String normalized = sourceCodePathService.normalizePath(filename);
@@ -255,10 +322,17 @@ public class ProjectRepairService {
                 || existingFiles.containsKey(normalized)) {
             return false;
         }
-        boolean declaredByCurrentSlice = data.currentSlice().ownedFiles().stream()
-                .map(sourceCodePathService::normalizePath)
-                .anyMatch(normalized::equals);
-        if (!declaredByCurrentSlice || data.qualityPolicyResult == null) {
+        // 最终验证针对完整项目，不能再把补建范围误限到最后停留的单个切片。
+        boolean declaredByActiveScope = data.finalVerificationStarted
+                ? data.structure != null && data.structure.files() != null
+                        && data.structure.files().stream()
+                                .filter(java.util.Objects::nonNull)
+                                .map(file -> sourceCodePathService.normalizePath(file.targetPath()))
+                                .anyMatch(normalized::equals)
+                : data.currentSlice() != null && data.currentSlice().ownedFiles().stream()
+                        .map(sourceCodePathService::normalizePath)
+                        .anyMatch(normalized::equals);
+        if (!declaredByActiveScope || data.qualityPolicyResult == null) {
             return false;
         }
         return !data.qualityPolicyResult.contractBlockingFindings().isEmpty();

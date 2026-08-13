@@ -62,7 +62,6 @@ public class BatchPlanningService {
 
         // 先统一排序，保证同样的蓝图输入每次都能得到稳定的批次顺序。
         Map<String, List<FileBlueprint>> grouped = new LinkedHashMap<>();
-        Map<String, String> groupLayers = new HashMap<>();
 
         List<FileBlueprint> sortedFiles = structure.files().stream()
                 .sorted(Comparator
@@ -71,22 +70,20 @@ public class BatchPlanningService {
                 .toList();
 
         for (FileBlueprint file : sortedFiles) {
-            String groupKey = (file.batchName() != null && !file.batchName().isBlank())
-                    ? file.batchName().trim()
-                    : file.effectiveLayer();
+            // 完整项目优先按技术依赖层生成，让后续层能看到已经生成的真实上游代码。
+            // batchName 仍保留在蓝图中作为业务语义，但不再成为隔离生成与修复的硬边界。
+            String groupKey = file.effectiveLayer();
             grouped.computeIfAbsent(groupKey, key -> new ArrayList<>()).add(file);
-            groupLayers.putIfAbsent(groupKey, file.effectiveLayer());
         }
 
-        // 如果架构师显式给了 batchName，就优先相信它；
-        // 否则退回到按 layer 分组，这是默认的批次划分策略。
+        // DTO/实体/配置先于仓储、服务、控制器和前端，降低首次生成时的跨文件猜测。
         List<GenerationBatch> batches = grouped.entrySet().stream()
                 .sorted(Comparator
-                        .comparingInt((Map.Entry<String, List<FileBlueprint>> entry) -> layerPriority(groupLayers.get(entry.getKey())))
+                        .comparingInt((Map.Entry<String, List<FileBlueprint>> entry) -> layerPriority(entry.getKey()))
                         .thenComparing(Map.Entry::getKey))
                 .map(entry -> new GenerationBatch(
                         entry.getKey(),
-                        groupLayers.getOrDefault(entry.getKey(), "base"),
+                        entry.getKey(),
                         sortWithinBatch(entry.getValue())))
                 .toList();
 

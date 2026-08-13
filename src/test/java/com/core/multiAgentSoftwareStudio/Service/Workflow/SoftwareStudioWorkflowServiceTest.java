@@ -1,27 +1,24 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow;
 
-import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
-import com.core.multiAgentSoftwareStudio.Model.Generation.DeliverySlice;
-import com.core.multiAgentSoftwareStudio.Model.Generation.SliceDeliveryPlan;
+import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationBatch;
+import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationPlan;
+import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
-import com.core.multiAgentSoftwareStudio.Service.Repair.ProjectRepairService;
+import com.core.multiAgentSoftwareStudio.Service.Repair.ToolDrivenRepairService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ArchitectureNodeService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.BatchPlanNodeService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.BatchValidationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ContractNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.EvaluationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.FrontendReviewNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PersistenceNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PreflightValidationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.RequirementNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.SliceAcceptanceNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.SlicePlanNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.TestGenerationNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.VerificationNodeService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -34,88 +31,92 @@ import static org.mockito.Mockito.when;
 class SoftwareStudioWorkflowServiceTest {
 
     /**
-     * 主图必须逐片完成生成和验收，全部切片结束后额外执行一次最终全量验证。
+     * 主流程必须先生成全部生产批次并通过真实编译，之后才允许生成和执行测试。
      */
     @Test
-    void deliversSlicesSequentiallyThenRunsFinalVerification() {
+    void compilesCompleteProductionProjectBeforeGeneratingTests() {
+        Fixture fixture = fixture();
+        when(fixture.repair.compileAndRepair(any(), any())).thenReturn(true);
+        when(fixture.repair.testAndRepair(any(), any())).thenAnswer(invocation -> {
+            SoftwareStudioWorkflowData data = invocation.getArgument(0);
+            data.success = true;
+            return true;
+        });
+
+        var result = fixture.service.generateProjectWithResult("test", message -> { });
+
+        assertTrue(result.platformSuccess());
+        verify(fixture.generation, times(2)).generateBatch(any(), any());
+        verify(fixture.testGeneration, times(1)).execute(any(), any());
+        verify(fixture.repair).compileAndRepair(any(), any());
+        verify(fixture.repair).testAndRepair(any(), any());
+    }
+
+    /**
+     * 完整生产项目无法修到可编译时必须停止，不能继续生成会掩盖根因的测试代码。
+     */
+    @Test
+    void skipsTestGenerationWhenProductionCompileCannotBeRepaired() {
+        Fixture fixture = fixture();
+        when(fixture.repair.compileAndRepair(any(), any())).thenReturn(false);
+
+        fixture.service.generateProjectWithResult("test", message -> { });
+
+        verify(fixture.testGeneration, never()).execute(any(), any());
+        verify(fixture.repair, never()).testAndRepair(any(), any());
+    }
+
+    private Fixture fixture() {
         RequirementNodeService requirement = passthrough(RequirementNodeService.class);
         ArchitectureNodeService architecture = passthrough(ArchitectureNodeService.class);
-        ContractNodeService contractNode = passthrough(ContractNodeService.class);
-        SlicePlanNodeService slicePlan = mock(SlicePlanNodeService.class);
+        ContractNodeService contract = passthrough(ContractNodeService.class);
+        SlicePlanNodeService slicePlan = passthrough(SlicePlanNodeService.class);
+        BatchPlanNodeService batchPlan = mock(BatchPlanNodeService.class);
         BatchGenerationService generation = mock(BatchGenerationService.class);
-        TestGenerationNodeService testGeneration = mock(TestGenerationNodeService.class);
-        FrontendReviewNodeService frontendReview = passthrough(FrontendReviewNodeService.class);
-        PreflightValidationNodeService preflight = mock(PreflightValidationNodeService.class);
+        BatchValidationNodeService batchValidation = mock(BatchValidationNodeService.class);
+        FrontendReviewNodeService frontend = passthrough(FrontendReviewNodeService.class);
         PersistenceNodeService persistence = mock(PersistenceNodeService.class);
-        VerificationNodeService verification = passthrough(VerificationNodeService.class);
-        EvaluationNodeService evaluation = mock(EvaluationNodeService.class);
-        ProjectRepairService repair = mock(ProjectRepairService.class);
-        RunJournalService journal = new RunJournalService();
-        SliceAcceptanceNodeService acceptance = new SliceAcceptanceNodeService(journal);
+        TestGenerationNodeService testGeneration = passthrough(TestGenerationNodeService.class);
+        ToolDrivenRepairService repair = mock(ToolDrivenRepairService.class);
         LlmUsageMetricsService metrics = mock(LlmUsageMetricsService.class);
+        RunJournalService journal = new RunJournalService();
 
-        ProjectContract emptyContract = new ProjectContract(List.of(), List.of(), List.of(), List.of());
-        when(slicePlan.execute(any(), any())).thenAnswer(invocation -> {
+        when(batchPlan.execute(any(), any())).thenAnswer(invocation -> {
             SoftwareStudioWorkflowData data = invocation.getArgument(0);
-            data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of(
-                    new DeliverySlice("poll", "Poll", List.of(), List.of(), emptyContract, List.of(), List.of()),
-                    new DeliverySlice("result", "Result", List.of(), List.of(), emptyContract, List.of("poll"), List.of())),
-                    List.of(), "test-policy");
-            journal.recordSliceStarted(data);
+            data.generationPlan = new GenerationPlan(List.of(
+                    new GenerationBatch("base", "base", List.of()),
+                    new GenerationBatch("api", "controller", List.of())));
+            data.currentBatchIndex = 0;
+            return data;
+        });
+        doAnswer(invocation -> null).when(generation).generateBatch(any(), any());
+        when(batchValidation.execute(any(), any())).thenAnswer(invocation -> {
+            SoftwareStudioWorkflowData data = invocation.getArgument(0);
+            data.currentBatchIndex++;
             return data;
         });
         when(persistence.initializeWorkspace(any(), any())).thenAnswer(invocation -> {
             SoftwareStudioWorkflowData data = invocation.getArgument(0);
-            data.projectPath = "target/workflow-graph-test";
+            data.projectPath = "target/quality-first-workflow-test";
             return data;
         });
-        doAnswer(invocation -> null).when(generation).generateSlice(any(), any());
-        when(testGeneration.executeCurrentSlice(any(), any())).thenAnswer(invocation -> {
-            SoftwareStudioWorkflowData data = invocation.getArgument(0);
-            data.currentSliceTestFiles.add("src/test/java/" + data.currentSliceId() + "Test.java");
-            return data;
-        });
-        when(preflight.execute(any(), any())).thenAnswer(invocation -> {
-            SoftwareStudioWorkflowData data = invocation.getArgument(0);
-            data.preflightPassed = true;
-            data.shouldFix = false;
-            return data;
-        });
-        when(persistence.persistCurrentSlice(any(), any())).thenAnswer(invocation -> {
-            SoftwareStudioWorkflowData data = invocation.getArgument(0);
-            data.currentSlicePersisted = true;
-            return data;
-        });
-        when(evaluation.execute(any(), any())).thenAnswer(invocation -> {
-            SoftwareStudioWorkflowData data = invocation.getArgument(0);
-            if (data.finalVerificationStarted) {
-                data.success = true;
-            } else {
-                data.currentSliceVerified = true;
-            }
-            data.shouldFix = false;
-            return data;
-        });
+        when(persistence.persistWholeProject(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         SoftwareStudioWorkflowService service = new SoftwareStudioWorkflowService(
-                requirement, architecture, contractNode, slicePlan, generation, testGeneration,
-                frontendReview, preflight, persistence, verification, evaluation, acceptance,
-                repair, metrics, journal);
-
-        var result = service.generateProjectWithResult("test", message -> { });
-
-        assertTrue(result.platformSuccess());
-        assertEquals(2, result.runSummary().sliceDelivery().acceptedSlices());
-        verify(generation, times(2)).generateSlice(any(), any());
-        verify(testGeneration, times(2)).executeCurrentSlice(any(), any());
-        verify(persistence, times(2)).persistCurrentSlice(any(), any());
-        verify(verification, times(3)).run(any(), any());
-        verify(preflight, times(3)).execute(any(), any());
-        verify(repair, never()).repair(any(), any());
+                requirement, architecture, contract, slicePlan, batchPlan, generation, batchValidation,
+                frontend, persistence, testGeneration, repair, metrics, journal);
+        return new Fixture(service, generation, testGeneration, repair);
     }
 
     private <T> T passthrough(Class<T> type) {
         return mock(type, invocation -> invocation.getArguments().length > 0
                 && invocation.getArguments()[0] instanceof SoftwareStudioWorkflowData data ? data : null);
+    }
+
+    private record Fixture(
+            SoftwareStudioWorkflowService service,
+            BatchGenerationService generation,
+            TestGenerationNodeService testGeneration,
+            ToolDrivenRepairService repair) {
     }
 }

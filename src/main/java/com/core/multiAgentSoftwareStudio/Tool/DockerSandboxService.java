@@ -95,6 +95,16 @@ public class DockerSandboxService {
     }
 
     /**
+     * 在修复会话中执行最小生产源码编译，快速把最新编译器证据反馈给修复器。
+     */
+    public SandboxExecutionResult runCompileInSandboxWithResult(Path projectPath, String projectType) {
+        String cmd = "SPRING_BOOT".equals(projectType) || "PURE_JAVA_MAVEN".equals(projectType)
+                ? "mvn -DskipTests compile"
+                : "find . -name \"*.java\" > sources.txt && javac -d . @sources.txt";
+        return executeInDockerWithResult(projectPath, projectType, cmd, false);
+    }
+
+    /**
      * 新增：在沙箱中运行测试
      */
     public String runTestsInSandbox(Path projectPath, String projectType) {
