@@ -76,35 +76,6 @@ public class SourceCodePathService {
         codes.add(new SourceCode(normalizedCandidate, language, safeCode));
     }
 
-    /**
-     * 将修复结果写入内存列表，如已存在则覆盖（精确路径匹配 + 纯文件名兜底匹配）。
-     * 适用于 Debugger / FrontendReview 等修复场景，模型可能只返回类名而非完整路径。
-     */
-    public void applyCodeFix(List<SourceCode> codes, String filename, String code) {
-        String safeCode = normalizeGeneratedCode(filename, code);
-        // applyCodeFix 只用于整文件修复；空白响应必须视为无效，不能清空已有内存源码。
-        if (safeCode.isBlank()) {
-            return;
-        }
-        String normalizedFixFilename = normalizeGeneratedFilename(filename, safeCode);
-        String fixPureName = Path.of(normalizedFixFilename).getFileName().toString();
-        String language = detectLanguageFromFilename(normalizedFixFilename);
-
-        for (int i = 0; i < codes.size(); i++) {
-            String existingFilename = normalizeGeneratedFilename(codes.get(i).filename(), codes.get(i).code());
-            if (existingFilename.equals(normalizedFixFilename)) {
-                codes.set(i, new SourceCode(existingFilename, codes.get(i).language(), safeCode));
-                return;
-            }
-            String existingPureName = Path.of(existingFilename).getFileName().toString();
-            if (existingPureName.equals(fixPureName)) {
-                codes.set(i, new SourceCode(existingFilename, codes.get(i).language(), safeCode));
-                return;
-            }
-        }
-        codes.add(new SourceCode(normalizedFixFilename, language, safeCode));
-    }
-
     // ==================== 路径规范化 ====================
 
     /**

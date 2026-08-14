@@ -3,6 +3,11 @@ package com.core.multiAgentSoftwareStudio.Service.Metric;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmCallUsage;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmFailureType;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationType;
+import com.core.multiAgentSoftwareStudio.Model.Tool.ToolCall;
+import com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage;
+import com.core.multiAgentSoftwareStudio.Model.Tool.ToolDefinition;
+import com.core.multiAgentSoftwareStudio.Model.Tool.ToolModelResponse;
+import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.ToolCallingModel;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -29,7 +34,7 @@ import java.util.Map;
 /**
  * OpenAI-compatible Chat 模型包装器，统一记录通用 Token 用量并可选观测 DeepSeek 缓存指标。
  */
-public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
+public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, ToolCallingModel {
     private final String apiKey;
     private final String baseUrl;
     private final String modelName;
@@ -117,6 +122,57 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
         }
     }
 
+    /**
+     * 使用 OpenAI 兼容的 tools/tool_calls 协议执行一次工具会话模型调用。
+     */
+    @Override
+    public ToolModelResponse generateWithTools(
+            List<ToolChatMessage> messages,
+            List<ToolDefinition> tools) {
+        long started = System.nanoTime();
+        try {
+            ObjectNode requestBody = buildToolRequest(messages, tools);
+            String rawResponse = postChatCompletion(requestBody);
+            JsonNode root = objectMapper.readTree(rawResponse);
+            if (root.has("error")) {
+                throw new ProviderResponseException("OpenAI-compatible API returned error: " + root.get("error"));
+            }
+
+            JsonNode messageNode = root.path("choices").path(0).path("message");
+            String content = messageNode.path("content").isNull() ? "" : messageNode.path("content").asText("");
+            List<ToolCall> calls = parseToolCalls(messageNode.path("tool_calls"));
+            String finishReason = root.path("choices").path(0).path("finish_reason").asText();
+            LlmCallUsage usage = parseUsage(root.path("usage"));
+            metricsService.recordSuccess(modelName, usage, elapsedMillis(started), finishReason);
+            if (content.isBlank() && calls.isEmpty()) {
+                metricsService.recordOutputValidationFailure(LlmOutputValidationType.EMPTY_CONTENT);
+            }
+            return new ToolModelResponse(ToolChatMessage.assistant(content, calls), finishReason);
+        } catch (HttpTimeoutException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.TIMEOUT, e);
+            throw new IllegalStateException("OpenAI-compatible tool request timed out", e);
+        } catch (JsonProcessingException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.RESPONSE_PARSE_ERROR, e);
+            throw new IllegalStateException("Failed to parse OpenAI-compatible tool response", e);
+        } catch (IOException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.HTTP_ERROR, e);
+            throw new IllegalStateException("Failed to call OpenAI-compatible tool API", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.INTERRUPTED, e);
+            throw new IllegalStateException("Interrupted while calling tool API", e);
+        } catch (ModelHttpException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.HTTP_ERROR, e);
+            throw e;
+        } catch (ProviderResponseException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.PROVIDER_ERROR, e);
+            throw e;
+        } catch (RuntimeException e) {
+            metricsService.recordFailure(modelName, elapsedMillis(started), LlmFailureType.UNKNOWN, e);
+            throw e;
+        }
+    }
+
     public String modelName() {
         return modelName;
     }
@@ -144,6 +200,71 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel {
             addMessage(messageNodes, roleOf(message), message.text());
         }
         return root;
+    }
+
+    /**
+     * 构造工具请求；工具会话不能附带全局 JSON Mode，否则部分兼容服务会拒绝 tool_calls。
+     */
+    ObjectNode buildToolRequest(List<ToolChatMessage> messages, List<ToolDefinition> tools) {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("model", modelName);
+        root.put("temperature", temperature);
+        root.put("max_tokens", maxTokens);
+        root.put("tool_choice", "auto");
+        root.put("parallel_tool_calls", false);
+
+        ArrayNode messageNodes = root.putArray("messages");
+        for (ToolChatMessage message : messages == null ? List.<ToolChatMessage>of() : messages) {
+            ObjectNode node = messageNodes.addObject();
+            node.put("role", message.role());
+            if ("tool".equals(message.role())) {
+                node.put("tool_call_id", message.toolCallId());
+                node.put("content", message.content());
+                continue;
+            }
+            if (message.content() == null || message.content().isBlank()) {
+                node.putNull("content");
+            } else {
+                node.put("content", message.content());
+            }
+            if (message.toolCalls() != null && !message.toolCalls().isEmpty()) {
+                ArrayNode calls = node.putArray("tool_calls");
+                for (ToolCall call : message.toolCalls()) {
+                    ObjectNode callNode = calls.addObject();
+                    callNode.put("id", call.id());
+                    callNode.put("type", "function");
+                    ObjectNode function = callNode.putObject("function");
+                    function.put("name", call.name());
+                    function.put("arguments", call.arguments());
+                }
+            }
+        }
+
+        ArrayNode toolNodes = root.putArray("tools");
+        for (ToolDefinition tool : tools == null ? List.<ToolDefinition>of() : tools) {
+            ObjectNode toolNode = toolNodes.addObject();
+            toolNode.put("type", "function");
+            ObjectNode function = toolNode.putObject("function");
+            function.put("name", tool.name());
+            function.put("description", tool.description());
+            function.set("parameters", tool.parameters());
+        }
+        return root;
+    }
+
+    private List<ToolCall> parseToolCalls(JsonNode callsNode) {
+        if (callsNode == null || !callsNode.isArray()) {
+            return List.of();
+        }
+        java.util.ArrayList<ToolCall> calls = new java.util.ArrayList<>();
+        for (JsonNode call : callsNode) {
+            JsonNode function = call.path("function");
+            calls.add(new ToolCall(
+                    call.path("id").asText(),
+                    function.path("name").asText(),
+                    function.path("arguments").asText("{}")));
+        }
+        return List.copyOf(calls);
     }
 
     /**

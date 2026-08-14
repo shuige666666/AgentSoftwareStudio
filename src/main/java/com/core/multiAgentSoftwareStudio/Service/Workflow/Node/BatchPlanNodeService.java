@@ -26,7 +26,6 @@ public class BatchPlanNodeService {
         // 这个节点把“架构蓝图”转换成“可执行计划”。
         // 也就是把文件从静态描述，变成真正的生成批次序列。
         data.generationPlan = batchPlanningService.createPlan(data.structure);
-        data.currentBatchIndex = 0;
         logger.accept("3. Batch plan created with " + data.generationPlan.batches().size() + " batches.");
         for (int i = 0; i < data.generationPlan.batches().size(); i++) {
             GenerationBatch batch = data.generationPlan.batches().get(i);

@@ -86,18 +86,17 @@ class BenchmarkRunReportSerializationTest {
     }
 
     /**
-     * 确保 AiConfig 中所有 Agent 的模型 Qualifier 都能被报告自动发现。
+     * 确保规划 Agent 和共享工具运行时的真实模型映射都进入报告。
      */
     @Test
     void shouldDiscoverEveryAgentModelAssignmentFromAiConfig() {
         List<AgentModelAssignment> assignments = BenchmarkRunnerService.agentModelAssignments();
 
-        assertEquals(9, assignments.size());
-        assertEquals(9, assignments.stream().map(AgentModelAssignment::agent).distinct().count());
+        assertEquals(4, assignments.size());
+        assertEquals(4, assignments.stream().map(AgentModelAssignment::agent).distinct().count());
         assertTrue(assignments.stream().anyMatch(assignment ->
-                assignment.agent().equals("ImplementationRepairAgent")));
-        assertTrue(assignments.stream().anyMatch(assignment ->
-                assignment.agent().equals("ContractRepairAgent")));
+                assignment.agent().equals("WorkspaceAgentRuntime")
+                        && assignment.modelRef().equals(AiConfig.CODER_MODEL_BEAN_NAME)));
         assertTrue(assignments.stream().allMatch(assignment ->
                 assignment.modelRef().equals(AiConfig.CODER_MODEL_BEAN_NAME)
                         || assignment.modelRef().equals(AiConfig.LOGIC_MODEL_BEAN_NAME)));

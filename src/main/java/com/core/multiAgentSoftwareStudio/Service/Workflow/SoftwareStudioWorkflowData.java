@@ -1,6 +1,5 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow;
 
-import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationBatch;
 import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationPlan;
 import com.core.multiAgentSoftwareStudio.Model.Generation.DeliverySlice;
 import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
@@ -39,15 +38,10 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public ProjectProfile projectProfile;
     public ProjectQualityPolicyResult qualityPolicyResult = ProjectQualityPolicyResult.empty();
     public GenerationPlan generationPlan = new GenerationPlan(List.of());
-    public int currentBatchIndex;
     public SliceDeliveryPlan sliceDeliveryPlan = SliceDeliveryPlan.empty();
     public int currentSliceIndex;
     public List<String> acceptedSliceIds = new ArrayList<>();
     public List<String> acceptedTestFiles = new ArrayList<>();
-    public List<String> currentSliceTestFiles = new ArrayList<>();
-    public Map<String, String> testSliceOwners = new LinkedHashMap<>();
-    public boolean currentSlicePersisted;
-    public boolean currentSliceVerified;
     public boolean finalVerificationStarted;
     public RepairBudget repairBudget;
     // 这里放进 LangGraph state 的对象都会被序列化，路径统一存字符串更稳妥。
@@ -60,9 +54,7 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public VerificationResult verificationResult = VerificationResult.empty();
     public boolean success;
     public boolean shouldFix;
-    public boolean preflightPassed;
     public boolean repairStopRequested;
-    public boolean resumeSliceTestGeneration;
     public String repairStoppedAt;
     public String repairStopReason;
     public int generatedTestFileCount;
@@ -106,27 +98,6 @@ public class SoftwareStudioWorkflowData implements Serializable {
         this.repairBudget = RepairBudget.forSlicePlan(1);
     }
 
-    /**
-     * 判断是否还有未处理的代码生成批次
-     */
-    public boolean hasMoreBatches() {
-        // 是否还有下一批待生成文件，供条件边决定要不要继续回到 generate_batch。
-        return generationPlan != null
-                && generationPlan.batches() != null
-                && currentBatchIndex < generationPlan.batches().size();
-    }
-
-    /**
-     * 获取当前游标所指向的生成批次
-     */
-    public GenerationBatch currentBatch() {
-        // 读取当前批次时不额外推进索引，索引推进统一放在 validate_batch 后面。
-        if (!hasMoreBatches()) {
-            return null;
-        }
-        return generationPlan.batches().get(currentBatchIndex);
-    }
-
     public boolean hasMoreSlices() {
         return sliceDeliveryPlan != null
                 && sliceDeliveryPlan.slices() != null
@@ -140,34 +111,6 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public String currentSliceId() {
         DeliverySlice slice = currentSlice();
         return finalVerificationStarted ? "FINAL_VERIFICATION" : slice == null ? "UNSCOPED" : slice.id();
-    }
-
-    public boolean canModifyInCurrentSlice(String filename) {
-        if (finalVerificationStarted || currentSlice() == null) {
-            return true;
-        }
-        String normalized = filename == null ? "" : filename.replace('\\', '/');
-        if (normalized.startsWith("src/test/")) {
-            // 已接受切片的测试属于回归基线；当前切片可修改自己的测试，也可新增测试。
-            boolean acceptedTest = acceptedTestFiles.stream()
-                    .map(path -> path.replace('\\', '/'))
-                    .anyMatch(normalized::equals);
-            boolean currentTest = currentSliceTestFiles.stream()
-                    .map(path -> path.replace('\\', '/'))
-                    .anyMatch(normalized::equals);
-            return !acceptedTest || currentTest;
-        }
-        return currentSlice().ownedFiles().stream().map(path -> path.replace('\\', '/')).anyMatch(normalized::equals)
-                || sliceDeliveryPlan.sharedFiles().stream().map(path -> path.replace('\\', '/')).anyMatch(normalized::equals);
-    }
-
-    public List<String> activeTestFiles() {
-        if (finalVerificationStarted) {
-            return List.of();
-        }
-        java.util.LinkedHashSet<String> tests = new java.util.LinkedHashSet<>(acceptedTestFiles);
-        tests.addAll(currentSliceTestFiles);
-        return List.copyOf(tests);
     }
 
     public boolean canRepairNow() {

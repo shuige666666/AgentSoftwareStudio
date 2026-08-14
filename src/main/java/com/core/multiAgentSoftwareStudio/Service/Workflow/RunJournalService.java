@@ -111,15 +111,11 @@ public class RunJournalService {
                 .filter(entry -> entry.eventType() == WorkflowJournalEventType.PREFLIGHT)
                 .flatMap(entry -> entry.gateIds().stream())
                 .collect(Collectors.groupingBy(Function.identity(), LinkedHashMap::new, Collectors.counting()));
-        int acceptedSlices = (int) data.runJournal.stream()
-                .filter(entry -> entry.eventType() == WorkflowJournalEventType.SLICE_ACCEPTED).count();
+        int acceptedSlices = data.acceptedSliceIds == null ? 0 : data.acceptedSliceIds.size();
         int regressionFailures = (int) data.runJournal.stream()
                 .filter(entry -> entry.eventType() == WorkflowJournalEventType.SLICE_REGRESSION_FAILED).count();
-        int firstPassAccepted = (int) data.runJournal.stream()
-                .filter(entry -> entry.eventType() == WorkflowJournalEventType.SLICE_ACCEPTED)
-                .filter(entry -> data.repairBudget == null
-                        || data.repairBudget.sliceRepairCounts().getOrDefault(entry.sliceId(), 0) == 0)
-                .count();
+        int firstPassAccepted = data.success && data.repairBudget != null
+                && data.repairBudget.usedLlmRepairs() == 0 ? acceptedSlices : 0;
         SliceDeliverySummary sliceSummary = new SliceDeliverySummary(
                 data.sliceDeliveryPlan == null ? 0 : data.sliceDeliveryPlan.slices().size(),
                 acceptedSlices,

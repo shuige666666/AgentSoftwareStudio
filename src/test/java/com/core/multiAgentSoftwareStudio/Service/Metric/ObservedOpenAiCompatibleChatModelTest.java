@@ -1,5 +1,8 @@
 package com.core.multiAgentSoftwareStudio.Service.Metric;
 
+import com.core.multiAgentSoftwareStudio.Model.Tool.ToolCall;
+import com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage;
+import com.core.multiAgentSoftwareStudio.Model.Tool.ToolDefinition;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -110,6 +113,30 @@ class ObservedOpenAiCompatibleChatModelTest {
         ObjectNode request = model.buildRequest(List.of(UserMessage.from("hello")));
 
         assertTrue(request.path("response_format").isMissingNode());
+    }
+
+    /**
+     * 工具对话必须保留 assistant tool_calls 与对应 tool_call_id，且不能叠加 JSON Mode。
+     */
+    @Test
+    void serializesNativeToolConversationWithoutJsonMode() {
+        ObservedOpenAiCompatibleChatModel model = newModel(true);
+        ObjectNode parameters = objectMapper.createObjectNode();
+        parameters.put("type", "object");
+
+        ObjectNode request = model.buildToolRequest(
+                List.of(
+                        ToolChatMessage.user("inspect"),
+                        ToolChatMessage.assistant("", List.of(new ToolCall("call-1", "list_files", "{}"))),
+                        ToolChatMessage.tool("call-1", "{\"files\":[]}")),
+                List.of(new ToolDefinition("list_files", "list", parameters)));
+
+        assertEquals("call-1", request.at("/messages/1/tool_calls/0/id").asText());
+        assertEquals("list_files", request.at("/messages/1/tool_calls/0/function/name").asText());
+        assertEquals("call-1", request.at("/messages/2/tool_call_id").asText());
+        assertEquals("list_files", request.at("/tools/0/function/name").asText());
+        assertTrue(request.path("response_format").isMissingNode());
+        assertFalse(request.path("parallel_tool_calls").asBoolean());
     }
 
     private ObservedOpenAiCompatibleChatModel newModel(boolean deepSeekCacheMetricsEnabled) {

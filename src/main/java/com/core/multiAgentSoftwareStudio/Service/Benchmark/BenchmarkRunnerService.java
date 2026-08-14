@@ -295,13 +295,17 @@ public class BenchmarkRunnerService {
     }
 
     /**
-     * 直接读取 AiConfig 中 Agent Bean 参数的 Qualifier，确保报告映射跟随真实注入关系变化。
+     * 读取规划 Agent 的 Bean Qualifier，并补充直接注入模型的共享工具运行时。
      */
     static List<AgentModelAssignment> agentModelAssignments() {
-        return Arrays.stream(AiConfig.class.getDeclaredMethods())
+        List<AgentModelAssignment> assignments = new java.util.ArrayList<>(Arrays.stream(AiConfig.class.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(Bean.class))
                 .map(BenchmarkRunnerService::agentModelAssignment)
                 .filter(Objects::nonNull)
+                .toList());
+        // 工具运行时由 Spring 服务注入 coderModel，不通过 AiConfig Agent Bean 工厂创建，需要显式记录。
+        assignments.add(new AgentModelAssignment("WorkspaceAgentRuntime", AiConfig.CODER_MODEL_BEAN_NAME));
+        return assignments.stream()
                 .sorted(Comparator.comparing(AgentModelAssignment::agent))
                 .toList();
     }

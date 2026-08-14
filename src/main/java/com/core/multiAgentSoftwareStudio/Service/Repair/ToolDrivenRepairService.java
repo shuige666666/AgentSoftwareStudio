@@ -36,7 +36,7 @@ public class ToolDrivenRepairService {
     private final VerificationResultService verificationResultService;
     private final ProjectProfileService projectProfileService;
     private final PersistenceNodeService persistenceNodeService;
-    private final ProjectRepairService projectRepairService;
+    private final WorkspaceRepairService workspaceRepairService;
     private final RepairProgressEvaluator progressEvaluator;
     private final RepairRegressionGuardService regressionGuardService;
     private final RunJournalService runJournalService;
@@ -46,7 +46,7 @@ public class ToolDrivenRepairService {
             VerificationResultService verificationResultService,
             ProjectProfileService projectProfileService,
             PersistenceNodeService persistenceNodeService,
-            ProjectRepairService projectRepairService,
+            WorkspaceRepairService workspaceRepairService,
             RepairProgressEvaluator progressEvaluator,
             RepairRegressionGuardService regressionGuardService,
             RunJournalService runJournalService) {
@@ -54,7 +54,7 @@ public class ToolDrivenRepairService {
         this.verificationResultService = verificationResultService;
         this.projectProfileService = projectProfileService;
         this.persistenceNodeService = persistenceNodeService;
-        this.projectRepairService = projectRepairService;
+        this.workspaceRepairService = workspaceRepairService;
         this.progressEvaluator = progressEvaluator;
         this.regressionGuardService = regressionGuardService;
         this.runJournalService = runJournalService;
@@ -116,7 +116,7 @@ public class ToolDrivenRepairService {
                     + ", remaining=" + best.remainingProblemCount() + ".");
             setPendingFailure(data, best);
             data.shouldFix = true;
-            projectRepairService.repair(data, logger);
+            workspaceRepairService.repair(data, logger);
             if (data.repairStopRequested || data.repairCandidateChangedFiles.isEmpty()) {
                 return false;
             }

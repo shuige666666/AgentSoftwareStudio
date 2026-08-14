@@ -1,10 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Service.Source;
 
-import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -36,16 +33,4 @@ class SourceCodePathServiceTest {
         assertEquals(legitimate, normalized);
     }
 
-    /**
-     * 整文件修复的公共入口必须拒绝空白内容，避免遗漏调用方再次清空内存源码。
-     */
-    @Test
-    void ignoresBlankWholeFileFix() {
-        List<SourceCode> codes = new ArrayList<>(List.of(new SourceCode(
-                "src/main/java/com/example/App.java", "java", "package com.example; class App {}")));
-
-        service.applyCodeFix(codes, "src/main/java/com/example/App.java", "  ");
-
-        assertEquals("package com.example; class App {}", codes.getFirst().code());
-    }
 }

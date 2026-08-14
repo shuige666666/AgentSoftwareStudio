@@ -1,80 +1,68 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow.Node;
 
-import com.core.multiAgentSoftwareStudio.Agent.FrontendReviewAgent;
-import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFix;
-import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFixResult;
-import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
-import com.core.multiAgentSoftwareStudio.Service.Context.CodeContextBuilderService;
-import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
+import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentMode;
+import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRuntime;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
-import static com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService.safeValue;
-
 /**
- * 负责执行前端专项审查节点，修复 HTML/CSS/JS 之间的交互一致性问题。
+ * 使用真实文件和编译反馈检查前后端接口、模板与浏览器脚本的一致性。
  */
 @Service
 public class FrontendReviewNodeService {
 
-    private final FrontendReviewAgent frontendReviewAgent;
-    private final CodeContextBuilderService codeContextBuilderService;
-    private final SourceCodePathService sourceCodePathService;
+    private final WorkspaceAgentRuntime workspaceAgentRuntime;
 
-    /**
-     * 注入前端审查 Agent 和源码上下文辅助服务。
-     */
-    public FrontendReviewNodeService(FrontendReviewAgent frontendReviewAgent,
-            CodeContextBuilderService codeContextBuilderService,
-            SourceCodePathService sourceCodePathService) {
-        this.frontendReviewAgent = frontendReviewAgent;
-        this.codeContextBuilderService = codeContextBuilderService;
-        this.sourceCodePathService = sourceCodePathService;
+    public FrontendReviewNodeService(WorkspaceAgentRuntime workspaceAgentRuntime) {
+        this.workspaceAgentRuntime = workspaceAgentRuntime;
     }
 
     /**
-     * 执行前端专项审查修复，重点处理 HTML/CSS/JS 之间的交互一致性
+     * 仅在项目包含前端资源时启动工具会话，允许同步修正前端文件和对应后端接口。
      */
     public SoftwareStudioWorkflowData execute(SoftwareStudioWorkflowData data, Consumer<String> logger) {
-        List<SourceCode> reviewCodes = data.currentSlice() == null || data.finalVerificationStarted
-                ? data.codes
-                : data.codes.stream()
-                        .filter(code -> data.canModifyInCurrentSlice(code.filename()))
-                        .toList();
-        String frontendContext = codeContextBuilderService.buildFrontendContext(reviewCodes);
-        if (frontendContext.isBlank()) {
-            logger.accept("5.5. No frontend files detected, skipping frontend review.");
+        if (!hasFrontend(data)) {
+            logger.accept("5. No frontend files detected, skipping frontend integration.");
             return data;
         }
 
-        logger.accept("5.5. Frontend reviewer is checking DOM, events, visibility states, and fetch calls.");
-        var reviewContract = data.currentSlice() == null || data.finalVerificationStarted
-                ? data.contract
-                : data.currentSlice().contract();
-        CodeFixResult reviewResult = frontendReviewAgent.reviewAndFix(reviewContract, frontendContext);
-        List<CodeFix> fixes = reviewResult == null ? null : reviewResult.fixes();
-        if (fixes == null || fixes.isEmpty()) {
-            logger.accept("   Frontend reviewer found no concrete fixes.");
-            return data;
-        }
+        logger.accept("5. Tool-driven frontend integrator is validating browser/backend contracts.");
+        String objective = """
+                Review and, where necessary, fix the real frontend/backend integration of this project.
 
-        logger.accept("   Frontend reviewer returned " + fixes.size() + " fixes.");
-        for (CodeFix fix : fixes) {
-            if (fix == null || fix.newCode() == null || fix.newCode().isBlank()) {
-                logger.accept("   - Skipped blank frontend whole-file fix.");
-                continue;
-            }
-            String normalizedFilename = sourceCodePathService.normalizeGeneratedFilename(fix.filename(), fix.newCode());
-            if (!data.canModifyInCurrentSlice(normalizedFilename)) {
-                logger.accept("   - Skipped out-of-slice frontend fix: " + normalizedFilename);
-                continue;
-            }
-            logger.accept("   - " + safeValue(fix.explanation(), "No explanation provided"));
-            sourceCodePathService.applyCodeFix(data.codes, normalizedFilename, fix.newCode());
+                Product requirements:
+                %s
+
+                Required contract:
+                %s
+
+                Inspect templates, JavaScript, CSS, controllers and request/response DTOs before deciding whether edits
+                are needed. Verify DOM selectors, event handlers, fetch URLs, HTTP methods, payload fields, response
+                fields, template variables, redirects and visible error states. Do not add decorative or meaningless
+                network calls. If changes are needed, keep both sides of the contract coherent. Run compile_main after
+                the latest edit and call complete_stage only when the project compiles.
+                """.formatted(data.prd, data.contract);
+
+        boolean completed = workspaceAgentRuntime.run(
+                data,
+                WorkspaceAgentMode.FRONTEND_INTEGRATION,
+                Set.of(),
+                objective,
+                logger);
+        if (!completed) {
+            // 前端审查是增强阶段；失败候选已经由工具运行时回滚，不应阻断后续测试与最终验证。
+            logger.accept("   Frontend integration did not complete; preserved the last compiling production candidate.");
         }
         return data;
+    }
+
+    private boolean hasFrontend(SoftwareStudioWorkflowData data) {
+        return data.codes.stream()
+                .filter(code -> code != null && code.filename() != null)
+                .map(code -> code.filename().replace('\\', '/').toLowerCase())
+                .anyMatch(path -> path.endsWith(".html") || path.endsWith(".js") || path.endsWith(".css"));
     }
 }

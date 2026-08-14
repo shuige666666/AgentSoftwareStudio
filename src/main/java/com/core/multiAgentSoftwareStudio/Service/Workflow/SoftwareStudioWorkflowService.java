@@ -4,11 +4,11 @@ import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
+import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRunResult;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Repair.ToolDrivenRepairService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ArchitectureNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.BatchPlanNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.BatchValidationNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ContractNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.FrontendReviewNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PersistenceNodeService;
@@ -32,7 +32,6 @@ public class SoftwareStudioWorkflowService {
     private final SlicePlanNodeService slicePlanNodeService;
     private final BatchPlanNodeService batchPlanNodeService;
     private final BatchGenerationService batchGenerationService;
-    private final BatchValidationNodeService batchValidationNodeService;
     private final FrontendReviewNodeService frontendReviewNodeService;
     private final PersistenceNodeService persistenceNodeService;
     private final TestGenerationNodeService testGenerationNodeService;
@@ -47,7 +46,6 @@ public class SoftwareStudioWorkflowService {
             SlicePlanNodeService slicePlanNodeService,
             BatchPlanNodeService batchPlanNodeService,
             BatchGenerationService batchGenerationService,
-            BatchValidationNodeService batchValidationNodeService,
             FrontendReviewNodeService frontendReviewNodeService,
             PersistenceNodeService persistenceNodeService,
             TestGenerationNodeService testGenerationNodeService,
@@ -60,7 +58,6 @@ public class SoftwareStudioWorkflowService {
         this.slicePlanNodeService = slicePlanNodeService;
         this.batchPlanNodeService = batchPlanNodeService;
         this.batchGenerationService = batchGenerationService;
-        this.batchValidationNodeService = batchValidationNodeService;
         this.frontendReviewNodeService = frontendReviewNodeService;
         this.persistenceNodeService = persistenceNodeService;
         this.testGenerationNodeService = testGenerationNodeService;
@@ -91,23 +88,30 @@ public class SoftwareStudioWorkflowService {
             data = slicePlanNodeService.execute(data, logger);
             // 编译、测试和契约共享同一份三加一额度，不能再按切片复制重试次数。
             data.repairBudget = RepairBudget.forToolDrivenProject();
+            logger.accept("   Tool repair budget: " + data.repairBudget.maxLlmRepairs()
+                    + " calls, with the fourth available only after verified progress.");
             data = batchPlanNodeService.execute(data, logger);
             data = persistenceNodeService.initializeWorkspace(data, logger);
 
-            while (data.hasMoreBatches()) {
-                batchGenerationService.generateBatch(data, logger);
-                data = batchValidationNodeService.execute(data, logger);
-            }
-
-            // 所有生产文件都已存在后再做一次全项目前端一致性审查。
+            // 生产代码共享同一真实工作区和工具会话，完整实现后再以编译结果验收。
+            WorkspaceAgentRunResult development = batchGenerationService.generateProject(data, logger);
             data.finalVerificationStarted = true;
-            data = frontendReviewNodeService.execute(data, logger);
-            data = persistenceNodeService.persistWholeProject(data, logger);
 
-            if (toolDrivenRepairService.compileAndRepair(data, logger)) {
-                data = testGenerationNodeService.execute(data, logger);
-                data = persistenceNodeService.persistWholeProject(data, logger);
+            // 即使开发工具会话没有主动 complete，只要保留了候选文件，就交给真实编译和修复接力。
+            if (!data.codes.isEmpty() && toolDrivenRepairService.compileAndRepair(data, logger)) {
+                data = frontendReviewNodeService.execute(data, logger);
+                try {
+                    data = testGenerationNodeService.execute(data, logger);
+                } catch (RuntimeException testAuthorFailure) {
+                    // 测试编写是增强和诊断阶段；即使 Agent 自身异常，也必须保留项目并让真实测试/修复接棒。
+                    logger.accept("   Test author stopped unexpectedly; continuing with outer test/repair: "
+                            + testAuthorFailure.getClass().getSimpleName() + ": "
+                            + String.valueOf(testAuthorFailure.getMessage()));
+                }
                 toolDrivenRepairService.testAndRepair(data, logger);
+            } else if (data.codes.isEmpty()) {
+                logger.accept("Initial development produced no candidate files; skipping compile and repair handoff."
+                        + " Stop reason=" + development.stopReason() + ".");
             }
 
             if (data.success && data.sliceDeliveryPlan != null) {

@@ -32,7 +32,7 @@ class ToolDrivenRepairServiceTest {
     private DockerSandboxService sandboxService;
     private ProjectProfileService profileService;
     private PersistenceNodeService persistenceNodeService;
-    private ProjectRepairService projectRepairService;
+    private WorkspaceRepairService workspaceRepairService;
     private RepairRegressionGuardService regressionGuardService;
     private ToolDrivenRepairService service;
 
@@ -41,7 +41,7 @@ class ToolDrivenRepairServiceTest {
         sandboxService = mock(DockerSandboxService.class);
         profileService = mock(ProjectProfileService.class);
         persistenceNodeService = mock(PersistenceNodeService.class);
-        projectRepairService = mock(ProjectRepairService.class);
+        workspaceRepairService = mock(WorkspaceRepairService.class);
         regressionGuardService = mock(RepairRegressionGuardService.class);
         RunJournalService journalService = mock(RunJournalService.class);
 
@@ -50,7 +50,7 @@ class ToolDrivenRepairServiceTest {
                 new VerificationResultService(),
                 profileService,
                 persistenceNodeService,
-                projectRepairService,
+                workspaceRepairService,
                 new RepairProgressEvaluator(),
                 regressionGuardService,
                 journalService);
@@ -70,7 +70,7 @@ class ToolDrivenRepairServiceTest {
 
         assertTrue(service.compileAndRepair(data, message -> { }));
 
-        verify(projectRepairService, never()).repair(any(), any());
+        verify(workspaceRepairService, never()).repair(any(), any());
     }
 
     @Test
@@ -84,11 +84,11 @@ class ToolDrivenRepairServiceTest {
             current.consumeRepairBudget();
             current.repairCandidateChangedFiles = List.of("src/main/java/com/example/App.java");
             return null;
-        }).when(projectRepairService).repair(any(), any());
+        }).when(workspaceRepairService).repair(any(), any());
 
         assertTrue(service.compileAndRepair(data, message -> { }));
 
-        verify(projectRepairService, times(4)).repair(any(), any());
+        verify(workspaceRepairService, times(4)).repair(any(), any());
         verify(regressionGuardService, times(4)).commitCandidate(data);
     }
 
@@ -102,11 +102,11 @@ class ToolDrivenRepairServiceTest {
             current.consumeRepairBudget();
             current.repairCandidateChangedFiles = List.of("src/main/java/com/example/App.java");
             return null;
-        }).when(projectRepairService).repair(any(), any());
+        }).when(workspaceRepairService).repair(any(), any());
 
         assertFalse(service.compileAndRepair(data, message -> { }));
 
-        verify(projectRepairService, times(1)).repair(any(), any());
+        verify(workspaceRepairService, times(1)).repair(any(), any());
         verify(regressionGuardService).rollbackCandidateWithoutProgress(any(), any(), any());
         assertTrue(data.repairStopRequested);
     }

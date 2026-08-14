@@ -1,0 +1,263 @@
+{
+  "startedAt" : "2026-08-14T04:51:08.787763700Z",
+  "finishedAt" : "2026-08-14T05:00:04.316200200Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash-2026-07-15",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : "qwen3.7-flash-2026-07-15"
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.7-plus",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : "qwen3.7-plus-2026-05-26"
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "ArchitectAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "ContractAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "ProductManagerAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "url-shortener-basic", "poll-system-basic" ],
+    "repetitions" : 1,
+    "repairBudget" : {
+      "policyVersion" : "tool-driven-progress-budget-v4",
+      "maxProjectLlmRepairs" : 4,
+      "extraRepairsBeyondSliceCount" : 0,
+      "maxRepairsPerSlice" : 4,
+      "reservedForFinalVerification" : 0
+    },
+    "gitCommit" : "a99700d4962a999a4a7b85257c6b94e6f7dbcc22",
+    "gitDirty" : true,
+    "workingTreeFingerprint" : "4752c1b3718c858d474069cebee6894dcdfba383976b50d46010be188a4e82ff"
+  },
+  "cases" : [ {
+    "caseId" : "url-shortener-basic",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : null,
+    "elapsedMillis" : 266596,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ ]
+    },
+    "usage" : {
+      "calls" : 11,
+      "successfulCalls" : 11,
+      "failedCalls" : 0,
+      "durationMillis" : 266535,
+      "inputCacheHitTokens" : 0,
+      "inputCacheMissTokens" : 59375,
+      "outputTokens" : 22612,
+      "totalTokens" : 81987,
+      "cacheMetricsAvailable" : false,
+      "finishReasonCounts" : {
+        "stop" : 3,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 8,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      }
+    },
+    "attemptsUsed" : 0,
+    "finalFailureKind" : "UNKNOWN",
+    "validationWarningCount" : 0,
+    "verificationSummary" : {
+      "buildExitCode" : null,
+      "testExitCode" : null,
+      "buildPassed" : false,
+      "testPassed" : false,
+      "testsRun" : 0,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 0,
+      "testDurationMillis" : 0,
+      "primaryFailureKind" : "NONE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 0,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : { },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 0,
+        "acceptedSlices" : 0,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 0,
+        "sliceRepairSafetyLimit" : 0,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 0,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "",
+        "slicePolicyVersion" : "",
+        "declaredProjectType" : "",
+        "effectiveProjectType" : "",
+        "projectProfileId" : ""
+      }
+    },
+    "workflowError" : "IllegalStateException: Tool-driven developer did not produce a compiling project"
+  }, {
+    "caseId" : "poll-system-basic",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : null,
+    "elapsedMillis" : 268727,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ ]
+    },
+    "usage" : {
+      "calls" : 11,
+      "successfulCalls" : 11,
+      "failedCalls" : 0,
+      "durationMillis" : 268696,
+      "inputCacheHitTokens" : 0,
+      "inputCacheMissTokens" : 56949,
+      "outputTokens" : 16811,
+      "totalTokens" : 73760,
+      "cacheMetricsAvailable" : false,
+      "finishReasonCounts" : {
+        "stop" : 3,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 8,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      }
+    },
+    "attemptsUsed" : 0,
+    "finalFailureKind" : "UNKNOWN",
+    "validationWarningCount" : 0,
+    "verificationSummary" : {
+      "buildExitCode" : null,
+      "testExitCode" : null,
+      "buildPassed" : false,
+      "testPassed" : false,
+      "testsRun" : 0,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 0,
+      "testDurationMillis" : 0,
+      "primaryFailureKind" : "NONE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 0,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : { },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 0,
+        "acceptedSlices" : 0,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 0,
+        "sliceRepairSafetyLimit" : 0,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 0,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "",
+        "slicePolicyVersion" : "",
+        "declaredProjectType" : "",
+        "effectiveProjectType" : "",
+        "projectProfileId" : ""
+      }
+    },
+    "workflowError" : "IllegalStateException: Tool-driven developer did not produce a compiling project"
+  } ],
+  "platformSuccessCount" : 0,
+  "independentQualityPassCount" : 0,
+  "falseSuccessCount" : 0,
+  "falseSuccessRate" : null,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-08-14T04-51-08.787763700Z.json"
+}

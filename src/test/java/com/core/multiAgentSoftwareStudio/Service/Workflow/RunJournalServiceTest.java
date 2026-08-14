@@ -68,7 +68,7 @@ class RunJournalServiceTest {
     }
 
     /**
-     * 切片报告应聚合计划数、接受数、首轮通过数和全局修复预算，不保留失败明细。
+     * 当前项目级工具流程按最终接受结果聚合计划数和修复预算，不伪造逐切片首轮通过。
      */
     @Test
     void summarizesVerticalSliceDeliveryAndRepairBudget() {
@@ -86,6 +86,8 @@ class RunJournalServiceTest {
         data.admittedTestFileCount = 3;
         data.acceptedTestFiles.add("src/test/java/com/example/PollTest.java");
         data.acceptedTestFiles.add("src/test/java/com/example/ResultTest.java");
+        data.acceptedSliceIds.add("poll");
+        data.acceptedSliceIds.add("result");
         data.skippedFutureTypeTestCount = 1;
         data.repairRollbackCount = 2;
         data.repeatedRegressionStopCount = 1;
@@ -102,7 +104,7 @@ class RunJournalServiceTest {
 
         assertEquals(2, summary.plannedSlices());
         assertEquals(2, summary.acceptedSlices());
-        assertEquals(1, summary.firstPassAcceptedSlices());
+        assertEquals(0, summary.firstPassAcceptedSlices());
         assertEquals(1, summary.regressionFailures());
         assertEquals(2, summary.repairRollbackCount());
         assertEquals(1, summary.repeatedRegressionStopCount());

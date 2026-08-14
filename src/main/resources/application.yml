@@ -26,6 +26,27 @@ studio:
   ai:
     # 可选：deepseek-direct、alibaba-bailian、generic-openai。只有直连 DeepSeek 时启用专用缓存指标。
     provider: alibaba-bailian
+  agent-runtime:
+    # 单会话安全上限，避免工具反馈历史持续膨胀；0 可显式表示无限制。
+    # 外层修复事务仍遵守“默认 3 次、有真实进展时最多 4 次”的独立预算。
+    implement:
+      max-model-turns: 24
+      max-tool-calls: 72
+    test:
+      max-model-turns: 12
+      max-tool-calls: 36
+    frontend-integration:
+      max-model-turns: 8
+      max-tool-calls: 24
+    repair-implementation:
+      max-model-turns: 16
+      max-tool-calls: 48
+    repair-test:
+      max-model-turns: 16
+      max-tool-calls: 48
+    repair-contract:
+      max-model-turns: 16
+      max-tool-calls: 48
 
 spring:
   ai:

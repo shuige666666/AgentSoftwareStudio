@@ -1,6 +1,5 @@
 package com.core.multiAgentSoftwareStudio.Service.Workspace;
 
-import com.core.multiAgentSoftwareStudio.Model.Repair.CodeFix;
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import org.springframework.stereotype.Service;
@@ -112,69 +111,6 @@ public class WorkspaceService {
 
         } catch (IOException e) {
             throw new RuntimeException("无法保存代码到本地磁盘", e);
-        }
-    }
-
-    /**
-     * 将 DebuggerAgent 或 FrontendReviewAgent 返回的整文件修复结果覆盖到磁盘项目中。
-     */
-    public void applyFixesToDisk(Path projectDir, List<CodeFix> fixes) {
-        applyFixesToDisk(projectDir, fixes, System.out::println);
-    }
-
-    /**
-     * 将 DebuggerAgent 或 FrontendReviewAgent 返回的整文件修复结果覆盖到磁盘项目中，并通过统一日志回调输出过程信息。
-     */
-    public void applyFixesToDisk(Path projectDir, List<CodeFix> fixes, Consumer<String> logger) {
-        Consumer<String> safeLogger = logger == null ? message -> {
-        } : logger;
-        try {
-            // 1. 修复结果可能为空；这里统一转为空列表，避免外层流程因为空集合中断。
-            List<CodeFix> safeFixes = fixes == null ? List.of() : fixes;
-            for (int i = 0; i < safeFixes.size(); i++) {
-                CodeFix fix = safeFixes.get(i);
-                if (fix == null) {
-                    safeLogger.accept("   跳过空修复记录: index=" + i);
-                    continue;
-                }
-
-                // 修复接口采用整文件覆盖语义；空白结果只能视为无效响应，不能清空现有项目文件。
-                if (fix.newCode() == null || fix.newCode().isBlank()) {
-                    safeLogger.accept("   跳过空白整文件修复: " + fix.filename());
-                    continue;
-                }
-
-                String normalizedFilename = sourceCodePathService.normalizeGeneratedFilename(fix.filename(), fix.newCode());
-                Path relativePath = resolveSmartPath(normalizedFilename, fix.newCode());
-                Path exactPath = projectDir.resolve(relativePath).normalize();
-                String pureFileName = exactPath.getFileName().toString();
-
-                Path existingFilePath = findExistingFile(projectDir, pureFileName);
-                Path targetPath;
-
-                // 2. 优先覆盖精确路径；如果模型只返回类名，则回退到项目中同名文件的位置。
-                if (Files.exists(exactPath)) {
-                    targetPath = exactPath;
-                } else if (existingFilePath != null) {
-                    targetPath = existingFilePath;
-                } else {
-                    targetPath = exactPath;
-                }
-
-                // 3. 修复阶段同样限制写入范围，避免错误路径覆盖项目目录外的文件。
-                if (!targetPath.normalize().startsWith(projectDir.normalize())) {
-                    throw new IllegalArgumentException("Fix target path escapes project directory: " + targetPath);
-                }
-
-                if (targetPath.getParent() != null) {
-                    Files.createDirectories(targetPath.getParent());
-                }
-
-                Files.writeString(targetPath, fix.newCode() == null ? "" : fix.newCode(), StandardCharsets.UTF_8);
-                safeLogger.accept("   🔧 已覆盖修复文件: " + targetPath + " (AI原输出名: " + fix.filename() + ")");
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("应用代码修复失败", e);
         }
     }
 
