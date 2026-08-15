@@ -246,7 +246,10 @@ public class WorkspaceService {
                 }
 
                 String pathStr = path.toString().replace('\\', '/');
-                if (pathStr.contains("/target/") || pathStr.contains("/.git/") || pathStr.contains("/.idea/")) {
+                if (pathStr.contains("/target/")
+                        || pathStr.contains("/.git/")
+                        || pathStr.contains("/.idea/")
+                        || pathStr.contains("/" + PlanningArtifactPersistenceService.METADATA_DIRECTORY + "/")) {
                     return false;
                 }
 

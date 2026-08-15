@@ -5,6 +5,7 @@ import com.core.multiAgentSoftwareStudio.Service.Contract.ProjectProfileService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
+import com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +37,24 @@ class WorkspaceToolRegistryTest {
 
     @TempDir
     Path projectRoot;
+
+    @Test
+    void planningMetadataIsExcludedFromAgentFileListingAndSnapshots() throws Exception {
+        Path metadata = projectRoot.resolve(PlanningArtifactPersistenceService.METADATA_DIRECTORY);
+        Files.createDirectories(metadata);
+        Files.writeString(metadata.resolve("contract.json"), "{\"internal\":true}", StandardCharsets.UTF_8);
+        Path source = projectRoot.resolve("src/main/java/demo/App.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class App {}", StandardCharsets.UTF_8);
+        WorkspaceAgentSession session = session(WorkspaceAgentMode.IMPLEMENT, Map.of());
+
+        String listed = registry.execute("list_files", "{}", session);
+        Map<String, String> snapshot = registry.snapshotWorkspace(projectRoot);
+
+        assertFalse(listed.contains(".software-studio"));
+        assertFalse(snapshot.keySet().stream().anyMatch(path -> path.startsWith(".software-studio/")));
+        assertTrue(snapshot.containsKey("src/main/java/demo/App.java"));
+    }
 
     @Test
     void rejectsStaleEditAndPreservesCurrentFile() throws Exception {

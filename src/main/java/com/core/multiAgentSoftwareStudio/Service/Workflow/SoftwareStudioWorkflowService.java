@@ -20,6 +20,12 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.function.Consumer;
 
+import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService.PlanningStage.ARCHITECTURE;
+import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService.PlanningStage.CONTRACT;
+import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService.PlanningStage.GENERATION_PLAN;
+import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService.PlanningStage.REQUIREMENT;
+import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService.PlanningStage.SLICE_PLAN;
+
 /**
  * 以最终产物质量为中心编排完整生成、真实编译修复、测试生成和测试修复流程。
  */
@@ -81,17 +87,22 @@ public class SoftwareStudioWorkflowService {
         llmUsageMetricsService.beginTask();
         try {
             data = requirementNodeService.execute(data, logger);
+            data = persistenceNodeService.initializeWorkspace(data, logger);
+            data = persistenceNodeService.persistPlanningArtifacts(data, REQUIREMENT, logger);
             data = architectureNodeService.execute(data, logger);
+            data = persistenceNodeService.persistPlanningArtifacts(data, ARCHITECTURE, logger);
             data = contractNodeService.execute(data, logger);
+            data = persistenceNodeService.persistPlanningArtifacts(data, CONTRACT, logger);
 
             // 切片仅用于业务上下文、预算估算和报告，不再作为中间验收及修复边界。
             data = slicePlanNodeService.execute(data, logger);
+            data = persistenceNodeService.persistPlanningArtifacts(data, SLICE_PLAN, logger);
             // 编译、测试和契约共享同一份三加一额度，不能再按切片复制重试次数。
             data.repairBudget = RepairBudget.forToolDrivenProject();
             logger.accept("   Tool repair budget: " + data.repairBudget.maxLlmRepairs()
                     + " calls, with the fourth available only after verified progress.");
             data = batchPlanNodeService.execute(data, logger);
-            data = persistenceNodeService.initializeWorkspace(data, logger);
+            data = persistenceNodeService.persistPlanningArtifacts(data, GENERATION_PLAN, logger);
 
             // 生产代码共享同一真实工作区和工具会话，完整实现后再以编译结果验收。
             WorkspaceAgentRunResult development = batchGenerationService.generateProject(data, logger);
@@ -129,6 +140,7 @@ public class SoftwareStudioWorkflowService {
                 logger.accept("Project generation finished without a clean pass after "
                         + used + "/" + limit + " LLM repair calls.");
             }
+            persistenceNodeService.persistRunSummary(data, runJournalService.summarize(data), logger);
             return result(data);
         } finally {
             logger.accept(llmUsageMetricsService.formatSummary());

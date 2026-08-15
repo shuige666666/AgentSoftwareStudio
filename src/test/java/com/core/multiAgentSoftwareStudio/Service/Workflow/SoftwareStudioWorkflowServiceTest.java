@@ -140,6 +140,8 @@ class SoftwareStudioWorkflowServiceTest {
             data.projectPath = "target/quality-first-workflow-test";
             return data;
         });
+        when(persistence.persistPlanningArtifacts(any(), any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         when(generation.generateProject(any(), any())).thenAnswer(invocation -> {
             SoftwareStudioWorkflowData data = invocation.getArgument(0);
             data.codes.add(new SourceCode("pom.xml", "xml", "<project/>"));

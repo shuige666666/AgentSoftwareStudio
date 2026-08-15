@@ -6,6 +6,7 @@ import com.core.multiAgentSoftwareStudio.Model.Tool.ToolDefinition;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
 import com.core.multiAgentSoftwareStudio.Service.Contract.ProjectProfileService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
+import com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -524,6 +525,7 @@ public class WorkspaceToolRegistry {
         return !normalized.startsWith("target/")
                 && !normalized.startsWith(".git/")
                 && !normalized.startsWith(".idea/")
+                && !normalized.startsWith(PlanningArtifactPersistenceService.METADATA_DIRECTORY + "/")
                 && !normalized.endsWith(".class")
                 && !normalized.endsWith(".jar")
                 && !normalized.endsWith(".png");

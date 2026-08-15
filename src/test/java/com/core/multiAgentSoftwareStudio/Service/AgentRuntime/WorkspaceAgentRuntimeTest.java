@@ -1,6 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Service.AgentRuntime;
 
 import com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentLimitsConfig;
+import com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentAuditConfig;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolCall;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolDefinition;
@@ -9,6 +10,7 @@ import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -57,12 +59,7 @@ class WorkspaceAgentRuntimeTest {
             return "{\"files\":[\"src/main/java/demo/App.java\"]}";
         });
 
-        WorkspaceAgentRuntime runtime = new WorkspaceAgentRuntime(
-                model,
-                registry,
-                new WorkspaceService(new SourceCodePathService()),
-                new LlmUsageMetricsService(),
-                new WorkspaceAgentLimitsConfig());
+        WorkspaceAgentRuntime runtime = runtime(model, registry);
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
         data.projectPath = projectRoot.toString();
 
@@ -92,9 +89,7 @@ class WorkspaceAgentRuntimeTest {
             }
             return "{}";
         });
-        WorkspaceAgentRuntime runtime = new WorkspaceAgentRuntime(
-                model, registry, new WorkspaceService(new SourceCodePathService()),
-                new LlmUsageMetricsService(), new WorkspaceAgentLimitsConfig());
+        WorkspaceAgentRuntime runtime = runtime(model, registry);
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
         data.projectPath = projectRoot.toString();
 
@@ -128,9 +123,7 @@ class WorkspaceAgentRuntimeTest {
             }
             return "{}";
         });
-        WorkspaceAgentRuntime runtime = new WorkspaceAgentRuntime(
-                model, registry, new WorkspaceService(new SourceCodePathService()),
-                new LlmUsageMetricsService(), new WorkspaceAgentLimitsConfig());
+        WorkspaceAgentRuntime runtime = runtime(model, registry);
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
         data.projectPath = projectRoot.toString();
 
@@ -165,9 +158,7 @@ class WorkspaceAgentRuntimeTest {
             }
             return "{}";
         });
-        WorkspaceAgentRuntime runtime = new WorkspaceAgentRuntime(
-                model, registry, new WorkspaceService(new SourceCodePathService()),
-                new LlmUsageMetricsService(), new WorkspaceAgentLimitsConfig());
+        WorkspaceAgentRuntime runtime = runtime(model, registry);
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
         data.projectPath = projectRoot.toString();
 
@@ -198,9 +189,7 @@ class WorkspaceAgentRuntimeTest {
             }
             return "{}";
         });
-        WorkspaceAgentRuntime runtime = new WorkspaceAgentRuntime(
-                model, registry, new WorkspaceService(new SourceCodePathService()),
-                new LlmUsageMetricsService(), new WorkspaceAgentLimitsConfig());
+        WorkspaceAgentRuntime runtime = runtime(model, registry);
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
         data.projectPath = projectRoot.toString();
 
@@ -215,6 +204,18 @@ class WorkspaceAgentRuntimeTest {
         return new ToolModelResponse(
                 ToolChatMessage.assistant("", List.of(new ToolCall(id, name, arguments))),
                 "tool_calls");
+    }
+
+    private WorkspaceAgentRuntime runtime(ToolCallingModel model, WorkspaceToolRegistry registry) {
+        WorkspaceAgentAuditConfig auditConfig = new WorkspaceAgentAuditConfig();
+        auditConfig.setEnabled(false);
+        return new WorkspaceAgentRuntime(
+                model,
+                registry,
+                new WorkspaceService(new SourceCodePathService()),
+                new LlmUsageMetricsService(),
+                new WorkspaceAgentLimitsConfig(),
+                new ToolCallAuditService(new ObjectMapper(), auditConfig));
     }
 
     private static final class RecordingToolModel implements ToolCallingModel {
