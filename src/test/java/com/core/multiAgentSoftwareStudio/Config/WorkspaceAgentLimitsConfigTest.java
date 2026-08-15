@@ -28,6 +28,22 @@ class WorkspaceAgentLimitsConfigTest {
         assertThrows(IllegalArgumentException.class, () -> limit.setMaxToolCalls(-1));
     }
 
+    @Test
+    void exposesDeterministicStagnationAndContextDefaults() {
+        WorkspaceAgentLimitsConfig config = new WorkspaceAgentLimitsConfig();
+
+        assertEquals(3, config.getStagnation().getMaxIdenticalToolCalls());
+        assertEquals(8, config.getStagnation().getMaxCallsWithoutNewEvidence());
+        assertEquals(2, config.getStagnation().getMaxRepeatedVerificationFailuresAfterEdit());
+        assertEquals(6, config.getContext().getCompactAfterModelTurns());
+        assertEquals(3, config.getContext().getRetainedModelTurns());
+        assertEquals(6_000, config.getContext().getMaxLatestToolResultChars());
+        assertThrows(IllegalArgumentException.class,
+                () -> config.getStagnation().setMaxIdenticalToolCalls(0));
+        assertThrows(IllegalArgumentException.class,
+                () -> config.getContext().setRetainedModelTurns(0));
+    }
+
     private void assertLimit(
             WorkspaceAgentLimitsConfig config,
             WorkspaceAgentMode mode,

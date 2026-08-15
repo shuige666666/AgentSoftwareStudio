@@ -6,6 +6,7 @@ import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairDecision;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairTarget;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationResult;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentMode;
+import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRunResult;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRuntime;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.FailureTriageService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.RunJournalService;
@@ -30,14 +31,17 @@ public class WorkspaceRepairService {
     private final FailureTriageService failureTriageService;
     private final WorkspaceAgentRuntime workspaceAgentRuntime;
     private final RunJournalService runJournalService;
+    private final RepairRegressionGuardService regressionGuardService;
 
     public WorkspaceRepairService(
             FailureTriageService failureTriageService,
             WorkspaceAgentRuntime workspaceAgentRuntime,
-            RunJournalService runJournalService) {
+            RunJournalService runJournalService,
+            RepairRegressionGuardService regressionGuardService) {
         this.failureTriageService = failureTriageService;
         this.workspaceAgentRuntime = workspaceAgentRuntime;
         this.runJournalService = runJournalService;
+        this.regressionGuardService = regressionGuardService;
     }
 
     /**
@@ -60,25 +64,41 @@ public class WorkspaceRepairService {
         captureBaseline(data);
         WorkspaceAgentMode mode = modeFor(decision.target());
         String objective = repairObjective(data, decision);
-        boolean completed = workspaceAgentRuntime.run(data, mode, Set.of(), objective, logger);
-        boolean changed = completed && data.repairCandidateChangedFiles != null
+        WorkspaceAgentRunResult result = workspaceAgentRuntime.runDetailed(
+                data, mode, Set.of(), objective, logger);
+        boolean changed = data.repairCandidateChangedFiles != null
                 && !data.repairCandidateChangedFiles.isEmpty();
 
         if (!changed) {
             data.noChangeStopCount++;
             data.repairStopRequested = true;
             data.shouldFix = false;
-            data.markRepairStopped(completed ? "NO_CHANGE" : "TOOL_SESSION_INCOMPLETE");
+            data.markRepairStopped(result.completed() ? "NO_CHANGE" : "TOOL_SESSION_NO_CANDIDATE");
             clearBaseline(data);
+        } else if (requiresProductionChange(data, decision)
+                && changesOnlyTests(data.repairCandidateChangedFiles)) {
+            // 生产失败不能靠改写测试掩盖；恢复基线并结束本轮，保留清晰停止原因。
+            regressionGuardService.rollbackCandidateWithoutProgress(
+                    data, logger, "Production-owned failure produced a test-only candidate.");
+            data.repairStopRequested = true;
+            data.shouldFix = false;
+            data.markRepairStopped("PRODUCTION_FAILURE_TEST_ONLY_CHANGE");
+            changed = false;
         } else {
+            // 即使工具会话因停滞或轮次上限退出，也把真实改动交给外层编译和测试判定价值。
             invalidateVerificationEvidence(data);
+            if (!result.completed()) {
+                logger.accept("   Tool session ended with " + result.stopReason()
+                        + ", but its candidate will still receive outer verification.");
+            }
         }
         runJournalService.recordRepair(
                 data,
                 decision,
                 changed,
                 changed ? List.copyOf(data.repairCandidateChangedFiles) : List.of(),
-                changed ? "工具修复已修改并局部验证真实文件。" : "工具修复未形成可验证候选。" );
+                changed ? "工具修复已形成候选，等待外层真实验证；会话停止原因=" + result.stopReason()
+                        : "工具修复未形成可接受候选；会话停止原因=" + result.stopReason());
     }
 
     private WorkspaceAgentMode modeFor(RepairTarget target) {
@@ -98,7 +118,7 @@ public class WorkspaceRepairService {
             default -> "Run compile_main after every edit set and use its newest compiler output.";
         };
         return """
-                Repair the current project failure. Failure ownership: %s.
+                Repair the current project failure. Initial ownership hypothesis: %s.
 
                 Real failing command and output:
                 %s
@@ -109,7 +129,9 @@ public class WorkspaceRepairService {
                 Required contract:
                 %s
 
-                Search and read the actual owner files before editing. Treat the tool output as authoritative; do not
+                The ownership above is a routing hypothesis, not a directory restriction. Inspect both production and
+                test code when the evidence crosses that boundary. Search and read the actual owner files before editing.
+                Treat the tool output as authoritative; do not
                 guess APIs, DTO fields, constructors, routes or test expectations. Make the smallest coherent repair
                 across the owning files. Do not weaken legitimate tests or remove required behavior. %s Call
                 complete_stage only after the latest change has passed the required real verification.
@@ -119,6 +141,28 @@ public class WorkspaceRepairService {
                 data.prd,
                 data.contract,
                 requiredVerification);
+    }
+
+    private boolean requiresProductionChange(SoftwareStudioWorkflowData data, RepairDecision decision) {
+        if (decision.target() != RepairTarget.TESTS) {
+            return true;
+        }
+        FailureKind kind = data.pendingFailureKind == null ? FailureKind.UNKNOWN : data.pendingFailureKind;
+        if (kind == FailureKind.MAIN_COMPILE || kind == FailureKind.SPRING_CONTEXT
+                || kind == FailureKind.IMPLEMENTATION || kind == FailureKind.CONTRACT
+                || kind == FailureKind.BUILD_PROFILE) {
+            return true;
+        }
+        String failure = data.pendingFixLog == null ? "" : data.pendingFixLog.toLowerCase();
+        return (failure.contains("expected:<400>") || failure.contains("expected: 400"))
+                && (failure.contains("but was:<500>") || failure.contains("actual: 500"));
+    }
+
+    private boolean changesOnlyTests(List<String> changedFiles) {
+        return changedFiles != null && !changedFiles.isEmpty()
+                && changedFiles.stream()
+                .map(path -> path == null ? "" : path.replace('\\', '/'))
+                .allMatch(path -> path.startsWith("src/test/"));
     }
 
     private String boundedFailureContext(String failure) {

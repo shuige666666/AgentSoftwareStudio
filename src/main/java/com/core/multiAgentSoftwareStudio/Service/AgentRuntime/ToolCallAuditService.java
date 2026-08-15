@@ -125,6 +125,23 @@ public class ToolCallAuditService {
     }
 
     /**
+     * 记录确定性上下文压缩点，便于区分模型遗忘与平台主动裁剪旧历史。
+     */
+    public void recordContextCompacted(
+            ToolCallAuditSession auditSession,
+            WorkspaceAgentSession workspaceSession,
+            WorkspaceAgentContextCompactor.Result result) {
+        if (result == null || !result.compacted()) {
+            return;
+        }
+        ObjectNode event = baseEvent(auditSession, workspaceSession, "CONTEXT_COMPACTED");
+        event.put("modelTurn", workspaceSession.modelTurns());
+        event.put("messagesBefore", result.messagesBefore());
+        event.put("messagesAfter", result.messagesAfter());
+        append(auditSession, workspaceSession, event);
+    }
+
+    /**
      * 会话所有退出路径统一写入停止原因和真实变更文件，便于事后重建时间线。
      */
     public void finishSession(

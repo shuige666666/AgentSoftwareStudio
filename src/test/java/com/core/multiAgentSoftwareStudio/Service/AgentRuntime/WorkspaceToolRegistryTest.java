@@ -92,6 +92,24 @@ class WorkspaceToolRegistryTest {
     }
 
     @Test
+    void repairTestAgentMayModifyProductionSourceWhenEvidenceCrossesOwnershipBoundary() throws Exception {
+        Path source = projectRoot.resolve("src/main/java/demo/App.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class App {}", StandardCharsets.UTF_8);
+        WorkspaceAgentSession session = session(WorkspaceAgentMode.REPAIR_TEST, Map.of(
+                "src/main/java/demo/App.java", "class App {}"));
+        String hash = readHash(session, "src/main/java/demo/App.java");
+
+        String result = registry.execute("apply_edits", """
+                {"edits":[{"path":"src/main/java/demo/App.java","expectedHash":"%s",
+                "oldText":"class App {}","newText":"class App { int value; }"}]}
+                """.formatted(hash), session);
+
+        assertTrue(result.contains("changedFiles"));
+        assertEquals("class App { int value; }", Files.readString(source, StandardCharsets.UTF_8));
+    }
+
+    @Test
     void completionRequiresVerificationAfterLatestWrite() throws Exception {
         WorkspaceAgentSession session = session(WorkspaceAgentMode.IMPLEMENT, Map.of());
         String missingHash = readHash(session, "src/main/java/demo/App.java");

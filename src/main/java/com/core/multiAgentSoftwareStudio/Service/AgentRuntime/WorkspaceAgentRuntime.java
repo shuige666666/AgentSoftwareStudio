@@ -46,7 +46,7 @@ public class WorkspaceAgentRuntime {
     }
 
     /**
-     * 运行一次工具会话并返回是否完成；初始开发保留失败候选，其余阶段失败时事务回滚。
+     * 运行一次工具会话并返回是否完成；未完成候选是否有价值由外层真实验证决定。
      */
     public boolean run(
             SoftwareStudioWorkflowData data,
@@ -58,7 +58,7 @@ public class WorkspaceAgentRuntime {
     }
 
     /**
-     * 执行工具会话并返回结构化停止证据；初始开发和测试编写保留可交接候选，修复会话仍事务回滚。
+     * 执行工具会话并返回结构化停止证据；除可选前端增强外，未完成的磁盘候选也可交给外层验证。
      */
     public WorkspaceAgentRunResult runDetailed(
             SoftwareStudioWorkflowData data,
@@ -86,6 +86,10 @@ public class WorkspaceAgentRuntime {
                 session, systemPrompt, objective, maxModelTurns, maxToolCalls);
         String lastToolName = "";
         String lastToolResult = "";
+        WorkspaceAgentStagnationTracker stagnationTracker =
+                new WorkspaceAgentStagnationTracker(limitsConfig.getStagnation());
+        WorkspaceAgentContextCompactor contextCompactor =
+                new WorkspaceAgentContextCompactor(limitsConfig.getContext());
 
         try {
             for (int turn = 1; maxModelTurns <= 0 || turn <= maxModelTurns; turn++) {
@@ -151,6 +155,20 @@ public class WorkspaceAgentRuntime {
                         return finishFailure(session, auditSession, WorkspaceAgentStopReason.REPORTED_BLOCKER,
                                 lastToolName, lastToolResult, session.completionSummary());
                     }
+                    WorkspaceAgentStagnationTracker.Decision stagnation =
+                            stagnationTracker.observe(call, result, session);
+                    if (stagnation.stop()) {
+                        logger.accept("   Tool Agent stopped after detecting stagnation: " + stagnation.reason() + ".");
+                        return finishFailure(session, auditSession, WorkspaceAgentStopReason.STAGNATED,
+                                lastToolName, lastToolResult, stagnation.reason());
+                    }
+                }
+                WorkspaceAgentContextCompactor.Result compaction =
+                        contextCompactor.compact(session, lastToolName, lastToolResult);
+                if (compaction.compacted()) {
+                    logger.accept("   Tool context compacted from " + compaction.messagesBefore()
+                            + " to " + compaction.messagesAfter() + " messages.");
+                    auditService.recordContextCompacted(auditSession, session, compaction);
                 }
             }
         } catch (RuntimeException e) {
@@ -166,7 +184,7 @@ public class WorkspaceAgentRuntime {
     }
 
     /**
-     * 初始开发和测试编写属于可增量交接阶段，未完成时也保存磁盘检查点；前端增强及修复会话失败时回滚。
+     * 未完成不等于无价值：开发、测试和修复均同步磁盘候选，只有可选前端增强自动恢复基线。
      */
     private WorkspaceAgentRunResult finishFailure(
             WorkspaceAgentSession session,
@@ -176,11 +194,10 @@ public class WorkspaceAgentRuntime {
             String lastToolResult,
             String message) {
         List<String> changedFiles = toolRegistry.actualChangedFiles(session);
-        if (session.mode() == WorkspaceAgentMode.IMPLEMENT || session.mode() == WorkspaceAgentMode.TEST) {
+        if (preservesIncompleteCandidate(session.mode())) {
             synchronizeCandidate(session);
-            session.logger().accept(session.mode() == WorkspaceAgentMode.IMPLEMENT
-                    ? "   Initial development candidate preserved for outer compile/repair handoff."
-                    : "   Test-author checkpoint preserved for outer test/repair handoff.");
+            session.logger().accept("   Incomplete candidate preserved for outer verification: "
+                    + session.mode() + ".");
         } else {
             toolRegistry.restoreBaseline(session);
         }
@@ -194,6 +211,10 @@ public class WorkspaceAgentRuntime {
                 lastToolName,
                 lastToolResult,
                 message);
+    }
+
+    private boolean preservesIncompleteCandidate(WorkspaceAgentMode mode) {
+        return mode != WorkspaceAgentMode.FRONTEND_INTEGRATION;
     }
 
     private List<String> synchronizeCandidate(WorkspaceAgentSession session) {

@@ -352,11 +352,11 @@ public class WorkspaceToolRegistry {
         boolean pathAllowed = session.allowedWritePaths().isEmpty()
                 || session.allowedWritePaths().stream().map(this::normalizeText).anyMatch(normalized::equals);
         boolean scopeAllowed = switch (session.mode()) {
-            case TEST, REPAIR_TEST -> normalized.startsWith("src/test/");
+            case TEST -> normalized.startsWith("src/test/");
             case IMPLEMENT -> pathAllowed && (normalized.startsWith("src/main/") || normalized.equals("pom.xml"));
             case FRONTEND_INTEGRATION -> normalized.startsWith("src/main/") && pathAllowed;
-            case REPAIR_IMPLEMENTATION -> normalized.startsWith("src/main/") || normalized.equals("pom.xml");
-            case REPAIR_CONTRACT -> normalized.startsWith("src/main/") || normalized.equals("pom.xml");
+            case REPAIR_IMPLEMENTATION, REPAIR_TEST, REPAIR_CONTRACT ->
+                    normalized.startsWith("src/") || normalized.equals("pom.xml");
         };
         if (!scopeAllowed) {
             throw new IllegalArgumentException("Write is outside the current Agent scope: " + path);

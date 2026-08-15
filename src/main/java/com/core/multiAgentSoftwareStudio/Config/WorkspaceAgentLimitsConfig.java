@@ -17,6 +17,8 @@ public class WorkspaceAgentLimitsConfig {
     private SessionLimit repairImplementation = new SessionLimit(16, 48);
     private SessionLimit repairTest = new SessionLimit(16, 48);
     private SessionLimit repairContract = new SessionLimit(16, 48);
+    private StagnationPolicy stagnation = new StagnationPolicy();
+    private ContextPolicy context = new ContextPolicy();
 
     public SessionLimit forMode(WorkspaceAgentMode mode) {
         return switch (mode) {
@@ -41,6 +43,10 @@ public class WorkspaceAgentLimitsConfig {
     public void setRepairTest(SessionLimit repairTest) { if (repairTest != null) this.repairTest = repairTest; }
     public SessionLimit getRepairContract() { return repairContract; }
     public void setRepairContract(SessionLimit repairContract) { if (repairContract != null) this.repairContract = repairContract; }
+    public StagnationPolicy getStagnation() { return stagnation; }
+    public void setStagnation(StagnationPolicy stagnation) { if (stagnation != null) this.stagnation = stagnation; }
+    public ContextPolicy getContext() { return context; }
+    public void setContext(ContextPolicy context) { if (context != null) this.context = context; }
 
     public static class SessionLimit {
         private int maxModelTurns;
@@ -65,5 +71,46 @@ public class WorkspaceAgentLimitsConfig {
             }
             return value;
         }
+    }
+
+    /**
+     * 控制单个工具会话中的无效重复，阈值只负责提前交接候选，不直接判定候选代码失败。
+     */
+    public static class StagnationPolicy {
+        private int maxIdenticalToolCalls = 3;
+        private int maxCallsWithoutNewEvidence = 8;
+        private int maxRepeatedVerificationFailuresAfterEdit = 2;
+
+        public int getMaxIdenticalToolCalls() { return maxIdenticalToolCalls; }
+        public void setMaxIdenticalToolCalls(int value) { this.maxIdenticalToolCalls = requirePositive(value); }
+        public int getMaxCallsWithoutNewEvidence() { return maxCallsWithoutNewEvidence; }
+        public void setMaxCallsWithoutNewEvidence(int value) { this.maxCallsWithoutNewEvidence = requirePositive(value); }
+        public int getMaxRepeatedVerificationFailuresAfterEdit() { return maxRepeatedVerificationFailuresAfterEdit; }
+        public void setMaxRepeatedVerificationFailuresAfterEdit(int value) {
+            this.maxRepeatedVerificationFailuresAfterEdit = requirePositive(value);
+        }
+    }
+
+    /**
+     * 控制发送给模型的历史长度，保留原始目标、最近工具证据和最近若干完整模型轮次。
+     */
+    public static class ContextPolicy {
+        private int compactAfterModelTurns = 6;
+        private int retainedModelTurns = 3;
+        private int maxLatestToolResultChars = 6_000;
+
+        public int getCompactAfterModelTurns() { return compactAfterModelTurns; }
+        public void setCompactAfterModelTurns(int value) { this.compactAfterModelTurns = requirePositive(value); }
+        public int getRetainedModelTurns() { return retainedModelTurns; }
+        public void setRetainedModelTurns(int value) { this.retainedModelTurns = requirePositive(value); }
+        public int getMaxLatestToolResultChars() { return maxLatestToolResultChars; }
+        public void setMaxLatestToolResultChars(int value) { this.maxLatestToolResultChars = requirePositive(value); }
+    }
+
+    private static int requirePositive(int value) {
+        if (value <= 0) {
+            throw new IllegalArgumentException("Workspace Agent policy values must be positive");
+        }
+        return value;
     }
 }

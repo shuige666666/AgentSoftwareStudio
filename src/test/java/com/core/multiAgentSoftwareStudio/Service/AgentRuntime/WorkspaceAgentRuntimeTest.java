@@ -75,7 +75,7 @@ class WorkspaceAgentRuntimeTest {
     void defaultImplementationSessionCanContinueBeyondEightModelTurns() throws Exception {
         List<ToolModelResponse> responses = new ArrayList<>();
         for (int index = 1; index <= 9; index++) {
-            responses.add(response("call-" + index, "list_files", "{}"));
+            responses.add(response("call-" + index, "list_files", "{\"path\":\"src/" + index + "\"}"));
         }
         responses.add(response("call-10", "complete_stage", "{\"summary\":\"verified\"}"));
         RecordingToolModel model = new RecordingToolModel(responses);
@@ -87,7 +87,7 @@ class WorkspaceAgentRuntimeTest {
             if ("complete_stage".equals(invocation.getArgument(0))) {
                 session.complete("verified");
             }
-            return "{}";
+            return invocation.getArgument(1);
         });
         WorkspaceAgentRuntime runtime = runtime(model, registry);
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
@@ -175,7 +175,7 @@ class WorkspaceAgentRuntimeTest {
     void defaultRepairSessionCanContinueBeyondTheFormerFourTurnLimit() {
         List<ToolModelResponse> responses = new ArrayList<>();
         for (int index = 1; index <= 6; index++) {
-            responses.add(response("call-" + index, "list_files", "{}"));
+            responses.add(response("call-" + index, "list_files", "{\"path\":\"src/" + index + "\"}"));
         }
         responses.add(response("call-7", "complete_stage", "{\"summary\":\"verified\"}"));
         RecordingToolModel model = new RecordingToolModel(responses);
@@ -187,7 +187,7 @@ class WorkspaceAgentRuntimeTest {
             if ("complete_stage".equals(invocation.getArgument(0))) {
                 session.complete("verified");
             }
-            return "{}";
+            return invocation.getArgument(1);
         });
         WorkspaceAgentRuntime runtime = runtime(model, registry);
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");

@@ -78,6 +78,16 @@ studio:
     repair-contract:
       max-model-turns: 16
       max-tool-calls: 48
+    stagnation:
+      # 同一写入版本反复执行相同工具，或反复得到相同证据时提前交给外层验证。
+      max-identical-tool-calls: 3
+      max-calls-without-new-evidence: 8
+      max-repeated-verification-failures-after-edit: 2
+    context:
+      # 保留原始目标与最近三轮完整工具交互，较旧证据压缩为确定性摘要。
+      compact-after-model-turns: 6
+      retained-model-turns: 3
+      max-latest-tool-result-chars: 6000
     audit:
       # 每次工具指令和真实结果按 JSONL 立即落盘，日志目录与候选项目分离。
       enabled: true
