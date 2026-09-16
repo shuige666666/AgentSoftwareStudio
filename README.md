@@ -26,3 +26,7 @@ server:
 
 
 前端直接访问：http://localhost:8080/stream_chat.html 即可，为其适配了一个流式接口。
+
+## 项目文档
+
+当前代码说明、重构方案和历史记录的入口见[文档导航](./文档/README.md)。

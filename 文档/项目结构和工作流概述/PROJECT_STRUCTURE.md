@@ -1,6 +1,8 @@
 # 项目结构与包边界
 
-本文档只记录相对稳定的包职责，避免新增代码时放错位置。详细主流程如果需要，建议另写文档，不和包边界混在一起。
+本文档记录相对稳定的包职责和代码放置规则，避免新增代码时放错位置。详细执行顺序见[工作流概述](./WORKFLOW.md)，目标改造见[重构方案总览](../SoftwareStudio-5生成质量缺陷与开源方案对比重构建议-20260819.md)。
+
+> 2026-09-16 对照 `improve2-realTools-fail`、HEAD `b26efe3` 修正主链相关描述；本次不是全仓库分层合规审计。[返回文档导航](../README.md)。
 
 ## 包职责
 
@@ -8,15 +10,17 @@
 
 `Service`：主要业务行为层。生成、校验、修复、源码管理、工作区操作、指标统计等实现都优先放这里；跨层传递的公共数据类型不放在 `Service` 中。
 
-`Service/Workflow`：LangGraph 工作流编排、节点服务、共享状态。
+`Service/Workflow`：主流程编排、节点服务、共享任务状态和运行记录。当前主链由 SoftwareStudioWorkflowService 顺序调用服务，不通过 LangGraph 图调度。
 
-`Service/Generation`：批次规划后的代码生成执行逻辑。
+`Service/Generation`：生成计划及代码生成入口。当前 BatchGenerationService 将完整项目目标交给真实工具会话，不按批次独立并发生成。
+
+`Service/AgentRuntime`：模型—工具执行循环、会话消息、工具注册、上下文压缩和候选同步。
 
 `Service/Contract`：接口契约、前后端契约、跨文件一致性校验。
 
 `Service/Source`：源码路径规范化、源码集合更新、`SourceCode` upsert 规则。
 
-`Service/Workspace`：项目目录、文件落盘、从磁盘加载项目文件。
+`Service/Workspace`：项目目录、文件落盘、从磁盘加载项目文件，以及规划产物和运行摘要的持久化。
 
 `Service/Metric`：LLM token、缓存命中率、耗时等观测指标。只做统计，不改变 prompt 或生成策略。
 
