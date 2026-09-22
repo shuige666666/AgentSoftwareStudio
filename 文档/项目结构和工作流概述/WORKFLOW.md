@@ -52,7 +52,7 @@
 
 [ToolDrivenRepairService](../../src/main/java/com/core/multiAgentSoftwareStudio/Service/Repair/ToolDrivenRepairService.java) 先通过 `compileAndRepair` 处理生产编译；后续 `testAndRepair` 对候选重新编译、执行全量已有测试，再进行最终契约／质量策略检查。编译、测试和契约修复共享同一 run 级预算，不按切片复制额度。现有检查通过也不能自动证明任意用户需求已全部实现。
 
-目标方案计划把开发、测试、联调和修复合入连续 DevelopmentAgent 会话，并引入新的 checkpoint 协议；这些内容属于[待实施设计](../生成质量重构/02-目标架构与设计约定.md#section-7-1)，不能写成当前已有行为。
+目标方案计划把开发、测试、联调和修复合入连续 DevelopmentAgent 会话，并引入新的 checkpoint 协议；这些内容属于[待实施设计](../生成质量重构/02-目标架构与设计约定.md#section-3-1)，不能写成当前已有行为。
 
 ## 维护约定
 
