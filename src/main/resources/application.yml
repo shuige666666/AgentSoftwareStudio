@@ -55,7 +55,7 @@ server:
 
 studio:
   ai:
-    # 可选：deepseek-direct、alibaba-bailian、generic-openai。只有直连 DeepSeek 时启用专用缓存指标。
+    # 可选：deepseek-direct、alibaba-bailian、generic-openai；前两者读取各自的缓存命中字段。
     provider: alibaba-bailian
   agent-runtime:
     # 单会话安全上限，避免工具反馈历史持续膨胀；0 可显式表示无限制。

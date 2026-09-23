@@ -1,0 +1,222 @@
+{
+  "startedAt" : "2026-09-23T12:05:42.060935200Z",
+  "finishedAt" : "2026-09-23T12:14:17.740760800Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash-2026-07-15",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.7-max-2026-05-20",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "ArchitectAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "ContractAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "ProductManagerAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "url-shortener-behavior-v1" ],
+    "repetitions" : 1,
+    "repairBudget" : {
+      "policyVersion" : "tool-driven-progress-budget-v4",
+      "maxProjectLlmRepairs" : 4,
+      "extraRepairsBeyondSliceCount" : 0,
+      "maxRepairsPerSlice" : 4,
+      "reservedForFinalVerification" : 0
+    },
+    "gitCommit" : "53c978039825e585ecc55a8f786e8573879ca401",
+    "gitDirty" : true,
+    "workingTreeFingerprint" : "f89d06ce06dd102aad6a5fa69cca6ff6488e3f381a33d2553092b3fd70d3bb65",
+    "requirementSha256" : {
+      "url-shortener-behavior-v1" : "d8271e7110f3f287b5b1ce1ba8f2eecacee43b75357a5e58e58019e799bf9f11"
+    }
+  },
+  "cases" : [ {
+    "caseId" : "url-shortener-behavior-v1",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : true,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\URL_Shortener_Service_MVP_20260923_200607",
+    "elapsedMillis" : 515468,
+    "quality" : {
+      "passed" : true,
+      "findings" : [ {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "CONTRACT_GATES_PASSED",
+        "passed" : true,
+        "evidence" : "Final semantic contract gates passed."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      } ]
+    },
+    "usage" : {
+      "calls" : 24,
+      "successfulCalls" : 23,
+      "failedCalls" : 1,
+      "durationMillis" : 461390,
+      "inputCacheHitTokens" : 12288,
+      "inputCacheMissTokens" : 89356,
+      "outputTokens" : 19006,
+      "totalTokens" : 120650,
+      "cacheMetricsAvailable" : true,
+      "finishReasonCounts" : {
+        "stop" : 3,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 20,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 1,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      },
+      "modelUsage" : {
+        "qwen3.7-flash-2026-07-15" : {
+          "calls" : 21,
+          "failedCalls" : 1,
+          "inputCacheHitTokens" : 12288,
+          "inputCacheMissTokens" : 86100,
+          "outputTokens" : 10279,
+          "totalTokens" : 108667
+        },
+        "qwen3.7-max-2026-05-20" : {
+          "calls" : 3,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 0,
+          "inputCacheMissTokens" : 3256,
+          "outputTokens" : 8727,
+          "totalTokens" : 11983
+        }
+      }
+    },
+    "attemptsUsed" : 1,
+    "finalFailureKind" : "NONE",
+    "validationWarningCount" : 0,
+    "verificationSummary" : {
+      "buildExitCode" : 0,
+      "testExitCode" : 0,
+      "buildPassed" : true,
+      "testPassed" : true,
+      "testsRun" : 1,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 6652,
+      "testDurationMillis" : 16483,
+      "primaryFailureKind" : "NONE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 3,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : { },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 1,
+        "acceptedSlices" : 1,
+        "firstPassAcceptedSlices" : 1,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 4,
+        "sliceRepairSafetyLimit" : 4,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 1,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "tool-driven-progress-budget-v4",
+        "slicePolicyVersion" : "vertical-slice-v6",
+        "declaredProjectType" : "SPRING_BOOT",
+        "effectiveProjectType" : "SPRING_BOOT",
+        "projectProfileId" : "java17-spring-boot-3.2"
+      }
+    },
+    "workflowError" : null,
+    "behavior" : {
+      "status" : "FAIL",
+      "findings" : [ {
+        "behavior" : "link.create",
+        "passed" : false,
+        "evidence" : "HTTP 201, body={\"shortCode\":\"048Ipo\",\"originalUrl\":null}"
+      }, {
+        "behavior" : "link.missing.query",
+        "passed" : true,
+        "evidence" : "HTTP 404, body={\"error\":\"Short code not found: __missing_baseline_code__\"}"
+      }, {
+        "behavior" : "link.missing.visit",
+        "passed" : true,
+        "evidence" : "HTTP 404, body={\"error\":\"Short code not found: __missing_baseline_code__\"}"
+      } ],
+      "reason" : null
+    }
+  } ],
+  "platformSuccessCount" : 1,
+  "independentQualityPassCount" : 0,
+  "falseSuccessCount" : 1,
+  "falseSuccessRate" : 1.0,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-09-23T12-05-42.060935200Z.json",
+  "fullWorkflowSuccessRate" : 0.0
+}

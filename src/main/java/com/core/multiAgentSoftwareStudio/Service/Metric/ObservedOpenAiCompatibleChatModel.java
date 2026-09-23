@@ -1,5 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Service.Metric;
 
+import com.core.multiAgentSoftwareStudio.Config.AiProvider;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmCallUsage;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmFailureType;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationType;
@@ -32,7 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * OpenAI-compatible Chat 模型包装器，统一记录通用 Token 用量并可选观测 DeepSeek 缓存指标。
+ * OpenAI-compatible Chat 模型包装器，统一记录通用 Token 用量和供应商缓存指标。
  */
 public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, ToolCallingModel {
     private final String apiKey;
@@ -43,7 +44,7 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
     private final Duration timeout;
     private final ObjectMapper objectMapper;
     private final LlmUsageMetricsService metricsService;
-    private final boolean deepSeekCacheMetricsEnabled;
+    private final AiProvider aiProvider;
     private final boolean jsonOutputEnabled;
     private final HttpClient httpClient;
 
@@ -55,7 +56,7 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
                                              Duration timeout,
                                              ObjectMapper objectMapper,
                                              LlmUsageMetricsService metricsService,
-                                             boolean deepSeekCacheMetricsEnabled,
+                                             AiProvider aiProvider,
                                              boolean jsonOutputEnabled) {
         this.apiKey = apiKey;
         this.baseUrl = normalizeBaseUrl(baseUrl);
@@ -65,7 +66,7 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
         this.timeout = timeout;
         this.objectMapper = objectMapper;
         this.metricsService = metricsService;
-        this.deepSeekCacheMetricsEnabled = deepSeekCacheMetricsEnabled;
+        this.aiProvider = aiProvider;
         this.jsonOutputEnabled = jsonOutputEnabled;
         this.httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
     }
@@ -268,18 +269,23 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
     }
 
     /**
-     * 通用 Token 始终按 OpenAI 字段读取；DeepSeek 缓存字段只在配置启用且响应真实返回时生效。
+     * 通用 Token 按 OpenAI 字段读取；供应商缓存字段仅在响应真实返回时计入。
      */
     LlmCallUsage parseUsage(JsonNode usage) {
-        boolean cacheMetricsAvailable = deepSeekCacheMetricsEnabled
-                && (usage.has("prompt_cache_hit_tokens") || usage.has("prompt_cache_miss_tokens"));
-        long hitTokens = cacheMetricsAvailable
-                ? usage.path("prompt_cache_hit_tokens").asLong(0)
-                : 0;
         long promptTokens = usage.path("prompt_tokens").asLong(0);
-        long missTokens = cacheMetricsAvailable
+        boolean deepSeek = aiProvider == AiProvider.DEEPSEEK_DIRECT;
+        boolean bailian = aiProvider == AiProvider.ALIBABA_BAILIAN;
+        boolean cacheMetricsAvailable = deepSeek
+                && (usage.has("prompt_cache_hit_tokens") || usage.has("prompt_cache_miss_tokens"))
+                || bailian && usage.path("prompt_tokens_details").has("cached_tokens");
+        long hitTokens = deepSeek && cacheMetricsAvailable
+                ? usage.path("prompt_cache_hit_tokens").asLong(0)
+                : bailian && cacheMetricsAvailable
+                        ? usage.path("prompt_tokens_details").path("cached_tokens").asLong(0)
+                        : 0;
+        long missTokens = deepSeek && cacheMetricsAvailable
                 ? usage.path("prompt_cache_miss_tokens").asLong(Math.max(0, promptTokens - hitTokens))
-                : promptTokens;
+                : cacheMetricsAvailable ? Math.max(0, promptTokens - hitTokens) : promptTokens;
 
         if (promptTokens == 0 && cacheMetricsAvailable) {
             promptTokens = hitTokens + missTokens;

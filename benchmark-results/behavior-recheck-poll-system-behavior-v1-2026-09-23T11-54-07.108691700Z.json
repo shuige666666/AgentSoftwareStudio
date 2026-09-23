@@ -1,0 +1,42 @@
+{
+  "evaluatedAt" : "2026-09-23T11:54:07.110934800Z",
+  "projectPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\ai_generated_projects\\在线投票系统_MVP_20260923_193812",
+  "behavior" : {
+    "status" : "PASS",
+    "findings" : [ {
+      "behavior" : "poll.create",
+      "passed" : true,
+      "evidence" : "HTTP 201, body={\"id\":1}"
+    }, {
+      "behavior" : "poll.initial",
+      "passed" : true,
+      "evidence" : "HTTP 200, body={\"counts\":{\"A\":0,\"B\":0}}"
+    }, {
+      "behavior" : "poll.vote.first",
+      "passed" : true,
+      "evidence" : "HTTP 201, body="
+    }, {
+      "behavior" : "poll.result.first",
+      "passed" : true,
+      "evidence" : "HTTP 200, body={\"counts\":{\"A\":1,\"B\":0}}"
+    }, {
+      "behavior" : "poll.vote.duplicate",
+      "passed" : true,
+      "evidence" : "HTTP 409, body=Voter has already voted in this poll"
+    }, {
+      "behavior" : "poll.result.afterDuplicate",
+      "passed" : true,
+      "evidence" : "HTTP 200, body={\"counts\":{\"A\":1,\"B\":0}}"
+    }, {
+      "behavior" : "poll.vote.second",
+      "passed" : true,
+      "evidence" : "HTTP 201, body="
+    }, {
+      "behavior" : "poll.result.final",
+      "passed" : true,
+      "evidence" : "HTTP 200, body={\"counts\":{\"A\":1,\"B\":1}}"
+    } ],
+    "reason" : null
+  },
+  "caseId" : "poll-system-behavior-v1"
+}

@@ -1,0 +1,22 @@
+{
+  "projectPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\ai_generated_projects\\Short_Link_Service_MVP_20260923_192906",
+  "behavior" : {
+    "status" : "FAIL",
+    "findings" : [ {
+      "behavior" : "link.create",
+      "passed" : false,
+      "evidence" : "HTTP 201, body={\"shortCode\":\"28af5f73\",\"originalUrl\":null}"
+    }, {
+      "behavior" : "link.missing.query",
+      "passed" : true,
+      "evidence" : "HTTP 404, body="
+    }, {
+      "behavior" : "link.missing.visit",
+      "passed" : true,
+      "evidence" : "HTTP 404, body={\"timestamp\":\"2026-09-23T11:53:24.259+00:00\",\"status\":404,\"error\":\"Not Found\",\"path\":\"/__missing_baseline_code__\"}"
+    } ],
+    "reason" : null
+  },
+  "caseId" : "url-shortener-behavior-v1",
+  "evaluatedAt" : "2026-09-23T11:53:29.569285900Z"
+}

@@ -3,6 +3,7 @@ package com.core.multiAgentSoftwareStudio.Service.Workflow;
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRunResult;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
@@ -142,6 +143,9 @@ public class SoftwareStudioWorkflowService {
             }
             persistenceNodeService.persistRunSummary(data, runJournalService.summarize(data), logger);
             return result(data);
+        } catch (RuntimeException e) {
+            // 候选项目已创建后即使工作流异常，也要保留路径供外部判卷和故障诊断。
+            throw new WorkflowExecutionFailure(data.projectPath, e);
         } finally {
             logger.accept(llmUsageMetricsService.formatSummary());
         }

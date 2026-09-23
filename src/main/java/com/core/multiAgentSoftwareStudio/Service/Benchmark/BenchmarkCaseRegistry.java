@@ -62,12 +62,42 @@ public class BenchmarkCaseRegistry {
                                 """,
                         SPRING_BASELINE_GATES),
                 new BenchmarkCase(
+                        "url-shortener-behavior-v1",
+                        "短链接服务行为基线 v1",
+                        """
+                                请生成 Java 17、Spring Boot 短链接服务，提供以下公开 HTTP 契约。
+                                POST /api/links 接收 {"url":"https://example.org/docs"}，成功返回 201 和 JSON，
+                                JSON 至少包含非空 code 及与请求相同的 originalUrl。
+                                GET /api/links/{code} 返回 200 和相同的 code、originalUrl。
+                                GET /{code} 返回 302，Location 为原始 URL。
+                                不存在的 code 在查询和访问时均返回 404。
+                                code 可安全放入 URL 路径；应用使用默认 HTTP 端口 8080。
+                                可以使用内存存储；必须提供必要的自动化测试。
+                                """,
+                        SPRING_BASELINE_GATES),
+                new BenchmarkCase(
                         "poll-system-basic",
                         "在线投票系统",
                         """
                                 请生成一个 Java 17、Spring Boot 的在线投票系统。
                                 支持创建投票、用户投票和查看投票结果。
                                 需要防止用户重复投票，并提供必要的测试。
+                                """,
+                        SPRING_BASELINE_GATES),
+                new BenchmarkCase(
+                        "poll-system-behavior-v1",
+                        "在线投票系统行为基线 v1",
+                        """
+                                请生成 Java 17、Spring Boot 在线投票系统，提供以下公开 HTTP 契约。
+                                POST /api/polls 接收 {"question":"选项测试","options":["A","B"]}，
+                                成功返回 201 和含非空 id 的 JSON。
+                                POST /api/polls/{id}/votes 接收 {"voterId":"alice","option":"A"}，
+                                成功返回 200 或 201；同一投票中相同 voterId 再次投票返回 409，且不能改变票数。
+                                不同 voterId 可以分别投票。GET /api/polls/{id}/results 返回 200 和 JSON，
+                                其中 counts 对象用选项文本作键，值为各选项票数；初始均为 0。
+                                voterId 是本案例的身份依据，不要求登录或外部身份服务。
+                                应用使用默认 HTTP 端口 8080。
+                                可以使用内存存储；必须提供必要的自动化测试。
                                 """,
                         SPRING_BASELINE_GATES),
                 new BenchmarkCase(
@@ -84,7 +114,10 @@ public class BenchmarkCaseRegistry {
 
     public List<BenchmarkCase> select(List<String> ids) {
         if (ids == null || ids.isEmpty()) {
-            return allCases();
+            // 新版行为案例显式选择，避免旧的默认六案例请求意外增加远程模型费用。
+            return allCases().stream()
+                    .filter(benchmarkCase -> !BenchmarkBehaviorEvaluator.isBehaviorCase(benchmarkCase.id()))
+                    .toList();
         }
         List<BenchmarkCase> selected = allCases().stream()
                 .filter(benchmarkCase -> ids.contains(benchmarkCase.id()))

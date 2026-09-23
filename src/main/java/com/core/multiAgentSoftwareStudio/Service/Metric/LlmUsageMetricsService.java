@@ -6,16 +6,20 @@ import com.core.multiAgentSoftwareStudio.Model.Metric.LlmFailureType;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmFinishReasonCounts;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationCounts;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationType;
+import com.core.multiAgentSoftwareStudio.Model.Metric.LlmModelUsage;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmUsageSnapshot;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 汇总一次软件生成任务中的 LLM Token 消耗，并在可用时记录 DeepSeek 远程缓存。
+ * 汇总一次软件生成任务中的 LLM Token 消耗，并在可用时记录供应商远程缓存。
  */
 @Service
 public class LlmUsageMetricsService {
@@ -42,6 +46,7 @@ public class LlmUsageMetricsService {
     private final AtomicLong validationJsonParseError = new AtomicLong();
     private final AtomicLong validationSchemaError = new AtomicLong();
     private final AtomicBoolean allSuccessfulCallsHaveCacheMetrics = new AtomicBoolean(true);
+    private final Map<String, ModelCounter> modelUsage = new ConcurrentHashMap<>();
     private final ThreadLocal<String> currentCallName = new ThreadLocal<>();
 
     public void beginTask() {
@@ -68,6 +73,7 @@ public class LlmUsageMetricsService {
         validationJsonParseError.set(0);
         validationSchemaError.set(0);
         allSuccessfulCallsHaveCacheMetrics.set(true);
+        modelUsage.clear();
     }
 
     public <T> T withCallName(String callName, Callable<T> action) {
@@ -114,6 +120,8 @@ public class LlmUsageMetricsService {
         inputCacheMissTokens.addAndGet(miss);
         outputTokens.addAndGet(output);
         totalTokens.addAndGet(total);
+        modelUsage.computeIfAbsent(modelName, ignored -> new ModelCounter())
+                .recordSuccess(hit, miss, output, total);
 
         if (usage.cacheMetricsAvailable()) {
             System.out.printf(Locale.ROOT,
@@ -137,6 +145,7 @@ public class LlmUsageMetricsService {
         durationMillis.addAndGet(elapsedMillis);
         LlmFailureType normalizedType = failureType == null ? LlmFailureType.UNKNOWN : failureType;
         recordFailureType(normalizedType);
+        modelUsage.computeIfAbsent(modelName, ignored -> new ModelCounter()).recordFailure();
         System.out.printf("[LLM用量] 第%d次 阶段=%s 模型=%s 耗时=%dms 失败类型=%s 调用失败=%s%n",
                 callIndex,
                 currentCallName(),
@@ -180,7 +189,41 @@ public class LlmUsageMetricsService {
                         failureTimeout.get(), failureHttpError.get(), failureInterrupted.get(),
                         failureResponseParseError.get(), failureProviderError.get(), failureUnknown.get()),
                 new LlmOutputValidationCounts(
-                        validationEmptyContent.get(), validationJsonParseError.get(), validationSchemaError.get()));
+                        validationEmptyContent.get(), validationJsonParseError.get(), validationSchemaError.get()),
+                modelUsageSnapshot());
+    }
+
+    private Map<String, LlmModelUsage> modelUsageSnapshot() {
+        Map<String, LlmModelUsage> snapshot = new TreeMap<>();
+        modelUsage.forEach((name, counter) -> snapshot.put(name, counter.snapshot()));
+        return Map.copyOf(snapshot);
+    }
+
+    private static final class ModelCounter {
+        private final AtomicLong calls = new AtomicLong();
+        private final AtomicLong failedCalls = new AtomicLong();
+        private final AtomicLong hit = new AtomicLong();
+        private final AtomicLong miss = new AtomicLong();
+        private final AtomicLong output = new AtomicLong();
+        private final AtomicLong total = new AtomicLong();
+
+        private void recordSuccess(long hitTokens, long missTokens, long outputTokens, long totalTokens) {
+            calls.incrementAndGet();
+            hit.addAndGet(hitTokens);
+            miss.addAndGet(missTokens);
+            output.addAndGet(outputTokens);
+            total.addAndGet(totalTokens);
+        }
+
+        private void recordFailure() {
+            calls.incrementAndGet();
+            failedCalls.incrementAndGet();
+        }
+
+        private LlmModelUsage snapshot() {
+            return new LlmModelUsage(calls.get(), failedCalls.get(), hit.get(), miss.get(),
+                    output.get(), total.get());
+        }
     }
 
     public String formatSummary() {

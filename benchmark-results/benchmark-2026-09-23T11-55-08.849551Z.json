@@ -1,0 +1,202 @@
+{
+  "startedAt" : "2026-09-23T11:55:08.849551Z",
+  "finishedAt" : "2026-09-23T12:01:43.458234200Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash-2026-07-15",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.7-max-2026-05-20",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "ArchitectAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "ContractAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "ProductManagerAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "url-shortener-behavior-v1" ],
+    "repetitions" : 1,
+    "repairBudget" : {
+      "policyVersion" : "tool-driven-progress-budget-v4",
+      "maxProjectLlmRepairs" : 4,
+      "extraRepairsBeyondSliceCount" : 0,
+      "maxRepairsPerSlice" : 4,
+      "reservedForFinalVerification" : 0
+    },
+    "gitCommit" : "53c978039825e585ecc55a8f786e8573879ca401",
+    "gitDirty" : true,
+    "workingTreeFingerprint" : "dbff16af6737119970fbc09d6a11d373612ad1fd8299e467000e7ebd1fb542d3",
+    "requirementSha256" : {
+      "url-shortener-behavior-v1" : "d8271e7110f3f287b5b1ce1ba8f2eecacee43b75357a5e58e58019e799bf9f11"
+    }
+  },
+  "cases" : [ {
+    "caseId" : "url-shortener-behavior-v1",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\URL_Shortener_MVP_20260923_195527",
+    "elapsedMillis" : 394402,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ ]
+    },
+    "usage" : {
+      "calls" : 35,
+      "successfulCalls" : 35,
+      "failedCalls" : 0,
+      "durationMillis" : 267702,
+      "inputCacheHitTokens" : 122112,
+      "inputCacheMissTokens" : 102833,
+      "outputTokens" : 21297,
+      "totalTokens" : 246242,
+      "cacheMetricsAvailable" : true,
+      "finishReasonCounts" : {
+        "stop" : 3,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 32,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      },
+      "modelUsage" : {
+        "qwen3.7-max-2026-05-20" : {
+          "calls" : 3,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 0,
+          "inputCacheMissTokens" : 3502,
+          "outputTokens" : 9687,
+          "totalTokens" : 13189
+        },
+        "qwen3.7-flash-2026-07-15" : {
+          "calls" : 32,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 122112,
+          "inputCacheMissTokens" : 99331,
+          "outputTokens" : 11610,
+          "totalTokens" : 233053
+        }
+      }
+    },
+    "attemptsUsed" : 0,
+    "finalFailureKind" : "UNKNOWN",
+    "validationWarningCount" : 0,
+    "verificationSummary" : {
+      "buildExitCode" : null,
+      "testExitCode" : null,
+      "buildPassed" : false,
+      "testPassed" : false,
+      "testsRun" : 0,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 0,
+      "testDurationMillis" : 0,
+      "primaryFailureKind" : "NONE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 0,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : { },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 0,
+        "acceptedSlices" : 0,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 0,
+        "sliceRepairSafetyLimit" : 0,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 0,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "",
+        "slicePolicyVersion" : "",
+        "declaredProjectType" : "",
+        "effectiveProjectType" : "",
+        "projectProfileId" : ""
+      }
+    },
+    "workflowError" : "UnsupportedOperationException: No message at java.base/java.util.ImmutableCollections.uoe(ImmutableCollections.java:142)",
+    "behavior" : {
+      "status" : "FAIL",
+      "findings" : [ {
+        "behavior" : "link.create",
+        "passed" : false,
+        "evidence" : "HTTP 201, body={\"shortCode\":\"lWrkTNE2\",\"originalUrl\":null}"
+      }, {
+        "behavior" : "link.missing.query",
+        "passed" : true,
+        "evidence" : "HTTP 404, body="
+      }, {
+        "behavior" : "link.missing.visit",
+        "passed" : true,
+        "evidence" : "HTTP 404, body="
+      } ],
+      "reason" : null
+    }
+  } ],
+  "platformSuccessCount" : 0,
+  "independentQualityPassCount" : 0,
+  "falseSuccessCount" : 0,
+  "falseSuccessRate" : null,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-09-23T11-55-08.849551Z.json",
+  "fullWorkflowSuccessRate" : 0.0
+}

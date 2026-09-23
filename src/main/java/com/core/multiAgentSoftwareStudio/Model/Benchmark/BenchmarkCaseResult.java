@@ -23,5 +23,19 @@ public record BenchmarkCaseResult(
         int validationWarningCount,
         BenchmarkVerificationSummary verificationSummary,
         WorkflowRunSummary runSummary,
-        String workflowError) {
+        String workflowError,
+        BenchmarkBehaviorResult behavior) {
+
+    public BenchmarkCaseResult(String caseId, int repetitionIndex, int repetitionCount,
+                               boolean platformSuccess, boolean independentQualityPassed,
+                               String manualVerdict, String projectPath, long elapsedMillis,
+                               BenchmarkQualityResult quality, LlmUsageSnapshot usage,
+                               int attemptsUsed, FailureKind finalFailureKind, int validationWarningCount,
+                               BenchmarkVerificationSummary verificationSummary,
+                               WorkflowRunSummary runSummary, String workflowError) {
+        this(caseId, repetitionIndex, repetitionCount, platformSuccess, independentQualityPassed,
+                manualVerdict, projectPath, elapsedMillis, quality, usage, attemptsUsed,
+                finalFailureKind, validationWarningCount, verificationSummary, runSummary,
+                workflowError, BenchmarkBehaviorResult.notApplicable());
+    }
 }

@@ -76,5 +76,25 @@ class LlmUsageMetricsServiceTest {
         assertEquals(1, snapshot.failureCounts().timeout());
         assertEquals(snapshot.failedCalls(), snapshot.failureCounts().total());
         assertEquals(1, snapshot.outputValidationCounts().jsonParseError());
+        assertEquals(2, snapshot.modelUsage().get("qwen-test").calls());
+        assertEquals(1, snapshot.modelUsage().get("qwen-test").failedCalls());
+        assertEquals(10, snapshot.modelUsage().get("qwen-test").inputCacheMissTokens());
+    }
+
+    /**
+     * 不同模型的用量分开保存，避免把规划与编码模型混在一起估算费用。
+     */
+    @Test
+    void keepsModelUsageSeparated() {
+        LlmUsageMetricsService metricsService = new LlmUsageMetricsService();
+        metricsService.beginTask();
+        metricsService.recordSuccess("logic", new LlmCallUsage(5, 15, 20, 40, true), 10, "stop");
+        metricsService.recordSuccess("coder", new LlmCallUsage(30, 10, 5, 45, true), 10, "stop");
+
+        var snapshot = metricsService.snapshot();
+
+        assertEquals(5, snapshot.modelUsage().get("logic").inputCacheHitTokens());
+        assertEquals(30, snapshot.modelUsage().get("coder").inputCacheHitTokens());
+        assertEquals(2, snapshot.modelUsage().size());
     }
 }

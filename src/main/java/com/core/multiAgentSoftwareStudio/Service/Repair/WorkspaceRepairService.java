@@ -204,7 +204,8 @@ public class WorkspaceRepairService {
 
     private void clearBaseline(SoftwareStudioWorkflowData data) {
         data.repairBaselineCodes.clear();
-        data.repairCandidateChangedFiles.clear();
+        // 清理候选状态时允许上游传入不可修改的文件列表。
+        data.repairCandidateChangedFiles = new ArrayList<>();
         data.repairBaselineValidationWarnings.clear();
         data.repairBaselineFailureKind = FailureKind.NONE;
         data.repairBaselineFixLog = null;

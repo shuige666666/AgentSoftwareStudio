@@ -2,6 +2,7 @@ package com.core.multiAgentSoftwareStudio.Service.Benchmark;
 
 import com.core.multiAgentSoftwareStudio.Config.AiConfig;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.AgentModelAssignment;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCaseResult;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkModelInfo;
@@ -12,6 +13,7 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRepairBudgetCo
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunRequest;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowService;
@@ -64,6 +66,7 @@ public class BenchmarkRunnerService {
 
     private final BenchmarkCaseRegistry caseRegistry;
     private final BenchmarkQualityEvaluator qualityEvaluator;
+    private final BenchmarkBehaviorEvaluator behaviorEvaluator;
     private final SoftwareStudioWorkflowService workflowService;
     private final LlmUsageMetricsService llmUsageMetricsService;
     private final ObjectMapper objectMapper;
@@ -71,12 +74,14 @@ public class BenchmarkRunnerService {
 
     public BenchmarkRunnerService(BenchmarkCaseRegistry caseRegistry,
             BenchmarkQualityEvaluator qualityEvaluator,
+            BenchmarkBehaviorEvaluator behaviorEvaluator,
             SoftwareStudioWorkflowService workflowService,
             LlmUsageMetricsService llmUsageMetricsService,
             ObjectMapper objectMapper,
             @Value("${spring.ai.openai.base-url}") String modelBaseUrl) {
         this.caseRegistry = caseRegistry;
         this.qualityEvaluator = qualityEvaluator;
+        this.behaviorEvaluator = behaviorEvaluator;
         this.workflowService = workflowService;
         this.llmUsageMetricsService = llmUsageMetricsService;
         this.objectMapper = objectMapper;
@@ -116,7 +121,9 @@ public class BenchmarkRunnerService {
         Path reportPath = reportPathFor(started).toAbsolutePath();
         BenchmarkRunConfiguration benchmarkConfig = new BenchmarkRunConfiguration(
                 selectedCases.stream().map(BenchmarkCase::id).toList(), repetitions, repairBudgetConfiguration(),
-                gitSnapshot.commit(), gitSnapshot.dirty(), gitSnapshot.workingTreeFingerprint());
+                gitSnapshot.commit(), gitSnapshot.dirty(), gitSnapshot.workingTreeFingerprint(),
+                selectedCases.stream().collect(java.util.stream.Collectors.toMap(
+                        BenchmarkCase::id, benchmarkCase -> sha256(benchmarkCase.prompt()))));
 
         System.out.println("[Benchmark] 质量基准测试进度：0/" + cases.size()
                 + "，每个案例重复 " + repetitions + " 次，准备执行。");
@@ -173,7 +180,7 @@ public class BenchmarkRunnerService {
     /**
      * 执行单个基准任务，并持续输出当前任务序号和耗时，避免长时间 LLM 调用看起来像控制台失去响应。
      */
-    private BenchmarkCaseResult runCase(
+    BenchmarkCaseResult runCase(
             BenchmarkCase benchmarkCase,
             int repetitionIndex,
             int repetitionCount,
@@ -187,29 +194,61 @@ public class BenchmarkRunnerService {
                 PROGRESS_HEARTBEAT_SECONDS,
                 PROGRESS_HEARTBEAT_SECONDS,
                 TimeUnit.SECONDS);
+        WorkflowExecutionResult execution = null;
+        String phase = "WORKFLOW";
         try {
-            WorkflowExecutionResult execution = workflowService.generateProjectWithResult(
+            execution = workflowService.generateProjectWithResult(
                     benchmarkCase.prompt(),
                     message -> System.out.println("[Benchmark " + currentCase + "/" + totalCases + " "
                             + benchmarkCase.id() + "] " + message));
+            phase = "QUALITY";
             BenchmarkQualityResult quality = qualityEvaluator.evaluate(benchmarkCase, execution);
+            phase = "BEHAVIOR";
+            BenchmarkBehaviorResult behavior = behaviorEvaluator.evaluate(benchmarkCase.id(), execution.projectPath());
+            boolean independentPassed = quality.passed()
+                    && (!BenchmarkBehaviorEvaluator.isBehaviorCase(benchmarkCase.id()) || behavior.passed());
             return new BenchmarkCaseResult(
                     benchmarkCase.id(), repetitionIndex, repetitionCount,
-                    execution.platformSuccess(), quality.passed(), "NOT_REVIEWED",
+                    execution.platformSuccess(), independentPassed, "NOT_REVIEWED",
                     execution.projectPath(), elapsedMillis(started), quality, execution.usage(),
                     execution.attemptsUsed(), resolveFinalFailure(execution),
                     execution.validationWarnings().size(),
-                    BenchmarkVerificationSummary.from(execution.verification()), execution.runSummary(), null);
-        } catch (Exception e) {
+                    BenchmarkVerificationSummary.from(execution.verification()), execution.runSummary(), null,
+                    behavior);
+        } catch (WorkflowExecutionFailure e) {
+            // 旧主链异常不应抹掉已经保存的候选；仍尝试对真实产物做外部行为判卷。
+            BenchmarkBehaviorResult behavior = behaviorEvaluator.evaluate(benchmarkCase.id(), e.projectPath());
             BenchmarkQualityResult quality = new BenchmarkQualityResult(false, List.of());
+            RuntimeException cause = e.getCause() instanceof RuntimeException runtime ? runtime : e;
+            String location = cause.getStackTrace().length == 0 ? "unknown" : cause.getStackTrace()[0].toString();
             return new BenchmarkCaseResult(
                     benchmarkCase.id(), repetitionIndex, repetitionCount,
-                    false, false, "NOT_REVIEWED", null, elapsedMillis(started), quality,
-                    llmUsageMetricsService.snapshot(),
-                    0, com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind.UNKNOWN, 0,
+                    false, false, "NOT_REVIEWED", e.projectPath(), elapsedMillis(started), quality,
+                    llmUsageMetricsService.snapshot(), 0,
+                    com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind.UNKNOWN, 0,
                     BenchmarkVerificationSummary.empty(),
                     com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowRunSummary.empty(),
-                    e.getClass().getSimpleName() + ": " + safeMessage(e));
+                    cause.getClass().getSimpleName() + ": " + safeMessage(cause) + " at " + location,
+                    behavior);
+        } catch (Exception e) {
+            // 判卷自身异常时保留已完成工作流的产物和用量，避免误记为没有生成项目。
+            String path = execution == null ? null : execution.projectPath();
+            BenchmarkQualityResult quality = new BenchmarkQualityResult(false, List.of());
+            BenchmarkBehaviorResult behavior = "BEHAVIOR".equals(phase)
+                    ? BenchmarkBehaviorResult.environmentError("外部行为判卷异常：" + safeMessage(e))
+                    : behaviorEvaluator.evaluate(benchmarkCase.id(), path);
+            return new BenchmarkCaseResult(
+                    benchmarkCase.id(), repetitionIndex, repetitionCount,
+                    false, false, "NOT_REVIEWED", path, elapsedMillis(started), quality,
+                    execution == null ? llmUsageMetricsService.snapshot() : execution.usage(),
+                    execution == null ? 0 : execution.attemptsUsed(),
+                    com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind.UNKNOWN,
+                    execution == null ? 0 : execution.validationWarnings().size(),
+                    execution == null ? BenchmarkVerificationSummary.empty()
+                            : BenchmarkVerificationSummary.from(execution.verification()),
+                    execution == null ? com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowRunSummary.empty()
+                            : execution.runSummary(),
+                    phase + " " + e.getClass().getSimpleName() + ": " + safeMessage(e), behavior);
         } finally {
             // 当前任务结束后停止心跳线程，避免后续任务的控制台进度被旧任务重复刷写。
             heartbeat.cancel(false);

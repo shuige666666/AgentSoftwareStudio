@@ -17,5 +17,21 @@ public record BenchmarkRunReport(
         int independentQualityPassCount,
         int falseSuccessCount,
         Double falseSuccessRate,
-        String reportPath) {
+        String reportPath,
+        Double fullWorkflowSuccessRate) {
+
+    public BenchmarkRunReport(String startedAt, String finishedAt,
+                              Map<String, BenchmarkModelInfo> models,
+                              List<AgentModelAssignment> agentModelAssignments,
+                              BenchmarkRunConfiguration benchmarkConfig,
+                              List<BenchmarkCaseResult> cases,
+                              int platformSuccessCount, int independentQualityPassCount,
+                              int falseSuccessCount, Double falseSuccessRate, String reportPath) {
+        this(startedAt, finishedAt, models, agentModelAssignments, benchmarkConfig, cases,
+                platformSuccessCount, independentQualityPassCount, falseSuccessCount,
+                falseSuccessRate, reportPath, cases == null || cases.isEmpty()
+                        ? null : (double) cases.stream()
+                        .filter(result -> result.platformSuccess() && result.independentQualityPassed())
+                        .count() / cases.size());
+    }
 }

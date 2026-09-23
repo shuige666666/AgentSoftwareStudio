@@ -1,5 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Model.Metric;
 
+import java.util.Map;
+
 /**
  * 保存一次生成任务或基准用例的 LLM 聚合用量快照。
  */
@@ -15,7 +17,8 @@ public record LlmUsageSnapshot(
         boolean cacheMetricsAvailable,
         LlmFinishReasonCounts finishReasonCounts,
         LlmFailureCounts failureCounts,
-        LlmOutputValidationCounts outputValidationCounts) {
+        LlmOutputValidationCounts outputValidationCounts,
+        Map<String, LlmModelUsage> modelUsage) {
 
     public LlmUsageSnapshot {
         finishReasonCounts = finishReasonCounts == null ? LlmFinishReasonCounts.empty() : finishReasonCounts;
@@ -23,6 +26,18 @@ public record LlmUsageSnapshot(
         outputValidationCounts = outputValidationCounts == null
                 ? LlmOutputValidationCounts.empty()
                 : outputValidationCounts;
+        modelUsage = modelUsage == null ? Map.of() : Map.copyOf(modelUsage);
+    }
+
+    public LlmUsageSnapshot(long calls, long successfulCalls, long failedCalls,
+                            long durationMillis, long inputCacheHitTokens,
+                            long inputCacheMissTokens, long outputTokens, long totalTokens,
+                            boolean cacheMetricsAvailable, LlmFinishReasonCounts finishReasonCounts,
+                            LlmFailureCounts failureCounts,
+                            LlmOutputValidationCounts outputValidationCounts) {
+        this(calls, successfulCalls, failedCalls, durationMillis, inputCacheHitTokens,
+                inputCacheMissTokens, outputTokens, totalTokens, cacheMetricsAvailable,
+                finishReasonCounts, failureCounts, outputValidationCounts, Map.of());
     }
 
     /**
@@ -40,7 +55,7 @@ public record LlmUsageSnapshot(
         this(calls, successfulCalls, failedCalls, durationMillis,
                 inputCacheHitTokens, inputCacheMissTokens, outputTokens, totalTokens,
                 cacheMetricsAvailable, LlmFinishReasonCounts.empty(), LlmFailureCounts.empty(),
-                LlmOutputValidationCounts.empty());
+                LlmOutputValidationCounts.empty(), Map.of());
     }
 
     public long inputTokens() {

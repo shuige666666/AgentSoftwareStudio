@@ -3,6 +3,7 @@ package com.core.multiAgentSoftwareStudio.Service.Workflow;
 import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationBatch;
 import com.core.multiAgentSoftwareStudio.Model.Generation.GenerationPlan;
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRunResult;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentStopReason;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -112,6 +114,22 @@ class SoftwareStudioWorkflowServiceTest {
         verify(fixture.repair).testAndRepair(any(), any());
         assertTrue(result.projectPath().contains("quality-first-workflow-test"));
         assertTrue(result.testResult().contains("Errors: 1"));
+    }
+
+    /**
+     * 后期工作流异常时保留已创建的产物路径，供基准报告继续判卷。
+     */
+    @Test
+    void keepsCandidatePathWhenWorkflowThrows() {
+        Fixture fixture = fixture();
+        when(fixture.repair.compileAndRepair(any(), any()))
+                .thenThrow(new UnsupportedOperationException("immutable candidate"));
+
+        WorkflowExecutionFailure failure = assertThrows(WorkflowExecutionFailure.class,
+                () -> fixture.service.generateProjectWithResult("test", message -> { }));
+
+        assertTrue(failure.projectPath().contains("quality-first-workflow-test"));
+        assertTrue(failure.getCause() instanceof UnsupportedOperationException);
     }
 
     private Fixture fixture() {

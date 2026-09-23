@@ -172,7 +172,8 @@ public class RepairRegressionGuardService {
 
     private void clearCandidate(SoftwareStudioWorkflowData data) {
         data.repairBaselineCodes.clear();
-        data.repairCandidateChangedFiles.clear();
+        // 候选列表可能来自不可修改的工具结果，重建状态避免回滚时再次抛错。
+        data.repairCandidateChangedFiles = new ArrayList<>();
         data.repairBaselineValidationWarnings.clear();
         data.repairBaselineFailureKind = FailureKind.NONE;
         data.repairBaselineFixLog = null;

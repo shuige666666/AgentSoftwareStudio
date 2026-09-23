@@ -10,10 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AiProviderTest {
 
     @Test
-    void enablesDedicatedCacheMetricsOnlyForDirectDeepSeekApi() {
-        assertTrue(AiProvider.fromConfig("deepseek-direct").deepSeekCacheMetricsEnabled());
-        assertFalse(AiProvider.fromConfig("alibaba-bailian").deepSeekCacheMetricsEnabled());
-        assertFalse(AiProvider.fromConfig("generic-openai").deepSeekCacheMetricsEnabled());
+    void resolvesProviderForDedicatedUsageParsing() {
+        assertEquals(AiProvider.DEEPSEEK_DIRECT, AiProvider.fromConfig("deepseek-direct"));
+        assertEquals(AiProvider.ALIBABA_BAILIAN, AiProvider.fromConfig("alibaba-bailian"));
+        assertEquals(AiProvider.GENERIC_OPENAI, AiProvider.fromConfig("generic-openai"));
     }
 
     @Test

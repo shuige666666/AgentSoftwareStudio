@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -221,7 +222,8 @@ public class WorkspaceAgentRuntime {
         List<String> changedFiles = toolRegistry.actualChangedFiles(session);
         session.workflowData().codes = workspaceService.loadProjectFromDisk(
                 session.projectRoot(), session.logger());
-        session.workflowData().repairCandidateChangedFiles = changedFiles;
+        // 修复回滚会清空候选列表；工具层返回的 stream.toList() 不可修改。
+        session.workflowData().repairCandidateChangedFiles = new ArrayList<>(changedFiles);
         return changedFiles;
     }
 

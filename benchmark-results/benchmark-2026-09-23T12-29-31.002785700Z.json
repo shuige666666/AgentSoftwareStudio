@@ -1,0 +1,248 @@
+{
+  "startedAt" : "2026-09-23T12:29:31.002785700Z",
+  "finishedAt" : "2026-09-23T12:38:02.236990400Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash-2026-07-15",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.7-max-2026-05-20",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "ArchitectAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "ContractAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "ProductManagerAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "poll-system-behavior-v1" ],
+    "repetitions" : 1,
+    "repairBudget" : {
+      "policyVersion" : "tool-driven-progress-budget-v4",
+      "maxProjectLlmRepairs" : 4,
+      "extraRepairsBeyondSliceCount" : 0,
+      "maxRepairsPerSlice" : 4,
+      "reservedForFinalVerification" : 0
+    },
+    "gitCommit" : "7c67e257786a6f89f4607a44b3593c34b0479740",
+    "gitDirty" : false,
+    "workingTreeFingerprint" : null,
+    "requirementSha256" : {
+      "poll-system-behavior-v1" : "14bd21fbe2c229b855365018a6b8e83afeed3c63c42da3d6ac0185717da46527"
+    }
+  },
+  "cases" : [ {
+    "caseId" : "poll-system-behavior-v1",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\在线投票系统_MVP_20260923_202956",
+    "elapsedMillis" : 511109,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      }, {
+        "gate" : "CONTRACT_GATES_PASSED",
+        "passed" : false,
+        "evidence" : "Final semantic contract gates contain 1 blocker(s): [NOT_FOUND_EXCEPTION_MAPPING]"
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      } ]
+    },
+    "usage" : {
+      "calls" : 45,
+      "successfulCalls" : 45,
+      "failedCalls" : 0,
+      "durationMillis" : 392944,
+      "inputCacheHitTokens" : 133760,
+      "inputCacheMissTokens" : 122504,
+      "outputTokens" : 33167,
+      "totalTokens" : 289431,
+      "cacheMetricsAvailable" : true,
+      "finishReasonCounts" : {
+        "stop" : 3,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 42,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      },
+      "modelUsage" : {
+        "qwen3.7-max-2026-05-20" : {
+          "calls" : 3,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 0,
+          "inputCacheMissTokens" : 3584,
+          "outputTokens" : 11334,
+          "totalTokens" : 14918
+        },
+        "qwen3.7-flash-2026-07-15" : {
+          "calls" : 42,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 133760,
+          "inputCacheMissTokens" : 118920,
+          "outputTokens" : 21833,
+          "totalTokens" : 274513
+        }
+      }
+    },
+    "attemptsUsed" : 3,
+    "finalFailureKind" : "CONTRACT",
+    "validationWarningCount" : 0,
+    "verificationSummary" : {
+      "buildExitCode" : 0,
+      "testExitCode" : 0,
+      "buildPassed" : true,
+      "testPassed" : true,
+      "testsRun" : 7,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 4218,
+      "testDurationMillis" : 14871,
+      "primaryFailureKind" : "NONE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 6,
+      "repairAttempts" : 2,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : {
+        "TEST_ASSERTION" : 1,
+        "MAIN_COMPILE" : 1
+      },
+      "repairTargetCounts" : {
+        "CONTRACT" : 1,
+        "IMPLEMENTATION" : 1
+      },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 4,
+        "acceptedSlices" : 0,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 1,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 2,
+        "repairBudgetLimit" : 4,
+        "sliceRepairSafetyLimit" : 4,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 2,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "FINAL_VERIFICATION",
+        "repairStopReason" : "REGRESSION",
+        "generatedTestFiles" : 1,
+        "admittedTestFiles" : 1,
+        "acceptedTestFiles" : 0,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "tool-driven-progress-budget-v4",
+        "slicePolicyVersion" : "vertical-slice-v6",
+        "declaredProjectType" : "SPRING_BOOT",
+        "effectiveProjectType" : "SPRING_BOOT",
+        "projectProfileId" : "java17-spring-boot-3.2"
+      }
+    },
+    "workflowError" : null,
+    "behavior" : {
+      "status" : "FAIL",
+      "findings" : [ {
+        "behavior" : "poll.create",
+        "passed" : true,
+        "evidence" : "HTTP 201, body={\"id\":\"1\"}"
+      }, {
+        "behavior" : "poll.initial",
+        "passed" : true,
+        "evidence" : "HTTP 200, body={\"counts\":{\"A\":0,\"B\":0}}"
+      }, {
+        "behavior" : "poll.vote.first",
+        "passed" : false,
+        "evidence" : "HTTP 400, body={\"error\":\"Invalid option: null\"}"
+      }, {
+        "behavior" : "poll.result.first",
+        "passed" : false,
+        "evidence" : "HTTP 200, body={\"counts\":{\"A\":0,\"B\":0}}"
+      }, {
+        "behavior" : "poll.vote.duplicate",
+        "passed" : false,
+        "evidence" : "HTTP 400, body={\"error\":\"Invalid option: null\"}"
+      }, {
+        "behavior" : "poll.result.afterDuplicate",
+        "passed" : false,
+        "evidence" : "HTTP 200, body={\"counts\":{\"A\":0,\"B\":0}}"
+      }, {
+        "behavior" : "poll.vote.second",
+        "passed" : false,
+        "evidence" : "HTTP 400, body={\"error\":\"Invalid option: null\"}"
+      }, {
+        "behavior" : "poll.result.final",
+        "passed" : false,
+        "evidence" : "HTTP 200, body={\"counts\":{\"A\":0,\"B\":0}}"
+      } ],
+      "reason" : null
+    }
+  } ],
+  "platformSuccessCount" : 0,
+  "independentQualityPassCount" : 0,
+  "falseSuccessCount" : 0,
+  "falseSuccessRate" : null,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-09-23T12-29-31.002785700Z.json",
+  "fullWorkflowSuccessRate" : 0.0
+}

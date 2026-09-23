@@ -45,7 +45,7 @@ class RepairRegressionGuardServiceTest {
         data.projectPath = tempDir.toString();
         data.codes.add(new SourceCode(filename, "java", candidateCode));
         data.repairBaselineCodes = new LinkedHashMap<>(java.util.Map.of(filename, baselineCode));
-        data.repairCandidateChangedFiles = new ArrayList<>(List.of(filename));
+        data.repairCandidateChangedFiles = List.of(filename);
         data.repairBaselineFailureKind = FailureKind.CONTRACT;
         data.repairBaselineErrorType = FailureKind.CONTRACT.name();
         data.repairBaselineFixLog = "frontend contract mismatch";

@@ -67,7 +67,7 @@ public class AiConfig {
                                 CODER_MODEL_TIMEOUT,
                                 objectMapper,
                                 metricsService,
-                                aiProvider.deepSeekCacheMetricsEnabled(),
+                                aiProvider,
                                 CODER_MODEL_JSON_OUTPUT_ENABLED);
         }
 
@@ -86,7 +86,7 @@ public class AiConfig {
                                 LOGIC_MODEL_TIMEOUT,
                                 objectMapper,
                                 metricsService,
-                                aiProvider.deepSeekCacheMetricsEnabled(),
+                                aiProvider,
                                 LOGIC_MODEL_JSON_OUTPUT_ENABLED);
         }
 

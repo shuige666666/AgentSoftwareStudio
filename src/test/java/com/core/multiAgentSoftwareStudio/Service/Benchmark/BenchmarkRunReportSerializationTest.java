@@ -51,7 +51,7 @@ class BenchmarkRunReportSerializationTest {
                 3,
                 new BenchmarkRepairBudgetConfiguration(
                         "progress-aware-repair-budget-v3", 8, 2, 4, 1),
-                "abc123", true, "sha256-local-tree");
+                "abc123", true, "sha256-local-tree", Map.of("task-api-basic", "prompt-hash"));
         BenchmarkRunReport report = new BenchmarkRunReport(
                 "2026-08-05T00:00:00Z", "2026-08-05T00:10:00Z",
                 Map.of("coderModel", model), List.of(assignment), config,
@@ -75,6 +75,8 @@ class BenchmarkRunReportSerializationTest {
         assertEquals("abc123", json.at("/benchmarkConfig/gitCommit").asText());
         assertTrue(json.at("/benchmarkConfig/gitDirty").asBoolean());
         assertEquals("sha256-local-tree", json.at("/benchmarkConfig/workingTreeFingerprint").asText());
+        assertEquals("prompt-hash", json.at("/benchmarkConfig/requirementSha256/task-api-basic").asText());
+        assertTrue(json.path("fullWorkflowSuccessRate").isNull());
     }
 
     /**
@@ -165,6 +167,7 @@ class BenchmarkRunReportSerializationTest {
         assertEquals(1, json.at("/runSummary/sliceDelivery/acceptedTestFiles").asInt());
         assertEquals(1, json.at("/runSummary/sliceDelivery/skippedFutureTypeTests").asInt());
         assertEquals("SPRING_BOOT", json.at("/runSummary/sliceDelivery/effectiveProjectType").asText());
+        assertEquals("NOT_APPLICABLE", json.at("/behavior/status").asText());
     }
 
     /**
@@ -226,7 +229,7 @@ class BenchmarkRunReportSerializationTest {
         BenchmarkCaseResult second = checkpointResult(2, true, false);
         Path reportPath = tempDir.resolve("checkpoint.json");
         BenchmarkRunnerService service = new BenchmarkRunnerService(
-                null, null, null, null, new ObjectMapper(), "https://example.com");
+                null, null, null, null, null, new ObjectMapper(), "https://example.com");
 
         BenchmarkRunReport firstCheckpoint = BenchmarkRunnerService.buildReport(
                 Instant.parse("2026-08-12T00:00:00Z"), Instant.parse("2026-08-12T00:10:00Z"),
@@ -241,6 +244,8 @@ class BenchmarkRunReportSerializationTest {
         assertEquals(2, json.at("/cases").size());
         assertEquals(1, json.at("/independentQualityPassCount").asInt());
         assertEquals(1, json.at("/falseSuccessCount").asInt());
+        // 平台通过但外部判卷失败的样本不能进入完整工作流成功率。
+        assertEquals(0.5, json.at("/fullWorkflowSuccessRate").asDouble());
         assertTrue(Files.notExists(reportPath.resolveSibling("checkpoint.json.tmp")));
     }
 

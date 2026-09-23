@@ -6,19 +6,9 @@ import java.util.Locale;
  * 标识当前实际调用的 API 提供方，用于选择供应商专用的观测行为。
  */
 public enum AiProvider {
-    DEEPSEEK_DIRECT(true),
-    ALIBABA_BAILIAN(false),
-    GENERIC_OPENAI(false);
-
-    private final boolean deepSeekCacheMetricsEnabled;
-
-    AiProvider(boolean deepSeekCacheMetricsEnabled) {
-        this.deepSeekCacheMetricsEnabled = deepSeekCacheMetricsEnabled;
-    }
-
-    public boolean deepSeekCacheMetricsEnabled() {
-        return deepSeekCacheMetricsEnabled;
-    }
+    DEEPSEEK_DIRECT,
+    ALIBABA_BAILIAN,
+    GENERIC_OPENAI;
 
     /**
      * 将 YAML 中适合阅读的短横线名称转换为枚举，并对未知配置立即报错。

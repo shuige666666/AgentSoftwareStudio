@@ -1,5 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Service.Metric;
 
+import com.core.multiAgentSoftwareStudio.Config.AiProvider;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolCall;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolDefinition;
@@ -80,6 +81,36 @@ class ObservedOpenAiCompatibleChatModelTest {
         assertFalse(parsed.cacheMetricsAvailable());
     }
 
+    /**
+     * 百炼 OpenAI 兼容接口的命中数位于嵌套 usage 字段。
+     */
+    @Test
+    void parsesBailianCachedTokensWhenReturned() {
+        ObservedOpenAiCompatibleChatModel model = newModel(AiProvider.ALIBABA_BAILIAN, true);
+        ObjectNode usage = JsonNodeFactory.instance.objectNode();
+        usage.put("prompt_tokens", 150);
+        usage.putObject("prompt_tokens_details").put("cached_tokens", 120);
+        usage.put("completion_tokens", 25);
+
+        var parsed = model.parseUsage(usage);
+
+        assertEquals(120, parsed.inputCacheHitTokens());
+        assertEquals(30, parsed.inputCacheMissTokens());
+        assertTrue(parsed.cacheMetricsAvailable());
+    }
+
+    @Test
+    void keepsBailianCacheUnavailableWhenResponseOmitsField() {
+        ObservedOpenAiCompatibleChatModel model = newModel(AiProvider.ALIBABA_BAILIAN, true);
+        ObjectNode usage = JsonNodeFactory.instance.objectNode();
+        usage.put("prompt_tokens", 150);
+
+        var parsed = model.parseUsage(usage);
+
+        assertEquals(150, parsed.inputCacheMissTokens());
+        assertFalse(parsed.cacheMetricsAvailable());
+    }
+
     @Test
     void keepsPromptAsPlainUserMessage() {
         ObservedOpenAiCompatibleChatModel model = newModel(true);
@@ -145,6 +176,11 @@ class ObservedOpenAiCompatibleChatModelTest {
 
     private ObservedOpenAiCompatibleChatModel newModel(boolean deepSeekCacheMetricsEnabled,
                                                        boolean jsonOutputEnabled) {
+        return newModel(deepSeekCacheMetricsEnabled ? AiProvider.DEEPSEEK_DIRECT : AiProvider.GENERIC_OPENAI,
+                jsonOutputEnabled);
+    }
+
+    private ObservedOpenAiCompatibleChatModel newModel(AiProvider aiProvider, boolean jsonOutputEnabled) {
         return new ObservedOpenAiCompatibleChatModel(
                 "test-key",
                 "https://api.deepseek.com",
@@ -154,7 +190,7 @@ class ObservedOpenAiCompatibleChatModelTest {
                 Duration.ofSeconds(5),
                 objectMapper,
                 new LlmUsageMetricsService(),
-                deepSeekCacheMetricsEnabled,
+                aiProvider,
                 jsonOutputEnabled);
     }
 }
