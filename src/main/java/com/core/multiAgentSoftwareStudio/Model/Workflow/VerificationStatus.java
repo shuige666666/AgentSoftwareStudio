@@ -6,5 +6,6 @@ package com.core.multiAgentSoftwareStudio.Model.Workflow;
 public enum VerificationStatus {
     PASSED,
     FAILED,
+    BLOCKED,
     NOT_RUN
 }

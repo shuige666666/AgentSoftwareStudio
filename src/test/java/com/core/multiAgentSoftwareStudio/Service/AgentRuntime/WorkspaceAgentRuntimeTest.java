@@ -72,6 +72,53 @@ class WorkspaceAgentRuntimeTest {
     }
 
     @Test
+    void developmentRepairsProductionAfterTestFailureInSameSession() throws Exception {
+        RecordingToolModel model = new RecordingToolModel(List.of(
+                response("call-1", "apply_patch", "{\"patch\":\"add test\"}"),
+                response("call-2", "submit_checkpoint", "{\"scope\":\"progress\",\"summary\":\"test\"}"),
+                response("call-3", "apply_patch", "{\"patch\":\"fix production\"}"),
+                response("call-4", "submit_checkpoint", "{\"scope\":\"final\",\"summary\":\"done\"}")));
+        WorkspaceToolRegistry registry = mock(WorkspaceToolRegistry.class);
+        when(registry.definitions(WorkspaceAgentMode.DEVELOPMENT)).thenReturn(List.of());
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
+            String name = invocation.getArgument(0);
+            String arguments = invocation.getArgument(1);
+            WorkspaceAgentSession session = invocation.getArgument(2);
+            if ("apply_patch".equals(name) && arguments.contains("add test")) {
+                Path test = projectRoot.resolve("src/test/java/demo/AppTest.java");
+                Files.createDirectories(test.getParent());
+                Files.writeString(test, "class AppTest {}", StandardCharsets.UTF_8);
+                session.recordWrite("src/test/java/demo/AppTest.java");
+                return "{\"applied\":1}";
+            }
+            if ("apply_patch".equals(name)) {
+                Path source = projectRoot.resolve("src/main/java/demo/App.java");
+                Files.createDirectories(source.getParent());
+                Files.writeString(source, "class App {}", StandardCharsets.UTF_8);
+                session.recordWrite("src/main/java/demo/App.java");
+                return "{\"applied\":1}";
+            }
+            if (arguments.contains("progress")) return "{\"status\":\"FAILED\",\"failureOutput\":\"assertion failed\"}";
+            session.complete("final checkpoint passed");
+            session.workflowData().success = true;
+            return "{\"status\":\"PASSED\"}";
+        });
+        SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
+        data.projectPath = projectRoot.toString();
+
+        WorkspaceAgentRunResult result = runtime(model, registry).runDetailed(
+                data, WorkspaceAgentMode.DEVELOPMENT, Set.of(), "implement", message -> { });
+
+        assertTrue(result.completed());
+        assertTrue(data.success);
+        assertEquals(4, model.histories.size());
+        assertTrue(model.histories.get(2).getLast().content().contains("assertion failed"));
+        assertTrue(data.codes.stream().anyMatch(code -> code.filename().endsWith("AppTest.java")));
+        assertTrue(data.codes.stream().anyMatch(code -> code.filename().endsWith("App.java")));
+    }
+
+    @Test
     void defaultImplementationSessionCanContinueBeyondEightModelTurns() throws Exception {
         List<ToolModelResponse> responses = new ArrayList<>();
         for (int index = 1; index <= 9; index++) {

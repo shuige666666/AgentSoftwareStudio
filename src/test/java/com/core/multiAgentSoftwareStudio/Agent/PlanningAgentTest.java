@@ -83,6 +83,26 @@ class PlanningAgentTest {
      * 缺失公开路径或方法应返回对应字段，不得静默采用根路径。
      */
     @Test
+    void rejectsConflictRevisionThatChangesUserFixedHttpPath() throws Exception {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        String altered = DESIGN.replace("\"path\":\"/api/polls\"", "\"path\":\"/api/surveys\"");
+        when(model.generate(anyList())).thenReturn(
+                reply("{\"decision\":\"REVISE\",\"reason\":\"planning path conflict\"}"), reply(altered));
+        PlanningAgent agent = new PlanningAgent(model,
+                new LangGraphPromptExecutor(new LlmUsageMetricsService()), new ObjectMapper());
+        var requirements = new ObjectMapper().readValue(REQUIREMENTS,
+                com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument.class);
+        var current = new ObjectMapper().readValue(DESIGN,
+                com.core.multiAgentSoftwareStudio.Model.Generation.PlanningDesign.class);
+
+        var decision = agent.reviewConflict("必须使用 POST /api/polls", requirements, current,
+                "规划与实现冲突");
+
+        assertTrue(!decision.revised());
+        assertTrue(decision.reason().contains("explicitly fixed"));
+    }
+
+    @Test
     void reportsMissingPublicMethodAndPathWithoutRootDefaults() throws Exception {
         ApiEndpointContract endpoint = new ApiEndpointContract(null, null, "", "", "", "");
         FrontendCallContract call = new FrontendCallContract("app.js", null, null, "");

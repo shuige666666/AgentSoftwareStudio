@@ -35,8 +35,10 @@ class WorkspaceAgentContextCompactorTest {
             session.messages().add(ToolChatMessage.tool("call-" + turn, "result-" + turn));
         }
 
-        WorkspaceAgentContextCompactor.Result result = new WorkspaceAgentContextCompactor(
-                new WorkspaceAgentLimitsConfig().getContext()).compact(session, "read_files", "result-7");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxContextTokens(100);
+        WorkspaceAgentContextCompactor.Result result = new WorkspaceAgentContextCompactor(policy)
+                .compact(session, "read_files", "result-7");
 
         assertTrue(result.compacted());
         assertEquals("system", session.messages().get(0).content());

@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 public class WorkspaceAgentLimitsConfig {
 
     private SessionLimit implement = new SessionLimit(24, 72);
+    private SessionLimit development = new SessionLimit(36, 108);
     private SessionLimit test = new SessionLimit(12, 36);
     private SessionLimit frontendIntegration = new SessionLimit(8, 24);
     private SessionLimit repairImplementation = new SessionLimit(16, 48);
@@ -22,6 +23,7 @@ public class WorkspaceAgentLimitsConfig {
 
     public SessionLimit forMode(WorkspaceAgentMode mode) {
         return switch (mode) {
+            case DEVELOPMENT -> development;
             case IMPLEMENT -> implement;
             case TEST -> test;
             case FRONTEND_INTEGRATION -> frontendIntegration;
@@ -33,6 +35,8 @@ public class WorkspaceAgentLimitsConfig {
 
     public SessionLimit getImplement() { return implement; }
     public void setImplement(SessionLimit implement) { if (implement != null) this.implement = implement; }
+    public SessionLimit getDevelopment() { return development; }
+    public void setDevelopment(SessionLimit development) { if (development != null) this.development = development; }
     public SessionLimit getTest() { return test; }
     public void setTest(SessionLimit test) { if (test != null) this.test = test; }
     public SessionLimit getFrontendIntegration() { return frontendIntegration; }
@@ -92,19 +96,25 @@ public class WorkspaceAgentLimitsConfig {
     }
 
     /**
-     * 控制发送给模型的历史长度，保留原始目标、最近工具证据和最近若干完整模型轮次。
+     * 按估算 token 占用压缩历史，保留原始目标和最近完整的工具调用轮次。
      */
     public static class ContextPolicy {
-        private int compactAfterModelTurns = 6;
         private int retainedModelTurns = 3;
         private int maxLatestToolResultChars = 6_000;
+        private int maxContextTokens = 64_000;
+        private int compactAtPercent = 70;
 
-        public int getCompactAfterModelTurns() { return compactAfterModelTurns; }
-        public void setCompactAfterModelTurns(int value) { this.compactAfterModelTurns = requirePositive(value); }
         public int getRetainedModelTurns() { return retainedModelTurns; }
         public void setRetainedModelTurns(int value) { this.retainedModelTurns = requirePositive(value); }
         public int getMaxLatestToolResultChars() { return maxLatestToolResultChars; }
         public void setMaxLatestToolResultChars(int value) { this.maxLatestToolResultChars = requirePositive(value); }
+        public int getMaxContextTokens() { return maxContextTokens; }
+        public void setMaxContextTokens(int value) { this.maxContextTokens = requirePositive(value); }
+        public int getCompactAtPercent() { return compactAtPercent; }
+        public void setCompactAtPercent(int value) {
+            if (value < 1 || value > 100) throw new IllegalArgumentException("Context percentage must be 1-100");
+            this.compactAtPercent = value;
+        }
     }
 
     private static int requirePositive(int value) {

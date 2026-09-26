@@ -10,7 +10,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * 让开发 Agent 在真实项目目录中完成整套生产代码，并以真实编译结果作为完成条件。
+ * 让开发 Agent 在同一工作区会话中完成实现、测试、修复及正式验收。
  */
 @Service
 public class BatchGenerationService {
@@ -22,12 +22,12 @@ public class BatchGenerationService {
     }
 
     /**
-     * 一次性实现完整生产代码，避免在依赖尚不完整的中间批次上进行无效编译。
+     * 交给连续开发会话处理跨层文件，并由最终 checkpoint 决定是否完成。
      */
     public WorkspaceAgentRunResult generateProject(SoftwareStudioWorkflowData data, Consumer<String> logger) {
-        logger.accept("4. Tool-driven developer is implementing the complete production project.");
+        logger.accept("4. DevelopmentAgent is implementing and verifying the complete project.");
         String objective = """
-                Implement the complete requested project in the current workspace.
+                Implement and verify the complete requested project in the current workspace.
 
                 Original user request:
                 %s
@@ -38,22 +38,20 @@ public class BatchGenerationService {
                 Architecture and file responsibilities:
                 %s
 
-                Planned delivery batches:
-                %s
-
                 Required cross-layer contract:
                 %s
 
                 Inspect the real workspace and its already compiling scaffold before editing. Keep the existing
                 build configuration and application bootstrap unless a concrete business need requires a change.
-                Create or update all required business files. Keep controller, service, persistence, DTO, template,
-                JavaScript and CSS contracts consistent. Do not create tests in this stage. Run compile_main after the
-                latest edit and only call complete_stage when the complete production project compiles.
-                """.formatted(data.userRequest, data.prd, data.structure, data.generationPlan, data.contract);
+                Create or update business code, frontend, meaningful behavior tests and README in this same session.
+                Keep controller, service, persistence, DTO, template, JavaScript and CSS contracts consistent.
+                Use bash for focused diagnosis; submit_checkpoint(scope=progress) for full build and all existing tests.
+                Resolve failures in this session, then submit_checkpoint(scope=final) for completion.
+                """.formatted(data.userRequest, data.prd, data.structure, data.contract);
 
         WorkspaceAgentRunResult result = workspaceAgentRuntime.runDetailed(
                 data,
-                WorkspaceAgentMode.IMPLEMENT,
+                WorkspaceAgentMode.DEVELOPMENT,
                 Set.of(),
                 objective,
                 logger);

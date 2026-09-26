@@ -2,6 +2,7 @@ package com.core.multiAgentSoftwareStudio.Service.AgentRuntime;
 
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
+import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -33,6 +34,10 @@ public final class WorkspaceAgentSession {
     private boolean completed;
     private boolean blocked;
     private String completionSummary = "";
+    private DockerSandboxService.WorkspaceShell shell;
+    private String lastCheckpointHash = "";
+    private boolean lastCheckpointPassed;
+    private boolean finalCheckpointPassed;
 
     public WorkspaceAgentSession(
             Path projectRoot,
@@ -63,6 +68,18 @@ public final class WorkspaceAgentSession {
     public boolean completed() { return completed; }
     public boolean blocked() { return blocked; }
     public String completionSummary() { return completionSummary; }
+    public String lastCheckpointHash() { return lastCheckpointHash; }
+    public boolean lastCheckpointPassed() { return lastCheckpointPassed; }
+    public boolean finalCheckpointPassed() { return finalCheckpointPassed; }
+
+    public DockerSandboxService.WorkspaceShell shell() { return shell; }
+    public void setShell(DockerSandboxService.WorkspaceShell shell) { this.shell = shell; }
+
+    /** 正式验证前清理会话容器，阻止后台进程继续写候选目录。 */
+    public void closeShell(DockerSandboxService sandbox) {
+        if (shell != null) sandbox.closeWorkspaceShell(shell);
+        shell = null;
+    }
 
     public void incrementModelTurns() { modelTurns++; }
     public void incrementToolCalls() { toolCalls++; }
@@ -70,6 +87,14 @@ public final class WorkspaceAgentSession {
     public void recordWrite(String path) {
         changedFiles.add(path);
         writeVersion++;
+        lastCheckpointPassed = false;
+        finalCheckpointPassed = false;
+    }
+
+    public void recordCheckpoint(String hash, boolean passed, boolean finalScope) {
+        lastCheckpointHash = hash == null ? "" : hash;
+        lastCheckpointPassed = passed;
+        finalCheckpointPassed = passed && finalScope;
     }
 
     public void recordCompilePassed() { compiledVersion = writeVersion; }

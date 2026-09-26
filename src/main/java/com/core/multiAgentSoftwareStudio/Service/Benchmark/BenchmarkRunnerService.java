@@ -1,6 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Service.Benchmark;
 
 import com.core.multiAgentSoftwareStudio.Config.AiConfig;
+import com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentLimitsConfig;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.AgentModelAssignment;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
@@ -9,12 +10,11 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkModelInfo;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkVerificationSummary;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunConfiguration;
-import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRepairBudgetConfiguration;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkDevelopmentConfiguration;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunRequest;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
-import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,6 +71,7 @@ public class BenchmarkRunnerService {
     private final LlmUsageMetricsService llmUsageMetricsService;
     private final ObjectMapper objectMapper;
     private final String modelBaseUrl;
+    private final WorkspaceAgentLimitsConfig limitsConfig;
 
     public BenchmarkRunnerService(BenchmarkCaseRegistry caseRegistry,
             BenchmarkQualityEvaluator qualityEvaluator,
@@ -78,7 +79,8 @@ public class BenchmarkRunnerService {
             SoftwareStudioWorkflowService workflowService,
             LlmUsageMetricsService llmUsageMetricsService,
             ObjectMapper objectMapper,
-            @Value("${spring.ai.openai.base-url}") String modelBaseUrl) {
+            @Value("${spring.ai.openai.base-url}") String modelBaseUrl,
+            WorkspaceAgentLimitsConfig limitsConfig) {
         this.caseRegistry = caseRegistry;
         this.qualityEvaluator = qualityEvaluator;
         this.behaviorEvaluator = behaviorEvaluator;
@@ -86,23 +88,11 @@ public class BenchmarkRunnerService {
         this.llmUsageMetricsService = llmUsageMetricsService;
         this.objectMapper = objectMapper;
         this.modelBaseUrl = modelBaseUrl;
+        this.limitsConfig = limitsConfig;
     }
 
     public List<BenchmarkCase> listCases() {
         return caseRegistry.allCases();
-    }
-
-    /**
-     * 将当前集中配置的修复预算策略写入报告，避免继续记录已经不控制运行行为的旧重试参数。
-     */
-    private BenchmarkRepairBudgetConfiguration repairBudgetConfiguration() {
-        RepairBudget budget = RepairBudget.forToolDrivenProject();
-        return new BenchmarkRepairBudgetConfiguration(
-                budget.policyVersion(),
-                budget.maxLlmRepairs(),
-                0,
-                budget.maxRepairsPerSlice(),
-                budget.reservedForFinalVerification());
     }
 
     public BenchmarkRunReport run(BenchmarkRunRequest request) {
@@ -120,10 +110,14 @@ public class BenchmarkRunnerService {
         GitSnapshot gitSnapshot = resolveGitSnapshot();
         Path reportPath = reportPathFor(started).toAbsolutePath();
         BenchmarkRunConfiguration benchmarkConfig = new BenchmarkRunConfiguration(
-                selectedCases.stream().map(BenchmarkCase::id).toList(), repetitions, repairBudgetConfiguration(),
+                selectedCases.stream().map(BenchmarkCase::id).toList(), repetitions, null,
                 gitSnapshot.commit(), gitSnapshot.dirty(), gitSnapshot.workingTreeFingerprint(),
                 selectedCases.stream().collect(java.util.stream.Collectors.toMap(
-                        BenchmarkCase::id, benchmarkCase -> sha256(benchmarkCase.prompt()))));
+                        BenchmarkCase::id, benchmarkCase -> sha256(benchmarkCase.prompt()))),
+                new BenchmarkDevelopmentConfiguration(
+                        limitsConfig.getDevelopment().getMaxModelTurns(),
+                        limitsConfig.getDevelopment().getMaxToolCalls(),
+                        "snapshot-build-all-tests-contract-final-v1"));
 
         System.out.println("[Benchmark] 质量基准测试进度：0/" + cases.size()
                 + "，每个案例重复 " + repetitions + " 次，准备执行。");
@@ -216,8 +210,8 @@ public class BenchmarkRunnerService {
                     BenchmarkVerificationSummary.from(execution.verification()), execution.runSummary(), null,
                     behavior);
         } catch (WorkflowExecutionFailure e) {
-            // 旧主链异常不应抹掉已经保存的候选；仍尝试对真实产物做外部行为判卷。
-            BenchmarkBehaviorResult behavior = behaviorEvaluator.evaluate(benchmarkCase.id(), e.projectPath());
+            // 工作流异常仍保留候选；外部判卷自身失败时也要继续生成可诊断报告。
+            BenchmarkBehaviorResult behavior = safeBehaviorEvaluation(benchmarkCase.id(), e.projectPath());
             BenchmarkQualityResult quality = new BenchmarkQualityResult(false, List.of());
             RuntimeException cause = e.getCause() instanceof RuntimeException runtime ? runtime : e;
             String location = cause.getStackTrace().length == 0 ? "unknown" : cause.getStackTrace()[0].toString();
@@ -236,7 +230,7 @@ public class BenchmarkRunnerService {
             BenchmarkQualityResult quality = new BenchmarkQualityResult(false, List.of());
             BenchmarkBehaviorResult behavior = "BEHAVIOR".equals(phase)
                     ? BenchmarkBehaviorResult.environmentError("外部行为判卷异常：" + safeMessage(e))
-                    : behaviorEvaluator.evaluate(benchmarkCase.id(), path);
+                    : safeBehaviorEvaluation(benchmarkCase.id(), path);
             return new BenchmarkCaseResult(
                     benchmarkCase.id(), repetitionIndex, repetitionCount,
                     false, false, "NOT_REVIEWED", path, elapsedMillis(started), quality,
@@ -254,6 +248,15 @@ public class BenchmarkRunnerService {
             heartbeat.cancel(false);
             progressExecutor.shutdown();
             printProgress(benchmarkCase.id(), currentCase, totalCases, "已完成", started);
+        }
+    }
+
+    /** 运行失败后的补充判卷不能再使整个基准报告丢失。 */
+    private BenchmarkBehaviorResult safeBehaviorEvaluation(String caseId, String path) {
+        try {
+            return behaviorEvaluator.evaluate(caseId, path);
+        } catch (RuntimeException e) {
+            return BenchmarkBehaviorResult.environmentError("外部行为判卷异常：" + safeMessage(e));
         }
     }
 

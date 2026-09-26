@@ -1,11 +1,13 @@
 package com.core.multiAgentSoftwareStudio.Service.AgentRuntime;
 
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectQualityPolicyResult;
+import com.core.multiAgentSoftwareStudio.Model.Generation.PlanningConflictDecision;
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolDefinition;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
 import com.core.multiAgentSoftwareStudio.Service.Contract.ProjectProfileService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PlanningNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -42,17 +44,26 @@ public class WorkspaceToolRegistry {
     private final DockerSandboxService sandboxService;
     private final WorkspaceService workspaceService;
     private final ProjectProfileService projectProfileService;
+    private final WorkspacePatchService patchService;
+    private final WorkspaceCheckpointService checkpointService;
+    private final PlanningNodeService planningNodeService;
     private final Map<String, WorkspaceTool> tools = new LinkedHashMap<>();
 
     public WorkspaceToolRegistry(
             ObjectMapper objectMapper,
             DockerSandboxService sandboxService,
             WorkspaceService workspaceService,
-            ProjectProfileService projectProfileService) {
+            ProjectProfileService projectProfileService,
+            WorkspacePatchService patchService,
+            WorkspaceCheckpointService checkpointService,
+            PlanningNodeService planningNodeService) {
         this.objectMapper = objectMapper;
         this.sandboxService = sandboxService;
         this.workspaceService = workspaceService;
         this.projectProfileService = projectProfileService;
+        this.patchService = patchService;
+        this.checkpointService = checkpointService;
+        this.planningNodeService = planningNodeService;
         registerCoreTools();
     }
 
@@ -60,10 +71,22 @@ public class WorkspaceToolRegistry {
         return tools.values().stream().map(WorkspaceTool::definition).toList();
     }
 
+    /** 连续开发会话只暴露当前协议，避免模型转回旧的阶段完成路径。 */
+    public List<ToolDefinition> definitions(WorkspaceAgentMode mode) {
+        if (mode != WorkspaceAgentMode.DEVELOPMENT) return definitions();
+        return List.of("list_files", "search_code", "read_files", "get_current_diff",
+                        "bash", "apply_patch", "submit_checkpoint", "report_blocker")
+                .stream().map(name -> tools.get(name).definition()).toList();
+    }
+
     /**
      * 校验工具名和 JSON 参数后执行；异常转换成工具结果交还模型继续判断。
      */
     public String execute(String name, String rawArguments, WorkspaceAgentSession session) {
+        if (session.mode() == WorkspaceAgentMode.DEVELOPMENT
+                && definitions(WorkspaceAgentMode.DEVELOPMENT).stream().noneMatch(def -> def.name().equals(name))) {
+            return jsonError("TOOL_NOT_ALLOWED", "Tool is outside the development protocol: " + name);
+        }
         WorkspaceTool tool = tools.get(name);
         if (tool == null) {
             return jsonError("UNKNOWN_TOOL", "Tool is not allowed: " + name);
@@ -85,6 +108,13 @@ public class WorkspaceToolRegistry {
                 arrayPropertySchema("paths", true), this::readFiles);
         register("apply_edits", "原子应用一组精确文本替换；每个文件限一项，并携带 read_files 返回的 expectedHash。",
                 applyEditsSchema(), this::applyEdits);
+        register("apply_patch", "按上下文应用多文件补丁；支持新增、修改、删除，返回局部失败的实际落盘文件。",
+                objectSchema("patch", "string", "true"), this::applyPatch);
+        register("bash", "在断网非 root 持久容器中执行命令；cwd 可用 . 或 /workspace 表示项目根目录，超时毫秒数可选。",
+                objectSchema("command", "string", "true", "cwd", "string", "false",
+                        "timeoutMillis", "integer", "false"), this::bash);
+        register("submit_checkpoint", "冻结当前源码，在独立副本执行完整编译和全量已有测试；final 另做契约验收。",
+                objectSchema("summary", "string", "true", "scope", "string", "true"), this::submitCheckpoint);
         register("get_current_diff", "查看本会话相对开始快照发生变化的文件摘要。",
                 objectSchema(), this::currentDiff);
         register("compile_main", "在隔离 Docker 沙箱中编译当前生产代码。",
@@ -96,7 +126,7 @@ public class WorkspaceToolRegistry {
         register("complete_stage", "声明当前阶段完成；平台会检查修改后的代码是否已经真实验证。",
                 objectSchema("summary", "string", "true"), this::completeStage);
         register("report_blocker", "报告无法安全处理的阻塞原因，不伪造代码修改。",
-                objectSchema("reason", "string", "true"), this::reportBlocker);
+                objectSchema("reason", "string", "true", "kind", "string", "false"), this::reportBlocker);
     }
 
     private void register(
@@ -254,6 +284,69 @@ public class WorkspaceToolRegistry {
         return result.toString();
     }
 
+    /** 结束会话时清理持续容器，避免后台进程跨越工作流边界。 */
+    public void closeSession(WorkspaceAgentSession session) {
+        session.closeShell(sandboxService);
+    }
+
+    /** 多文件补丁先校验再落盘；发生局部 IO 错误时只报告实际已写入项。 */
+    private String applyPatch(JsonNode arguments, WorkspaceAgentSession session) {
+        if (session.mode() != WorkspaceAgentMode.DEVELOPMENT) {
+            return jsonError("TOOL_NOT_ALLOWED", "apply_patch belongs to the development session");
+        }
+        return objectMapper.valueToTree(patchService.apply(arguments.path("patch").asText(""), session)).toString();
+    }
+
+    /** Shell 的所有写入都以命令前后的磁盘差异更新工作区版本。 */
+    private String bash(JsonNode arguments, WorkspaceAgentSession session) {
+        if (session.mode() != WorkspaceAgentMode.DEVELOPMENT) {
+            return jsonError("TOOL_NOT_ALLOWED", "bash belongs to the development session");
+        }
+        Map<String, String> before = snapshot(session.projectRoot());
+        if (session.shell() == null) session.setShell(sandboxService.startWorkspaceShell(session.projectRoot()));
+        String command = arguments.path("command").asText("");
+        String cwd = arguments.path("cwd").asText("");
+        long timeout = arguments.path("timeoutMillis").asLong(120_000);
+        DockerSandboxService.WorkspaceCommandResult run = sandboxService.runWorkspaceCommand(
+                session.shell(), command, cwd, timeout);
+        if (session.shell().closed()) session.setShell(null);
+        Map<String, String> after = snapshot(session.projectRoot());
+        java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>(before.keySet());
+        paths.addAll(after.keySet());
+        List<String> changed = paths.stream()
+                .filter(path -> !java.util.Objects.equals(before.get(path), after.get(path)))
+                .sorted().toList();
+        changed.forEach(session::recordWrite);
+        ObjectNode result = objectMapper.createObjectNode();
+        SandboxExecutionResult execution = run.execution();
+        result.put("passed", execution.completedSuccessfully());
+        result.put("command", command);
+        result.put("cwd", cwd.isBlank() ? "." : cwd);
+        if (execution.exitCode() == null) result.putNull("exitCode");
+        else result.put("exitCode", execution.exitCode());
+        result.put("durationMillis", execution.durationMillis());
+        result.put("timedOut", execution.timedOut());
+        result.put("infrastructureError", execution.infrastructureError());
+        result.put("output", limitHeadAndTail(execution.output(), 16_000));
+        result.put("fullLogPath", run.logPath());
+        ArrayNode files = result.putArray("changedFiles");
+        changed.forEach(files::add);
+        return result.toString();
+    }
+
+    /** 正式验证在冻结版本上执行，只有 final 全部通过才结束当前开发会话。 */
+    private String submitCheckpoint(JsonNode arguments, WorkspaceAgentSession session) {
+        if (session.mode() != WorkspaceAgentMode.DEVELOPMENT) {
+            return jsonError("TOOL_NOT_ALLOWED", "submit_checkpoint belongs to the development session");
+        }
+        WorkspaceCheckpointService.CheckpointResult result = checkpointService.verify(session,
+                arguments.path("scope").asText("progress"), arguments.path("summary").asText(""));
+        if (result.allowCompletion()) {
+            session.complete(arguments.path("summary").asText("Final checkpoint passed"));
+        }
+        return objectMapper.valueToTree(result).toString();
+    }
+
     private String currentDiff(JsonNode ignored, WorkspaceAgentSession session) {
         ObjectNode result = objectMapper.createObjectNode();
         ArrayNode changed = result.putArray("changedFiles");
@@ -342,6 +435,20 @@ public class WorkspaceToolRegistry {
 
     private String reportBlocker(JsonNode arguments, WorkspaceAgentSession session) {
         String reason = arguments.path("reason").asText("unspecified");
+        String kind = arguments.path("kind").asText("task_blocked");
+        if (session.mode() == WorkspaceAgentMode.DEVELOPMENT && "planning_conflict".equals(kind)) {
+            PlanningConflictDecision decision = planningNodeService.reviewConflict(
+                    session.workflowData(), reason, session.logger());
+            ObjectNode response = objectMapper.createObjectNode();
+            response.put("kind", "planning_conflict");
+            response.put("revised", decision.revised());
+            response.put("reason", decision.reason());
+            response.set("effectivePlan", objectMapper.valueToTree(session.workflowData().planningDesign));
+            return response.toString();
+        }
+        if (!"task_blocked".equals(kind)) {
+            return jsonError("UNKNOWN_BLOCKER_KIND", "Use planning_conflict or task_blocked");
+        }
         session.block(reason);
         session.logger().accept("   Tool Agent blocker: " + reason);
         return "{\"recorded\":true,\"instruction\":\"Stop making speculative changes and return.\"}";
@@ -352,6 +459,8 @@ public class WorkspaceToolRegistry {
         boolean pathAllowed = session.allowedWritePaths().isEmpty()
                 || session.allowedWritePaths().stream().map(this::normalizeText).anyMatch(normalized::equals);
         boolean scopeAllowed = switch (session.mode()) {
+            case DEVELOPMENT -> normalized.startsWith("src/") || normalized.equals("pom.xml")
+                    || normalized.equals("README.md") || normalized.equals(".gitignore");
             case TEST -> normalized.startsWith("src/test/");
             case IMPLEMENT -> pathAllowed && (normalized.startsWith("src/main/") || normalized.equals("pom.xml"));
             case FRONTEND_INTEGRATION -> normalized.startsWith("src/main/") && pathAllowed;

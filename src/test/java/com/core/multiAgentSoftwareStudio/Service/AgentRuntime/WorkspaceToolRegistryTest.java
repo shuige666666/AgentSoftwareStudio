@@ -1,11 +1,13 @@
 package com.core.multiAgentSoftwareStudio.Service.AgentRuntime;
 
 import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Generation.PlanningConflictDecision;
 import com.core.multiAgentSoftwareStudio.Service.Contract.ProjectProfileService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PlanningNodeService;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,14 +31,35 @@ class WorkspaceToolRegistryTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final DockerSandboxService sandboxService = mock(DockerSandboxService.class);
+    private final PlanningNodeService planningNodeService = mock(PlanningNodeService.class);
     private final WorkspaceToolRegistry registry = new WorkspaceToolRegistry(
             objectMapper,
             sandboxService,
             new WorkspaceService(new SourceCodePathService()),
-            mock(ProjectProfileService.class));
+            mock(ProjectProfileService.class),
+            new WorkspacePatchService(),
+            mock(WorkspaceCheckpointService.class),
+            planningNodeService);
 
     @TempDir
     Path projectRoot;
+
+    @Test
+    void planningConflictReturnsDecisionWithoutBlockingDevelopmentSession() {
+        SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("POST /api/polls");
+        WorkspaceAgentSession session = new WorkspaceAgentSession(projectRoot,
+                WorkspaceAgentMode.DEVELOPMENT, data, message -> { }, Map.of(), Set.of());
+        session.messages().add(com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage.user("original goal"));
+        when(planningNodeService.reviewConflict(any(), any(), any()))
+                .thenReturn(new PlanningConflictDecision(false, "Keep the fixed path", null));
+
+        String result = registry.execute("report_blocker",
+                "{\"kind\":\"planning_conflict\",\"reason\":\"planned path differs\"}", session);
+
+        assertTrue(result.contains("Keep the fixed path"));
+        assertFalse(session.blocked());
+        assertEquals("original goal", session.messages().getFirst().content());
+    }
 
     @Test
     void planningMetadataIsExcludedFromAgentFileListingAndSnapshots() throws Exception {

@@ -109,11 +109,39 @@ public class PlanningArtifactPersistenceService {
             Files.createDirectories(metadataRoot);
             writeJsonIfPresent(metadataRoot.resolve("project-profile.json"), data.projectProfile);
             writeJson(metadataRoot.resolve("run-summary.json"), summary);
+            writeAtomic(metadataRoot.resolve("delivery-report.md"), deliveryReport(data));
             writeManifest(metadataRoot);
             safeLogger.accept("   Workflow run summary persisted to " + metadataRoot.resolve("run-summary.json") + ".");
         } catch (IOException e) {
             throw new IllegalStateException("Unable to persist workflow run summary", e);
         }
+    }
+
+    /** 使用平台真实验证记录生成交付报告，不让模型自行宣称构建或测试通过。 */
+    private String deliveryReport(SoftwareStudioWorkflowData data) {
+        String build = data.verificationResult == null ? "NOT_RUN"
+                : data.verificationResult.build().status().name();
+        String test = data.verificationResult == null ? "NOT_RUN"
+                : data.verificationResult.test().status().name();
+        StringBuilder report = new StringBuilder("# 项目交付报告\n\n")
+                .append("- 最终结果：").append(data.success ? "通过" : "未通过").append('\n')
+                .append("- 编译：").append(build).append('\n')
+                .append("- 全量测试：").append(test).append('\n')
+                .append("- 受检源码 SHA-256：")
+                .append(data.lastCheckpointHash == null ? "未生成" : data.lastCheckpointHash).append('\n')
+                .append("- checkpoint 记录：")
+                .append(data.lastCheckpointReportPath == null ? "未生成" : data.lastCheckpointReportPath)
+                .append("\n\n## 实际交付文件\n\n");
+        if (data.codes.isEmpty()) report.append("未读取到源码文件。\n");
+        else data.codes.stream().filter(code -> code != null && code.filename() != null)
+                .map(code -> code.filename().replace('\\', '/')).distinct().sorted()
+                .forEach(path -> report.append("- ").append(path).append('\n'));
+        report.append("\n## 运行与验证\n\n项目的具体运行方式见 README.md；Maven 工程可执行 `mvn test`。")
+                .append("平台以上述 checkpoint 的编译和全量测试为正式验证依据。\n")
+                .append("\n## 已知限制\n\n");
+        if (data.validationWarnings.isEmpty()) report.append("本次未记录额外限制；业务正确性以独立行为验收为准。\n");
+        else data.validationWarnings.forEach(warning -> report.append("- ").append(warning).append('\n'));
+        return report.toString();
     }
 
     private void writeArtifact(Path root, String basename, String title, Object value) throws IOException {

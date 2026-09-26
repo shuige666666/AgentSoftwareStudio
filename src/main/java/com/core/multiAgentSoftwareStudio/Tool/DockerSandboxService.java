@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.Map;
+import java.nio.file.StandardOpenOption;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -28,6 +30,24 @@ import java.util.stream.Stream;
  */
 @Service
 public class DockerSandboxService {
+
+    /** 一次开发会话复用的受限容器；正式验证前关闭以终止可能遗留的后台进程。 */
+    public static final class WorkspaceShell {
+        private final String containerId;
+        private final Path projectRoot;
+        private boolean closed;
+
+        private WorkspaceShell(String containerId, Path projectRoot) {
+            this.containerId = containerId;
+            this.projectRoot = projectRoot;
+        }
+
+        public String containerId() { return containerId; }
+        public Path projectRoot() { return projectRoot; }
+        public boolean closed() { return closed; }
+    }
+
+    public record WorkspaceCommandResult(SandboxExecutionResult execution, String logPath) { }
 
     private final DockerClient dockerClient;
 
@@ -41,7 +61,7 @@ public class DockerSandboxService {
                 .sslConfig(config.getSSLConfig())
                 .maxConnections(100)
                 .connectionTimeout(java.time.Duration.ofSeconds(60)) // 连接超时设为 60秒
-                .responseTimeout(java.time.Duration.ofSeconds(120)) // 响应超时设为 120秒
+                .responseTimeout(java.time.Duration.ofMinutes(6)) // 依赖预取可能长时间无 Docker 日志
                 .build();
         // 3. 创建操作句柄：以后所有 docker 命令都通过这个对象发出
         this.dockerClient = DockerClientImpl.getInstance(config, httpClient);
@@ -56,6 +76,248 @@ public class DockerSandboxService {
             return true;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /**
+     * 仅挂载当前项目和只读 Maven 仓库，创建断网、非 root 的持久开发容器。
+     */
+    public WorkspaceShell startWorkspaceShell(Path projectRoot) {
+        Path root = projectRoot.toAbsolutePath().normalize();
+        if (!Files.isDirectory(root)) throw new IllegalArgumentException("Project workspace does not exist: " + root);
+        // 脚手架构建容器以 root 写出的 target 会阻止非 root Shell 编译；只清理可再生构建产物。
+        clearScaffoldTarget(root);
+        String image = "maven:3.8.5-openjdk-17-slim";
+        ensureImageExists(image);
+        List<Bind> binds = new ArrayList<>();
+        binds.add(new Bind(root.toString(), new Volume("/workspace"), AccessMode.rw));
+        Path metadata = root.resolve(".software-studio");
+        if (Files.isDirectory(metadata)) {
+            // 平台规划与验证资料不可由候选 Bash 修改。
+            binds.add(new Bind(metadata.toString(), new Volume("/workspace/.software-studio"), AccessMode.ro));
+        }
+        Path repository = Paths.get(System.getProperty("user.home"), ".m2", "repository");
+        if (Files.isDirectory(repository)) {
+            binds.add(new Bind(repository.toAbsolutePath().toString(),
+                    new Volume("/usr/share/maven/ref/repository"), AccessMode.ro));
+        }
+        HostConfig host = HostConfig.newHostConfig()
+                .withBinds(binds)
+                .withNetworkMode("none")
+                .withReadonlyRootfs(true)
+                .withTmpFs(Map.of("/tmp", "rw,nosuid,size=256m"))
+                .withSecurityOpts(List.of("no-new-privileges:true"))
+                .withCapDrop(Capability.ALL)
+                .withPidsLimit(128L)
+                .withMemory(1_073_741_824L)
+                .withMemorySwap(1_073_741_824L)
+                .withAutoRemove(false);
+        String id = dockerClient.createContainerCmd(image)
+                .withUser("1000:1000")
+                .withWorkingDir("/workspace")
+                .withEnv("HOME=/tmp", "MAVEN_OPTS=-Djansi.mode=off -Dmaven.repo.local=/usr/share/maven/ref/repository")
+                .withHostConfig(host)
+                .withCmd("sleep", "infinity")
+                .exec().getId();
+        try {
+            dockerClient.startContainerCmd(id).exec();
+            return new WorkspaceShell(id, root);
+        } catch (RuntimeException e) {
+            stopAndRemoveContainer(id);
+            throw e;
+        }
+    }
+
+    /** 仅在已核对的候选目录内删除脚手架 target，避免容器用户权限不一致。 */
+    private void clearScaffoldTarget(Path root) {
+        Path target = root.resolve("target").toAbsolutePath().normalize();
+        if (!target.startsWith(root) || target.equals(root) || Files.isSymbolicLink(target)) {
+            throw new IllegalArgumentException("Unsafe scaffold build directory: " + target);
+        }
+        if (!Files.exists(target)) return;
+        try {
+            Files.walkFileTree(target, new java.nio.file.SimpleFileVisitor<>() {
+                @Override public java.nio.file.FileVisitResult visitFile(Path file,
+                        java.nio.file.attribute.BasicFileAttributes attributes) throws IOException {
+                    Files.delete(file);
+                    return java.nio.file.FileVisitResult.CONTINUE;
+                }
+                @Override public java.nio.file.FileVisitResult postVisitDirectory(Path directory,
+                        IOException error) throws IOException {
+                    if (error != null) throw error;
+                    Files.delete(directory);
+                    return java.nio.file.FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to clear scaffold target for non-root shell", e);
+        }
+    }
+
+    /**
+     * 每条命令显式指定工作目录和超时；完整输出另存平台日志，返回值只承载有界摘要。
+     */
+    public WorkspaceCommandResult runWorkspaceCommand(
+            WorkspaceShell shell, String command, String cwd, long timeoutMillis) {
+        long started = System.nanoTime();
+        if (shell == null || shell.closed()) throw new IllegalStateException("Workspace shell is closed");
+        if (command == null || command.isBlank()) throw new IllegalArgumentException("Shell command is required");
+        String requestedCwd = cwd == null ? "" : cwd.replace('\\', '/');
+        // 模型常用容器内绝对路径；将 /workspace 映射到候选根目录后仍做宿主路径边界检查。
+        if (requestedCwd.equals("/workspace")) requestedCwd = "";
+        else if (requestedCwd.startsWith("/workspace/")) requestedCwd = requestedCwd.substring(11);
+        Path relative = requestedCwd.isBlank() ? Path.of("") : Path.of(requestedCwd).normalize();
+        Path directory = shell.projectRoot().resolve(relative).normalize();
+        if (relative.isAbsolute() || !directory.startsWith(shell.projectRoot()) || !Files.isDirectory(directory)) {
+            throw new IllegalArgumentException("Shell cwd must be an existing project directory: " + cwd);
+        }
+        String containerCwd = "/workspace" + (relative.toString().isBlank()
+                ? "" : "/" + relative.toString().replace('\\', '/'));
+        Path logPath = Paths.get("studio-run-logs", shell.projectRoot().getFileName().toString(),
+                "shell", UUID.randomUUID() + ".log").toAbsolutePath().normalize();
+        try {
+            Files.createDirectories(logPath.getParent());
+            Files.writeString(logPath, "", StandardCharsets.UTF_8);
+            String execId = dockerClient.execCreateCmd(shell.containerId())
+                    .withAttachStdout(true).withAttachStderr(true)
+                    .withWorkingDir(containerCwd)
+                    .withCmd("bash", "-lc", command)
+                    .exec().getId();
+            StringBuilder preview = new StringBuilder();
+            var callback = new com.github.dockerjava.api.async.ResultCallback.Adapter<Frame>() {
+                @Override public void onNext(Frame frame) {
+                    String chunk = new String(frame.getPayload(), StandardCharsets.UTF_8);
+                    try {
+                        Files.writeString(logPath, chunk, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+                    } catch (IOException e) {
+                        throw new IllegalStateException("Unable to save shell output", e);
+                    }
+                    if (preview.length() < 32_000) {
+                        preview.append(chunk, 0, Math.min(chunk.length(), 32_000 - preview.length()));
+                    }
+                }
+            };
+            dockerClient.execStartCmd(execId).exec(callback);
+            long boundedTimeout = Math.max(1_000, Math.min(timeoutMillis, 300_000));
+            boolean finished = callback.awaitCompletion(boundedTimeout, TimeUnit.MILLISECONDS);
+            if (!finished) {
+                // 超时后销毁整个会话容器，避免后台子进程继续修改宿主挂载目录。
+                closeWorkspaceShell(shell);
+                return new WorkspaceCommandResult(new SandboxExecutionResult(command, null,
+                        preview.toString(), elapsedMillis(started), true, null), logPath.toString());
+            }
+            Long code = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
+            return new WorkspaceCommandResult(new SandboxExecutionResult(command,
+                    code == null ? null : code.intValue(), preview.toString(), elapsedMillis(started),
+                    false, null), logPath.toString());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            closeWorkspaceShell(shell);
+            return new WorkspaceCommandResult(new SandboxExecutionResult(command, null, "Interrupted",
+                    elapsedMillis(started), true, "Shell command interrupted"), logPath.toString());
+        } catch (Exception e) {
+            closeWorkspaceShell(shell);
+            return new WorkspaceCommandResult(new SandboxExecutionResult(command, null,
+                    String.valueOf(e.getMessage()), elapsedMillis(started), false,
+                    "Shell execution failed: " + e.getMessage()), logPath.toString());
+        }
+    }
+
+    /** 关闭会话并清理全部在途命令及后台进程。 */
+    public void closeWorkspaceShell(WorkspaceShell shell) {
+        if (shell == null || shell.closed()) return;
+        shell.closed = true;
+        stopAndRemoveContainer(shell.containerId());
+    }
+
+    /** 在断网开发容器中执行正式 Maven 命令，并返回完整日志供测试结果解析。 */
+    public SandboxExecutionResult runCheckpointMaven(Path source, String command) {
+        WorkspaceShell shell = null;
+        try {
+            shell = startWorkspaceShell(source);
+            WorkspaceCommandResult result = runWorkspaceCommand(shell, command, "/workspace", 300_000);
+            String output = Files.readString(Path.of(result.logPath()), StandardCharsets.UTF_8);
+            SandboxExecutionResult execution = result.execution();
+            return new SandboxExecutionResult(command, execution.exitCode(), output,
+                    execution.durationMillis(), execution.timedOut(), execution.infrastructureError());
+        } catch (IOException | RuntimeException e) {
+            return new SandboxExecutionResult(command, null, String.valueOf(e.getMessage()), 0,
+                    false, "Isolated checkpoint execution failed: " + e.getMessage());
+        } finally {
+            closeWorkspaceShell(shell);
+        }
+    }
+
+    /**
+     * 缺依赖时仅由平台执行 Maven 预取：候选只读、无个人配置或凭据，所有仓库请求镜像到固定来源。
+     */
+    public SandboxExecutionResult prefetchCheckpointDependencies(Path source) {
+        long started = System.nanoTime();
+        String command = "mvn -B -ntp -s /platform/settings.xml "
+                + "org.apache.maven.plugins:maven-dependency-plugin:3.7.1:go-offline";
+        String image = "maven:3.8.5-openjdk-17-slim";
+        String containerId = null;
+        Path settings = null;
+        StringBuilder output = new StringBuilder();
+        try {
+            ensureImageExists(image);
+            Path repository = Paths.get(System.getProperty("user.home"), ".m2", "repository")
+                    .toAbsolutePath().normalize();
+            Files.createDirectories(repository);
+            settings = Files.createTempFile("studio-maven-settings-", ".xml");
+            Files.writeString(settings, """
+                    <settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
+                      <mirrors><mirror><id>studio-central</id><mirrorOf>*</mirrorOf>
+                        <url>https://repo.maven.apache.org/maven2</url>
+                      </mirror></mirrors>
+                    </settings>
+                    """, StandardCharsets.UTF_8);
+            List<Bind> binds = List.of(
+                    new Bind(source.toAbsolutePath().normalize().toString(), new Volume("/workspace"), AccessMode.ro),
+                    new Bind(repository.toString(), new Volume("/maven-repository"), AccessMode.rw),
+                    new Bind(settings.toString(), new Volume("/platform/settings.xml"), AccessMode.ro));
+            HostConfig host = HostConfig.newHostConfig().withBinds(binds)
+                    .withReadonlyRootfs(true).withTmpFs(Map.of("/tmp", "rw,nosuid,size=256m"))
+                    .withSecurityOpts(List.of("no-new-privileges:true"))
+                    .withCapDrop(Capability.ALL).withPidsLimit(128L)
+                    .withMemory(1_073_741_824L).withMemorySwap(1_073_741_824L)
+                    .withAutoRemove(false);
+            containerId = dockerClient.createContainerCmd(image)
+                    .withWorkingDir("/workspace")
+                    .withEnv("HOME=/tmp", "MAVEN_OPTS=-Djansi.mode=off -Dmaven.repo.local=/maven-repository "
+                            + "-Dmaven.wagon.http.connectionTimeout=10000 -Dmaven.wagon.http.readTimeout=30000")
+                    .withHostConfig(host).withCmd("sh", "-c", command).exec().getId();
+            dockerClient.startContainerCmd(containerId).exec();
+            var callback = new com.github.dockerjava.api.async.ResultCallback.Adapter<Frame>() {
+                @Override public void onNext(Frame frame) {
+                    output.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
+                }
+            };
+            dockerClient.logContainerCmd(containerId).withStdOut(true).withStdErr(true)
+                    .withFollowStream(true).exec(callback);
+            WaitContainerResultCallback wait = new WaitContainerResultCallback();
+            dockerClient.waitContainerCmd(containerId).exec(wait);
+            Integer exit = wait.awaitStatusCode(5, TimeUnit.MINUTES);
+            boolean timedOut = exit == null;
+            if (timedOut) stopAndRemoveContainer(containerId);
+            callback.awaitCompletion(30, TimeUnit.SECONDS);
+            String log = output.toString();
+            String lower = log.toLowerCase(java.util.Locale.ROOT);
+            // 仓库连接故障属于环境阻断，缺失坐标仍作为构建反馈交给开发会话。
+            String infrastructureError = lower.contains("could not transfer artifact")
+                    || lower.contains("unknown host") || lower.contains("connection timed out")
+                    ? "Trusted Maven repository unavailable" : null;
+            return new SandboxExecutionResult(command, exit, log, elapsedMillis(started),
+                    timedOut, infrastructureError);
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            return new SandboxExecutionResult(command, null, output + "\n" + e.getMessage(),
+                    elapsedMillis(started), false, "Maven dependency prefetch failed: " + e.getMessage());
+        } finally {
+            if (containerId != null) stopAndRemoveContainer(containerId);
+            if (settings != null) {
+                try { Files.deleteIfExists(settings); } catch (IOException ignored) { }
+            }
         }
     }
 

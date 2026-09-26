@@ -26,13 +26,27 @@ class BenchmarkRunnerFailureTest {
     private final SoftwareStudioWorkflowService workflow = mock(SoftwareStudioWorkflowService.class);
     private final LlmUsageMetricsService metrics = mock(LlmUsageMetricsService.class);
     private final BenchmarkRunnerService runner = new BenchmarkRunnerService(
-            null, quality, behavior, workflow, metrics, new ObjectMapper(), "https://example.com");
+            null, quality, behavior, workflow, metrics, new ObjectMapper(), "https://example.com",
+            new com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentLimitsConfig());
     private final BenchmarkCase benchmarkCase = new BenchmarkCase(
             "url-shortener-behavior-v1", "short", "prompt", Set.of());
 
     /**
      * 工作流末尾异常时，报告仍应指向已经生成的磁盘候选。
      */
+    @Test
+    void keepsDiagnosticReportWhenFailureBehaviorJudgeAlsoThrows() {
+        when(workflow.generateProjectWithResult(any(), any())).thenThrow(
+                new WorkflowExecutionFailure("candidate", new IllegalStateException("checkpoint failed")));
+        when(behavior.evaluate(any(), any())).thenThrow(new IllegalStateException("judge failed"));
+
+        var result = runner.runCase(benchmarkCase, 1, 1, 1, 1);
+
+        assertEquals("candidate", result.projectPath());
+        assertTrue(result.workflowError().contains("checkpoint failed"));
+        assertEquals("ENVIRONMENT_ERROR", result.behavior().status());
+    }
+
     @Test
     void preservesProjectPathAfterWorkflowException() {
         when(workflow.generateProjectWithResult(any(), any())).thenThrow(

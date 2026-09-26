@@ -99,7 +99,7 @@ public class WorkspaceAgentRuntime {
                 auditService.recordModelTurn(auditSession, session, turn);
                 ToolModelResponse response = metricsService.withCallName(
                         "Workspace" + mode.name() + "Agent",
-                        () -> model.generateWithTools(session.messages(), toolRegistry.definitions()));
+                        () -> model.generateWithTools(session.messages(), toolRegistry.definitions(mode)));
                 auditService.recordModelResponse(auditSession, session, response);
                 if (response.message() == null) {
                     return finishFailure(session, auditSession, WorkspaceAgentStopReason.MODEL_RETURNED_NO_MESSAGE,
@@ -107,8 +107,9 @@ public class WorkspaceAgentRuntime {
                 }
                 session.messages().add(response.message());
                 if (!response.hasToolCalls()) {
-                    session.messages().add(ToolChatMessage.user(
-                            "Do not claim completion in text. Use tools to inspect and verify the workspace, then call complete_stage."));
+                    session.messages().add(ToolChatMessage.user(mode == WorkspaceAgentMode.DEVELOPMENT
+                            ? "Continue editing and verifying. To request completion, call submit_checkpoint with scope=final."
+                            : "Do not claim completion in text. Use tools to inspect and verify the workspace, then call complete_stage."));
                     continue;
                 }
 
@@ -176,6 +177,8 @@ public class WorkspaceAgentRuntime {
             logger.accept("   Tool Agent stopped because the model or runtime failed: " + e.getMessage());
             return finishFailure(session, auditSession, WorkspaceAgentStopReason.MODEL_OR_RUNTIME_ERROR,
                     lastToolName, lastToolResult, e.getClass().getSimpleName() + ": " + e.getMessage());
+        } finally {
+            toolRegistry.closeSession(session);
         }
 
         logger.accept("   Tool Agent stopped without completing the stage"
@@ -250,6 +253,22 @@ public class WorkspaceAgentRuntime {
     }
 
     private String systemPrompt(WorkspaceAgentMode mode) {
+        if (mode == WorkspaceAgentMode.DEVELOPMENT) {
+            return """
+                    You are DevelopmentAgent, continuing one project in its real workspace.
+                    You may edit production code, frontend files, development tests, pom.xml and README.md.
+                    Keep every required user behavior and the public contract. Never edit platform acceptance assets.
+                    Use list_files/search_code/read_files, apply_patch for multi-file edits, and bash for local diagnosis.
+                    Bash runs in a restricted container; it can change project files, so inspect current disk state after it.
+                    Use submit_checkpoint(scope=progress) for full compile and all current tests while work continues.
+                    A progress pass is feedback, not project completion. Use submit_checkpoint(scope=final) only after
+                    implementation, tests and README are ready. Final failure means repair and submit again.
+                    Normal assistant text cannot complete the task. Report an unresolvable task with report_blocker.
+                    If the original request conflicts with a planning-derived public contract, report_blocker with
+                    kind=planning_conflict and specific evidence; continue after the tool returns a decision.
+                    Do not weaken valid tests, remove required behavior or claim an unverified result.
+                    """;
+        }
         return """
                 You are a repository coding agent operating on a real isolated candidate workspace.
                 Your mode is %s.

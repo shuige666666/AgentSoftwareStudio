@@ -58,6 +58,8 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public String pendingErrorType;
     public FailureKind pendingFailureKind = FailureKind.NONE;
     public VerificationResult verificationResult = VerificationResult.empty();
+    public String lastCheckpointHash;
+    public String lastCheckpointReportPath;
     public boolean success;
     public boolean shouldFix;
     public boolean repairStopRequested;

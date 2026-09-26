@@ -58,8 +58,10 @@ studio:
     # 可选：deepseek-direct、alibaba-bailian、generic-openai；前两者读取各自的缓存命中字段。
     provider: alibaba-bailian
   agent-runtime:
-    # 单会话安全上限，避免工具反馈历史持续膨胀；0 可显式表示无限制。
-    # 外层修复事务仍遵守“默认 3 次、有真实进展时最多 4 次”的独立预算。
+    # 连续开发会话的轮次和工具上限；正式验证失败由同一会话继续修复。
+    development:
+      max-model-turns: 36
+      max-tool-calls: 108
     implement:
       max-model-turns: 24
       max-tool-calls: 72
@@ -84,8 +86,9 @@ studio:
       max-calls-without-new-evidence: 8
       max-repeated-verification-failures-after-edit: 2
     context:
-      # 保留原始目标与最近三轮完整工具交互，较旧证据压缩为确定性摘要。
-      compact-after-model-turns: 6
+      # 估算上下文占用达到窗口的 70% 时，保留原始目标与最近三轮完整工具交互。
+      max-context-tokens: 64000
+      compact-at-percent: 70
       retained-model-turns: 3
       max-latest-tool-result-chars: 6000
     audit:

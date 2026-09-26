@@ -12,6 +12,7 @@ class WorkspaceAgentLimitsConfigTest {
     void everySessionModeHasASafeDefaultLimit() {
         WorkspaceAgentLimitsConfig config = new WorkspaceAgentLimitsConfig();
 
+        assertLimit(config, WorkspaceAgentMode.DEVELOPMENT, 36, 108);
         assertLimit(config, WorkspaceAgentMode.IMPLEMENT, 24, 72);
         assertLimit(config, WorkspaceAgentMode.TEST, 12, 36);
         assertLimit(config, WorkspaceAgentMode.FRONTEND_INTEGRATION, 8, 24);
@@ -35,7 +36,8 @@ class WorkspaceAgentLimitsConfigTest {
         assertEquals(3, config.getStagnation().getMaxIdenticalToolCalls());
         assertEquals(8, config.getStagnation().getMaxCallsWithoutNewEvidence());
         assertEquals(2, config.getStagnation().getMaxRepeatedVerificationFailuresAfterEdit());
-        assertEquals(6, config.getContext().getCompactAfterModelTurns());
+        assertEquals(64_000, config.getContext().getMaxContextTokens());
+        assertEquals(70, config.getContext().getCompactAtPercent());
         assertEquals(3, config.getContext().getRetainedModelTurns());
         assertEquals(6_000, config.getContext().getMaxLatestToolResultChars());
         assertThrows(IllegalArgumentException.class,

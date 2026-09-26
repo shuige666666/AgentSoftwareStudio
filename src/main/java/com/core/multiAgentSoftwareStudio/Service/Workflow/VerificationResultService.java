@@ -41,10 +41,13 @@ public class VerificationResultService {
         FailureKind failureKind = passed
                 ? FailureKind.NONE
                 : classifyFailure(stage, safeExecution, testSummary);
+        VerificationStatus status = passed ? VerificationStatus.PASSED
+                : failureKind == FailureKind.ENVIRONMENT ? VerificationStatus.BLOCKED
+                : VerificationStatus.FAILED;
 
         return new VerificationStepResult(
                 stage,
-                passed ? VerificationStatus.PASSED : VerificationStatus.FAILED,
+                status,
                 failureKind,
                 safeExecution.command(),
                 safeExecution.exitCode(),

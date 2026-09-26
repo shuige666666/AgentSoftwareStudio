@@ -2,6 +2,7 @@ package com.core.multiAgentSoftwareStudio.Agent;
 
 import com.core.multiAgentSoftwareStudio.Model.Generation.FileBlueprint;
 import com.core.multiAgentSoftwareStudio.Model.Generation.PlanningDesign;
+import com.core.multiAgentSoftwareStudio.Model.Generation.PlanningConflictDecision;
 import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ApiEndpointContract;
@@ -65,6 +66,16 @@ public class PlanningAgent extends AbstractJsonAgent {
             Do not put test files, pom.xml, or the application bootstrap in structure.files; the platform
             creates the build scaffold before business coding. Keep file paths project-relative.
             """;
+    private static final String CONFLICT_PROMPT = """
+            You are reviewing a specific conflict between the original user request and the current plan.
+            Keep the original request authoritative. Do not change user-specified HTTP methods, paths, fields,
+            required behavior or platform acceptance criteria to accommodate the current implementation.
+            Routine code bugs and internal class/file choices are not planning conflicts: choose KEEP.
+            Choose REVISE only if a planning-derived public contract or design choice contradicts the request.
+            Return JSON only: {"decision":"KEEP or REVISE","reason":"concrete evidence and rationale"}.
+            """;
+
+    public record ConflictReview(String decision, String reason) { }
 
     public PlanningAgent(ChatLanguageModel model, LangGraphPromptExecutor promptExecutor, ObjectMapper objectMapper) {
         super(model, promptExecutor, objectMapper);
@@ -94,7 +105,45 @@ public class PlanningAgent extends AbstractJsonAgent {
      * 在同一次设计输出中取得结构和契约，并检查每个必需行为有公开实现入口。
      */
     public PlanningDesign design(String originalRequest, PrdDocument requirements) {
-        String input = "Original request:\n" + originalRequest + "\nRequirement summary:\n" + json(requirements);
+        return designWithContext(originalRequest, requirements, "");
+    }
+
+    /**
+     * 真正的公开约定冲突才修订设计，并保留原始请求明确指定的 HTTP 接口。
+     */
+    public PlanningConflictDecision reviewConflict(String originalRequest, PrdDocument requirements,
+                                                   PlanningDesign current, String evidence) {
+        String input = "Original request:\n" + originalRequest
+                + "\nRequirements:\n" + json(requirements)
+                + "\nCurrent effective design:\n" + json(current)
+                + "\nReported conflict evidence:\n" + evidence;
+        ConflictReview review = askJson(CONFLICT_PROMPT, input, ConflictReview.class);
+        if (review == null || blank(review.decision()) || blank(review.reason())) {
+            review = askJson(CONFLICT_PROMPT, input + "\nRepair: decision and reason must be present.",
+                    ConflictReview.class);
+        }
+        if (review == null || blank(review.decision()) || blank(review.reason())) {
+            throw new IllegalStateException("Planning conflict review missing decision or reason");
+        }
+        if (!"REVISE".equalsIgnoreCase(review.decision())) {
+            return new PlanningConflictDecision(false, review.reason(), null);
+        }
+        PlanningDesign revised = designWithContext(originalRequest, requirements,
+                "Current design:\n" + json(current) + "\nConfirmed planning conflict:\n" + evidence
+                        + "\nRevision reason:\n" + review.reason()
+                        + "\nRevise only the conflicting planning choice; retain all required behavior.");
+        if (!preservesExplicitHttpInterfaces(originalRequest, revised)) {
+            return new PlanningConflictDecision(false,
+                    "Revision rejected because it changed an HTTP interface explicitly fixed by the user. "
+                            + review.reason(), null);
+        }
+        return new PlanningConflictDecision(true, review.reason(), revised);
+    }
+
+    private PlanningDesign designWithContext(String originalRequest, PrdDocument requirements,
+                                             String additionalContext) {
+        String input = "Original request:\n" + originalRequest + "\nRequirement summary:\n" + json(requirements)
+                + (additionalContext.isBlank() ? "" : "\nConflict review context:\n" + additionalContext);
         PlanningDesign first = normalize(askJson(DESIGN_PROMPT, input, PlanningDesign.class), requirements);
         List<String> missing = designProblems(first, requirements);
         if (missing.isEmpty()) {
@@ -109,6 +158,20 @@ public class PlanningAgent extends AbstractJsonAgent {
             throw new IllegalStateException("Planning design fields missing: " + remaining);
         }
         return repaired;
+    }
+
+    private boolean preservesExplicitHttpInterfaces(String originalRequest, PlanningDesign design) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?i)\\b(GET|POST|PUT|PATCH|DELETE)\\s+(/[^\\s，。；,;]*)")
+                .matcher(originalRequest == null ? "" : originalRequest);
+        while (matcher.find()) {
+            String method = matcher.group(1).toUpperCase();
+            String path = matcher.group(2);
+            boolean preserved = design.contract().endpoints().stream()
+                    .anyMatch(endpoint -> method.equals(endpoint.method()) && path.equals(endpoint.path()));
+            if (!preserved) return false;
+        }
+        return true;
     }
 
     static List<String> requirementProblems(PrdDocument prd) {

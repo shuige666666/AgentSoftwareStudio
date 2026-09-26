@@ -25,7 +25,8 @@ final class WorkspaceAgentContextCompactor {
             String lastToolName,
             String lastToolResult) {
         List<ToolChatMessage> messages = session.messages();
-        if (session.modelTurns() < policy.getCompactAfterModelTurns() || messages.size() <= 3) {
+        if (messages.size() <= 3 || estimatedTokens(messages) <
+                (long) policy.getMaxContextTokens() * policy.getCompactAtPercent() / 100) {
             return Result.unchanged(messages.size());
         }
 
@@ -49,6 +50,18 @@ final class WorkspaceAgentContextCompactor {
         messages.clear();
         messages.addAll(compacted);
         return new Result(true, before, messages.size());
+    }
+
+    /** 中文与 JSON 工具参数按较保守的两字符一 token 估算，提前压缩避免请求溢出。 */
+    private long estimatedTokens(List<ToolChatMessage> messages) {
+        long characters = 0;
+        for (ToolChatMessage message : messages) {
+            characters += message.content().length() + 32L;
+            for (var call : message.toolCalls()) {
+                characters += call.name().length() + call.arguments().length() + 32L;
+            }
+        }
+        return (characters + 1) / 2;
     }
 
     private String summary(WorkspaceAgentSession session, String lastToolName, String lastToolResult) {

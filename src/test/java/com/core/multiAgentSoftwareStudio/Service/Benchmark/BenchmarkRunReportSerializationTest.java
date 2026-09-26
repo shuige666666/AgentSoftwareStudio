@@ -232,7 +232,8 @@ class BenchmarkRunReportSerializationTest {
         BenchmarkCaseResult second = checkpointResult(2, true, false);
         Path reportPath = tempDir.resolve("checkpoint.json");
         BenchmarkRunnerService service = new BenchmarkRunnerService(
-                null, null, null, null, null, new ObjectMapper(), "https://example.com");
+                null, null, null, null, null, new ObjectMapper(), "https://example.com",
+                new com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentLimitsConfig());
 
         BenchmarkRunReport firstCheckpoint = BenchmarkRunnerService.buildReport(
                 Instant.parse("2026-08-12T00:00:00Z"), Instant.parse("2026-08-12T00:10:00Z"),
