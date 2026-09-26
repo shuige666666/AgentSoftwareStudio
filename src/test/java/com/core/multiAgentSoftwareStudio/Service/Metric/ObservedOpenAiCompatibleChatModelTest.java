@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.SystemMessage;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -120,6 +121,20 @@ class ObservedOpenAiCompatibleChatModelTest {
         assertEquals("deepseek-test", request.path("model").asText());
         assertEquals("user", request.path("messages").path(0).path("role").asText());
         assertEquals("hello", request.path("messages").path(0).path("content").asText());
+    }
+
+    /**
+     * 规划消息必须在兼容协议中保留 system 与 user 的独立角色。
+     */
+    @Test
+    void preservesPlanningMessageRoles() {
+        ObservedOpenAiCompatibleChatModel model = newModel(true);
+
+        ObjectNode request = model.buildRequest(List.of(
+                SystemMessage.from("Return JSON only"), UserMessage.from("Build a poll")));
+
+        assertEquals("system", request.path("messages").path(0).path("role").asText());
+        assertEquals("user", request.path("messages").path(1).path("role").asText());
     }
 
     /**

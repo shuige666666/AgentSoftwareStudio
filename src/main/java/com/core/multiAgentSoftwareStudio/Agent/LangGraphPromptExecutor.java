@@ -3,6 +3,9 @@ package com.core.multiAgentSoftwareStudio.Agent;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmOutputValidationType;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
 import org.bsc.langgraph4j.GraphStateException;
 import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.action.NodeAction;
@@ -74,6 +77,15 @@ public class LangGraphPromptExecutor {
     }
 
     /**
+     * 规划调用使用真实 system/user 消息，避免把角色标签当普通用户文本发送。
+     */
+    public String execute(ChatLanguageModel model, String systemPrompt, String userPrompt) {
+        String callName = inferCallerAgentName();
+        List<ChatMessage> messages = List.of(SystemMessage.from(systemPrompt), UserMessage.from(userPrompt));
+        return metricsService.withCallName(callName, () -> generateWithRetry(model, messages));
+    }
+
+    /**
      * 将 Agent 层的 JSON 解析或结构校验失败汇总到当前生成任务。
      */
     public void recordOutputValidationFailure(LlmOutputValidationType validationType) {
@@ -89,6 +101,25 @@ public class LangGraphPromptExecutor {
         for (int attempt = 1; attempt <= MAX_TIMEOUT_RETRIES + 1; attempt++) {
             try {
                 return model.generate(prompt);
+            } catch (RuntimeException e) {
+                lastException = e;
+                if (!isTimeoutError(e) || attempt > MAX_TIMEOUT_RETRIES) {
+                    throw e;
+                }
+                System.out.println("[LLM超时重试] 阶段=" + inferCallerAgentName()
+                        + " timeout retry " + attempt + "/" + MAX_TIMEOUT_RETRIES
+                        + "，即将发起第 " + (attempt + 1) + " 次物理调用。");
+                sleepQuietly(RETRY_BACKOFF_MILLIS * attempt);
+            }
+        }
+        throw lastException == null ? new IllegalStateException("Unknown LLM invocation failure") : lastException;
+    }
+
+    private String generateWithRetry(ChatLanguageModel model, List<ChatMessage> messages) {
+        RuntimeException lastException = null;
+        for (int attempt = 1; attempt <= MAX_TIMEOUT_RETRIES + 1; attempt++) {
+            try {
+                return model.generate(messages).content().text();
             } catch (RuntimeException e) {
                 lastException = e;
                 if (!isTimeoutError(e) || attempt > MAX_TIMEOUT_RETRIES) {

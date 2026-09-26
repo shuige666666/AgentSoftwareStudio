@@ -4,7 +4,9 @@ import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
 
-// 3. 单个文件蓝图 (架构师发给开发者的指令)
+/**
+ * 规划给开发者的文件建议，具体文件可以在实现中调整。
+ */
 public record FileBlueprint(
         String fileName,
         String filePath,

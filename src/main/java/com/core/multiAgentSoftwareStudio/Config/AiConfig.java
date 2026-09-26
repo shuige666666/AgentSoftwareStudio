@@ -1,10 +1,8 @@
 package com.core.multiAgentSoftwareStudio.Config;
 
-import com.core.multiAgentSoftwareStudio.Agent.ArchitectAgent;
-import com.core.multiAgentSoftwareStudio.Agent.ContractAgent;
+import com.core.multiAgentSoftwareStudio.Agent.PlanningAgent;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Metric.ObservedOpenAiCompatibleChatModel;
-import com.core.multiAgentSoftwareStudio.Agent.ProductManagerAgent;
 import com.core.multiAgentSoftwareStudio.Agent.LangGraphPromptExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -91,33 +89,12 @@ public class AiConfig {
         }
 
         /**
-         * 创建产品经理 Agent
+         * 将同一个逻辑模型用于需求和设计两步，旧三角色退出主链。
          */
         @Bean
-        ProductManagerAgent productManagerAgent(@Qualifier(LOGIC_MODEL_BEAN_NAME) ChatLanguageModel model,
+        PlanningAgent planningAgent(@Qualifier(LOGIC_MODEL_BEAN_NAME) ChatLanguageModel model,
                         LangGraphPromptExecutor promptExecutor,
                         ObjectMapper objectMapper) {
-                return new ProductManagerAgent(model, promptExecutor, objectMapper);
-        }
-
-        /**
-         * 创建架构师 Agent
-         */
-        @Bean
-        ArchitectAgent architectAgent(@Qualifier(LOGIC_MODEL_BEAN_NAME) ChatLanguageModel model,
-                        LangGraphPromptExecutor promptExecutor,
-                        ObjectMapper objectMapper) {
-                return new ArchitectAgent(model, promptExecutor, objectMapper);
-        }
-
-
-        /**
-         * 创建接口契约 Agent
-         */
-        @Bean
-        ContractAgent contractAgent(@Qualifier(LOGIC_MODEL_BEAN_NAME) ChatLanguageModel model,
-                        LangGraphPromptExecutor promptExecutor,
-                        ObjectMapper objectMapper) {
-                return new ContractAgent(model, promptExecutor, objectMapper);
+                return new PlanningAgent(model, promptExecutor, objectMapper);
         }
 }

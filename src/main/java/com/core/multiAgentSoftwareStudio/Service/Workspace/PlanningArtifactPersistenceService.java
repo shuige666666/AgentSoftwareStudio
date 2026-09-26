@@ -70,9 +70,15 @@ public class PlanningArtifactPersistenceService {
                 writeArtifact(metadataRoot, "architecture", "Project Architecture", data.structure);
             }
             if (stage.ordinal() >= PlanningStage.CONTRACT.ordinal()) {
-                // 契约节点会把补充文件合并回架构，因此同时覆盖架构检查点。
+                // 两步规划已合并结构与契约，此处保存同一版有效设计。
                 writeArtifact(metadataRoot, "architecture", "Project Architecture", data.structure);
                 writeArtifact(metadataRoot, "contract", "Project Contract", data.contract);
+                writeArtifact(metadataRoot, "overall-design", "Overall Design", data.planningDesign);
+                if (data.planningDesign != null && data.prd != null) {
+                    writeAtomic(metadataRoot.resolve("planning-overview.md"), planningOverview(data));
+                }
+                writeJsonIfPresent(metadataRoot.resolve("scaffold-spec.json"), data.scaffoldSpec);
+                writeJsonIfPresent(metadataRoot.resolve("scaffold-build.json"), data.scaffoldBuild);
             }
             if (stage.ordinal() >= PlanningStage.SLICE_PLAN.ordinal()) {
                 writeJsonIfPresent(metadataRoot.resolve("slice-plan.json"), data.sliceDeliveryPlan);
@@ -143,6 +149,43 @@ public class PlanningArtifactPersistenceService {
                 + "```json" + System.lineSeparator()
                 + json + System.lineSeparator()
                 + "```" + System.lineSeparator();
+    }
+
+    /**
+     * 复用同一份结构化规划生成便于人工和开发 Agent 阅读的需求与设计摘要。
+     */
+    private String planningOverview(SoftwareStudioWorkflowData data) {
+        StringBuilder out = new StringBuilder("# 需求与总体设计\n\n## 原始需求\n\n")
+                .append(data.userRequest == null ? "" : data.userRequest.strip()).append("\n\n")
+                .append("## 必需行为\n\n");
+        data.prd.userStories().forEach(story -> out.append("- ").append(story).append('\n'));
+        out.append("\n## 业务规则\n\n");
+        data.prd.businessRules().forEach(rule -> out.append("- ").append(rule).append('\n'));
+        out.append("\n## 技术约束与选择\n\n");
+        data.prd.techStack().forEach(item -> out.append("- ").append(item).append('\n'));
+        out.append("\n## 合理假设\n\n");
+        data.prd.assumptions().forEach(item -> out.append("- ").append(item).append('\n'));
+        out.append("\n## 关键设计\n\n").append(data.planningDesign.domainDesign()).append("\n\n")
+                .append("## 公开接口\n\n");
+        data.contract.endpoints().forEach(endpoint -> out.append("- ").append(endpoint.method())
+                .append(' ').append(endpoint.path()).append("：").append(endpoint.description())
+                .append("；请求字段=").append(endpoint.requestFields())
+                .append("；响应字段=").append(endpoint.responseFields())
+                .append("；错误=").append(endpoint.errorResponses())
+                .append("；行为=").append(endpoint.behaviorIds()).append('\n'));
+        out.append("\n## 页面与前端调用\n\n");
+        data.contract.views().forEach(view -> out.append("- 视图 ").append(view.name())
+                .append("：").append(view.templatePath()).append("；返回方=")
+                .append(view.returnedBy()).append("；").append(view.description()).append('\n'));
+        data.contract.frontendCalls().forEach(call -> out.append("- ").append(call.sourceFile())
+                .append(" 调用 ").append(call.method()).append(' ').append(call.path())
+                .append("：").append(call.description()).append('\n'));
+        out.append("\n## 必需行为对应\n\n");
+        data.planningDesign.behaviorCoverage().forEach((id, interactions) -> out.append("- ")
+                .append(id).append("：").append(interactions).append('\n'));
+        out.append("\n## 未解决问题\n\n");
+        data.prd.openQuestions().forEach(question -> out.append("- ").append(question).append('\n'));
+        return out.toString();
     }
 
     private void writeManifest(Path metadataRoot) throws IOException {

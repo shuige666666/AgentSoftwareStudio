@@ -7,14 +7,13 @@ import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRunResult;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentStopReason;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
+import com.core.multiAgentSoftwareStudio.Service.Generation.ProjectScaffoldService;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Repair.ToolDrivenRepairService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ArchitectureNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.BatchPlanNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ContractNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.FrontendReviewNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PersistenceNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.RequirementNodeService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PlanningNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.SlicePlanNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.TestGenerationNodeService;
 import org.junit.jupiter.api.Test;
@@ -133,9 +132,8 @@ class SoftwareStudioWorkflowServiceTest {
     }
 
     private Fixture fixture() {
-        RequirementNodeService requirement = passthrough(RequirementNodeService.class);
-        ArchitectureNodeService architecture = passthrough(ArchitectureNodeService.class);
-        ContractNodeService contract = passthrough(ContractNodeService.class);
+        PlanningNodeService planning = passthrough(PlanningNodeService.class);
+        ProjectScaffoldService scaffold = passthrough(ProjectScaffoldService.class);
         SlicePlanNodeService slicePlan = passthrough(SlicePlanNodeService.class);
         BatchPlanNodeService batchPlan = mock(BatchPlanNodeService.class);
         BatchGenerationService generation = mock(BatchGenerationService.class);
@@ -169,7 +167,7 @@ class SoftwareStudioWorkflowServiceTest {
         });
 
         SoftwareStudioWorkflowService service = new SoftwareStudioWorkflowService(
-                requirement, architecture, contract, slicePlan, batchPlan, generation,
+                planning, scaffold, slicePlan, batchPlan, generation,
                 frontend, persistence, testGeneration, repair, metrics, journal);
         return new Fixture(service, generation, testGeneration, repair);
     }

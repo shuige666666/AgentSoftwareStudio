@@ -5,15 +5,14 @@ import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
+import com.core.multiAgentSoftwareStudio.Service.Generation.ProjectScaffoldService;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRunResult;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Repair.ToolDrivenRepairService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ArchitectureNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.BatchPlanNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.ContractNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.FrontendReviewNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PersistenceNodeService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.RequirementNodeService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PlanningNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.SlicePlanNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.TestGenerationNodeService;
 import org.springframework.stereotype.Service;
@@ -21,7 +20,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.function.Consumer;
 
-import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService.PlanningStage.ARCHITECTURE;
 import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService.PlanningStage.CONTRACT;
 import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService.PlanningStage.GENERATION_PLAN;
 import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService.PlanningStage.REQUIREMENT;
@@ -33,9 +31,8 @@ import static com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifa
 @Service
 public class SoftwareStudioWorkflowService {
 
-    private final RequirementNodeService requirementNodeService;
-    private final ArchitectureNodeService architectureNodeService;
-    private final ContractNodeService contractNodeService;
+    private final PlanningNodeService planningNodeService;
+    private final ProjectScaffoldService projectScaffoldService;
     private final SlicePlanNodeService slicePlanNodeService;
     private final BatchPlanNodeService batchPlanNodeService;
     private final BatchGenerationService batchGenerationService;
@@ -47,9 +44,8 @@ public class SoftwareStudioWorkflowService {
     private final RunJournalService runJournalService;
 
     public SoftwareStudioWorkflowService(
-            RequirementNodeService requirementNodeService,
-            ArchitectureNodeService architectureNodeService,
-            ContractNodeService contractNodeService,
+            PlanningNodeService planningNodeService,
+            ProjectScaffoldService projectScaffoldService,
             SlicePlanNodeService slicePlanNodeService,
             BatchPlanNodeService batchPlanNodeService,
             BatchGenerationService batchGenerationService,
@@ -59,9 +55,8 @@ public class SoftwareStudioWorkflowService {
             ToolDrivenRepairService toolDrivenRepairService,
             LlmUsageMetricsService llmUsageMetricsService,
             RunJournalService runJournalService) {
-        this.requirementNodeService = requirementNodeService;
-        this.architectureNodeService = architectureNodeService;
-        this.contractNodeService = contractNodeService;
+        this.planningNodeService = planningNodeService;
+        this.projectScaffoldService = projectScaffoldService;
         this.slicePlanNodeService = slicePlanNodeService;
         this.batchPlanNodeService = batchPlanNodeService;
         this.batchGenerationService = batchGenerationService;
@@ -87,13 +82,17 @@ public class SoftwareStudioWorkflowService {
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData(userRequest);
         llmUsageMetricsService.beginTask();
         try {
-            data = requirementNodeService.execute(data, logger);
+            data = planningNodeService.requirements(data, logger);
             data = persistenceNodeService.initializeWorkspace(data, logger);
             data = persistenceNodeService.persistPlanningArtifacts(data, REQUIREMENT, logger);
-            data = architectureNodeService.execute(data, logger);
-            data = persistenceNodeService.persistPlanningArtifacts(data, ARCHITECTURE, logger);
-            data = contractNodeService.execute(data, logger);
+            data = planningNodeService.design(data, logger);
             data = persistenceNodeService.persistPlanningArtifacts(data, CONTRACT, logger);
+            try {
+                data = projectScaffoldService.bootstrap(data, logger);
+            } finally {
+                // 骨架编译失败时也保留规格和真实构建结果，便于定位平台或依赖问题。
+                persistenceNodeService.persistPlanningArtifacts(data, CONTRACT, logger);
+            }
 
             // 切片仅用于业务上下文、预算估算和报告，不再作为中间验收及修复边界。
             data = slicePlanNodeService.execute(data, logger);

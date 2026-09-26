@@ -29,6 +29,9 @@ public class BatchGenerationService {
         String objective = """
                 Implement the complete requested project in the current workspace.
 
+                Original user request:
+                %s
+
                 Product requirements:
                 %s
 
@@ -41,11 +44,12 @@ public class BatchGenerationService {
                 Required cross-layer contract:
                 %s
 
-                Inspect the real workspace before editing. Create or update all required production files, including
-                build configuration and application bootstrap. Keep controller, service, persistence, DTO, template,
+                Inspect the real workspace and its already compiling scaffold before editing. Keep the existing
+                build configuration and application bootstrap unless a concrete business need requires a change.
+                Create or update all required business files. Keep controller, service, persistence, DTO, template,
                 JavaScript and CSS contracts consistent. Do not create tests in this stage. Run compile_main after the
                 latest edit and only call complete_stage when the complete production project compiles.
-                """.formatted(data.prd, data.structure, data.generationPlan, data.contract);
+                """.formatted(data.userRequest, data.prd, data.structure, data.generationPlan, data.contract);
 
         WorkspaceAgentRunResult result = workspaceAgentRuntime.runDetailed(
                 data,

@@ -6,6 +6,8 @@ import com.core.multiAgentSoftwareStudio.Model.Generation.PrdDocument;
 import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectProfile;
+import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectScaffoldSpec;
+import com.core.multiAgentSoftwareStudio.Model.Generation.PlanningDesign;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectQualityPolicyResult;
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
 import com.core.multiAgentSoftwareStudio.Model.Generation.SliceDeliveryPlan;
@@ -13,6 +15,7 @@ import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowJournalEntry;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -35,7 +38,10 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public PrdDocument prd;
     public ProjectStructure structure;
     public ProjectContract contract;
+    public PlanningDesign planningDesign;
     public ProjectProfile projectProfile;
+    public ProjectScaffoldSpec scaffoldSpec;
+    public SandboxExecutionResult scaffoldBuild;
     public ProjectQualityPolicyResult qualityPolicyResult = ProjectQualityPolicyResult.empty();
     public GenerationPlan generationPlan = new GenerationPlan(List.of());
     public SliceDeliveryPlan sliceDeliveryPlan = SliceDeliveryPlan.empty();

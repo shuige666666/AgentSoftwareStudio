@@ -18,8 +18,9 @@ public record FrontendCallContract(
      */
     public FrontendCallContract {
         sourceFile = sourceFile == null ? "" : sourceFile.trim().replace("\\", "/");
-        method = method == null || method.isBlank() ? "GET" : method.trim().toUpperCase();
-        path = path == null || path.isBlank() ? "/" : path.trim();
+        // 缺失的方法和路径保留为空，避免前后端契约误匹配默认根路径。
+        method = method == null ? "" : method.trim().toUpperCase();
+        path = path == null ? "" : path.trim();
         description = description == null ? "" : description.trim();
     }
 }

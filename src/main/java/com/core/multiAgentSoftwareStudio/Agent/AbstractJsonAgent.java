@@ -11,7 +11,7 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
  */
 public abstract class AbstractJsonAgent {
     // 模型偶尔会返回不严格的 JSON；这里给一次“格式修复”机会，避免整个工作流直接中断。
-    private static final int MAX_JSON_REPAIR_ATTEMPTS = 2;
+    private static final int MAX_JSON_REPAIR_ATTEMPTS = 1;
     // 解析失败时只截取部分内容写入异常，防止整段源码把日志刷得过长。
     private static final int ERROR_SNIPPET_LIMIT = 2_000;
 
@@ -28,8 +28,7 @@ public abstract class AbstractJsonAgent {
     }
 
     protected String askText(String systemPrompt, String userPrompt) {
-        String fullPrompt = "SYSTEM:\n" + systemPrompt + "\n\nUSER:\n" + userPrompt;
-        return promptExecutor.execute(model, fullPrompt);
+        return promptExecutor.execute(model, systemPrompt, userPrompt);
     }
 
     protected <T> T askJson(String systemPrompt, String userPrompt, Class<T> type) {
