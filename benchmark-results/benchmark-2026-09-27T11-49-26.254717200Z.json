@@ -1,0 +1,237 @@
+{
+  "startedAt" : "2026-09-27T11:49:26.254717200Z",
+  "finishedAt" : "2026-09-27T11:56:04.133830600Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : "qwen3.7-flash alias 2026-09-27"
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.7-max-2026-05-20",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : "qwen3.7-max-2026-05-20"
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "PlanningAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "poll-system-behavior-v1" ],
+    "repetitions" : 1,
+    "repairBudget" : null,
+    "gitCommit" : "9bc10c4e2bcb32236a459df4e8c2f27412210135",
+    "gitDirty" : true,
+    "workingTreeFingerprint" : "4bccbb82c127613be68d66d1f2f8906155d273bc2fa3b04ac56d3cb44d72f1aa",
+    "requirementSha256" : {
+      "poll-system-behavior-v1" : "14bd21fbe2c229b855365018a6b8e83afeed3c63c42da3d6ac0185717da46527"
+    },
+    "development" : {
+      "maxModelTurns" : 36,
+      "maxToolCalls" : 108,
+      "verificationProtocol" : "snapshot-build-all-tests-contract-final-v1"
+    },
+    "planningSourceProjectId" : null,
+    "replayMode" : "SAVED_MILESTONES"
+  },
+  "cases" : [ {
+    "caseId" : "poll-system-behavior-v1",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : true,
+    "independentQualityPassed" : true,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\online-voting-system_20260927_194949",
+    "elapsedMillis" : 397611,
+    "quality" : {
+      "passed" : true,
+      "findings" : [ {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "CONTRACT_GATES_PASSED",
+        "passed" : true,
+        "evidence" : "Final semantic contract gates passed."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      } ]
+    },
+    "usage" : {
+      "calls" : 29,
+      "successfulCalls" : 29,
+      "failedCalls" : 0,
+      "durationMillis" : 240173,
+      "inputCacheHitTokens" : 179968,
+      "inputCacheMissTokens" : 40882,
+      "outputTokens" : 21123,
+      "totalTokens" : 241973,
+      "cacheMetricsAvailable" : true,
+      "finishReasonCounts" : {
+        "stop" : 2,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 27,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      },
+      "modelUsage" : {
+        "qwen3.7-flash" : {
+          "calls" : 27,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 179968,
+          "inputCacheMissTokens" : 38993,
+          "outputTokens" : 16694,
+          "totalTokens" : 235655
+        },
+        "qwen3.7-max-2026-05-20" : {
+          "calls" : 2,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 0,
+          "inputCacheMissTokens" : 1889,
+          "outputTokens" : 4429,
+          "totalTokens" : 6318
+        }
+      }
+    },
+    "attemptsUsed" : 1,
+    "finalFailureKind" : "NONE",
+    "validationWarningCount" : 0,
+    "verificationSummary" : {
+      "buildExitCode" : 0,
+      "testExitCode" : 0,
+      "buildPassed" : true,
+      "testPassed" : true,
+      "testsRun" : 12,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 7259,
+      "testDurationMillis" : 23722,
+      "primaryFailureKind" : "NONE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 2,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : { },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 1,
+        "acceptedSlices" : 1,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 0,
+        "sliceRepairSafetyLimit" : 0,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 2,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "",
+        "slicePolicyVersion" : "vertical-slice-v7",
+        "declaredProjectType" : "SPRING_BOOT",
+        "effectiveProjectType" : "SPRING_BOOT",
+        "projectProfileId" : "java17-spring-boot-3.2"
+      }
+    },
+    "workflowError" : null,
+    "behavior" : {
+      "status" : "PASS",
+      "findings" : [ {
+        "behavior" : "poll.create",
+        "passed" : true,
+        "evidence" : "HTTP 201, body={\"id\":\"eece8c6f-677b-4846-98fb-3e8b1f2e07d6\"}"
+      }, {
+        "behavior" : "poll.initial",
+        "passed" : true,
+        "evidence" : "HTTP 200, body={\"counts\":{\"A\":0,\"B\":0}}"
+      }, {
+        "behavior" : "poll.vote.first",
+        "passed" : true,
+        "evidence" : "HTTP 201, body={\"message\":\"Vote recorded successfully\"}"
+      }, {
+        "behavior" : "poll.result.first",
+        "passed" : true,
+        "evidence" : "HTTP 200, body={\"counts\":{\"A\":1,\"B\":0}}"
+      }, {
+        "behavior" : "poll.vote.duplicate",
+        "passed" : true,
+        "evidence" : "HTTP 409, body={\"error\":\"Voter 'alice' has already voted in poll 'eece8c6f-677b-4846-98fb-3e8b1f2e07d6'\"}"
+      }, {
+        "behavior" : "poll.result.afterDuplicate",
+        "passed" : true,
+        "evidence" : "HTTP 200, body={\"counts\":{\"A\":1,\"B\":0}}"
+      }, {
+        "behavior" : "poll.vote.second",
+        "passed" : true,
+        "evidence" : "HTTP 201, body={\"message\":\"Vote recorded successfully\"}"
+      }, {
+        "behavior" : "poll.result.final",
+        "passed" : true,
+        "evidence" : "HTTP 200, body={\"counts\":{\"A\":1,\"B\":1}}"
+      } ],
+      "reason" : null
+    }
+  } ],
+  "platformSuccessCount" : 1,
+  "independentQualityPassCount" : 1,
+  "falseSuccessCount" : 0,
+  "falseSuccessRate" : 0.0,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-09-27T11-49-26.254717200Z.json",
+  "fullWorkflowSuccessRate" : 1.0
+}

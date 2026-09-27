@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
+import java.net.http.HttpTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -28,6 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -305,6 +307,57 @@ class WorkspaceAgentRuntimeTest {
             assertEquals(1, history.stream().filter(message -> "user".equals(message.role())
                     && message.content().contains("About 7 model turns remain")).count());
         }
+    }
+
+    /** 超时重试沿用原消息并消耗剩余全局轮次，成功响应仍可继续交付。 */
+    @Test
+    void developmentRetriesOneTimeoutWithinGlobalBudget() {
+        ToolCallingModel model = mock(ToolCallingModel.class);
+        when(model.generateWithTools(any(), any()))
+                .thenThrow(new IllegalStateException("request timed out",
+                        new HttpTimeoutException("request timed out")))
+                .thenReturn(response("call-36", "submit_checkpoint", "{\"scope\":\"final\"}"));
+        WorkspaceToolRegistry registry = mock(WorkspaceToolRegistry.class);
+        when(registry.definitions(WorkspaceAgentMode.DEVELOPMENT)).thenReturn(List.of());
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
+            ((WorkspaceAgentSession) invocation.getArgument(2)).complete("verified");
+            return "{\"status\":\"PASSED\"}";
+        });
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectPath = projectRoot.toString();
+        data.developmentModelTurnsUsed = 34;
+
+        WorkspaceAgentRunResult result = runtime(model, registry).runDetailed(data,
+                WorkspaceAgentMode.DEVELOPMENT, Set.of(), "resume", message -> { });
+
+        assertTrue(result.completed());
+        assertEquals(36, result.modelTurns());
+        assertEquals(1, result.toolCalls());
+        verify(model, times(2)).generateWithTools(any(), any());
+    }
+
+    /** 连续超时必须停止，不能绕过全局轮次或无限重复计费。 */
+    @Test
+    void developmentStopsAfterSecondConsecutiveTimeout() {
+        ToolCallingModel model = mock(ToolCallingModel.class);
+        when(model.generateWithTools(any(), any()))
+                .thenThrow(new IllegalStateException("request timed out",
+                        new HttpTimeoutException("request timed out")));
+        WorkspaceToolRegistry registry = mock(WorkspaceToolRegistry.class);
+        when(registry.definitions(WorkspaceAgentMode.DEVELOPMENT)).thenReturn(List.of());
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.actualChangedFiles(any())).thenReturn(List.of());
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectPath = projectRoot.toString();
+        data.developmentModelTurnsUsed = 34;
+
+        WorkspaceAgentRunResult result = runtime(model, registry).runDetailed(data,
+                WorkspaceAgentMode.DEVELOPMENT, Set.of(), "resume", message -> { });
+
+        assertEquals(WorkspaceAgentStopReason.MODEL_OR_RUNTIME_ERROR, result.stopReason());
+        assertEquals(36, result.modelTurns());
+        verify(model, times(2)).generateWithTools(any(), any());
     }
 
     private ToolModelResponse response(String id, String name, String arguments) {

@@ -185,6 +185,22 @@ class ObservedOpenAiCompatibleChatModelTest {
         assertFalse(request.path("parallel_tool_calls").asBoolean());
     }
 
+    /** 工具参数截断后仍要向模型回放合法历史，并保留原始会话供审计。 */
+    @Test
+    void normalizesInvalidHistoricalToolArgumentsForProviderReplay() {
+        ObservedOpenAiCompatibleChatModel model = newModel(AiProvider.ALIBABA_BAILIAN, true);
+        ToolCall invalid = new ToolCall("call-1", "apply_patch", "{\"patch\":\"unfinished");
+        ToolCall valid = new ToolCall("call-2", "list_files", "{\"glob\":\"*.java\"}");
+        ObjectNode request = model.buildToolRequest(List.of(
+                ToolChatMessage.assistant("", List.of(invalid, valid)),
+                ToolChatMessage.tool("call-1", "{\"error\":\"TOOL_ARGUMENTS_INVALID_JSON\"}")), List.of());
+
+        assertEquals("{}", request.at("/messages/0/tool_calls/0/function/arguments").asText());
+        assertEquals(valid.arguments(), request.at("/messages/0/tool_calls/1/function/arguments").asText());
+        assertEquals("{\"patch\":\"unfinished", invalid.arguments());
+        assertEquals("call-1", request.at("/messages/1/tool_call_id").asText());
+    }
+
     private ObservedOpenAiCompatibleChatModel newModel(boolean deepSeekCacheMetricsEnabled) {
         return newModel(deepSeekCacheMetricsEnabled, true);
     }

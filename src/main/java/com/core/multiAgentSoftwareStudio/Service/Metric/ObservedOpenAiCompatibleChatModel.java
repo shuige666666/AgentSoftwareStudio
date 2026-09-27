@@ -236,7 +236,8 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
                     callNode.put("type", "function");
                     ObjectNode function = callNode.putObject("function");
                     function.put("name", call.name());
-                    function.put("arguments", call.arguments());
+                    // 失败工具调用的原始参数可能已被截断；回放历史必须仍符合供应商的 JSON 协议。
+                    function.put("arguments", compatibleToolArguments(call.arguments()));
                 }
             }
         }
@@ -251,6 +252,16 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
             function.set("parameters", tool.parameters());
         }
         return root;
+    }
+
+    /** 只修正发往模型的历史表示，原始工具参数和失败结果仍保留在会话与审计中。 */
+    private String compatibleToolArguments(String arguments) {
+        if (arguments == null || arguments.isBlank()) return "{}";
+        try {
+            return objectMapper.readTree(arguments).isObject() ? arguments : "{}";
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
     }
 
     private List<ToolCall> parseToolCalls(JsonNode callsNode) {

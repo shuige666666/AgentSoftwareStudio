@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
+import java.net.http.HttpTimeoutException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -95,6 +96,7 @@ public class WorkspaceAgentRuntime {
                 new WorkspaceAgentStagnationTracker(limitsConfig.getStagnation());
         WorkspaceAgentContextCompactor contextCompactor =
                 new WorkspaceAgentContextCompactor(limitsConfig.getContext());
+        boolean retriedTimeout = false;
 
         try {
             for (int turn = session.modelTurns() + 1; maxModelTurns <= 0 || turn <= maxModelTurns; turn++) {
@@ -108,9 +110,22 @@ public class WorkspaceAgentRuntime {
                 session.incrementModelTurns();
                 if (mode == WorkspaceAgentMode.DEVELOPMENT) milestoneService.persist(data);
                 auditService.recordModelTurn(auditSession, session, turn);
-                ToolModelResponse response = metricsService.withCallName(
-                        "Workspace" + mode.name() + "Agent",
-                        () -> model.generateWithTools(session.messages(), toolRegistry.definitions(mode)));
+                ToolModelResponse response;
+                try {
+                    response = metricsService.withCallName(
+                            "Workspace" + mode.name() + "Agent",
+                            () -> model.generateWithTools(session.messages(), toolRegistry.definitions(mode)));
+                    retriedTimeout = false;
+                } catch (RuntimeException e) {
+                    // 只有超时才重试一次；失败调用仍计入全局轮次，且尚未执行任何工具。
+                    if (mode == WorkspaceAgentMode.DEVELOPMENT && !retriedTimeout
+                            && isTimeout(e) && (maxModelTurns <= 0 || turn < maxModelTurns)) {
+                        retriedTimeout = true;
+                        logger.accept("   Tool model request timed out; retrying once within the remaining model-turn budget.");
+                        continue;
+                    }
+                    throw e;
+                }
                 auditService.recordModelResponse(auditSession, session, response);
                 if (response.message() == null) {
                     return finishFailure(session, auditSession, WorkspaceAgentStopReason.MODEL_RETURNED_NO_MESSAGE,
@@ -197,6 +212,14 @@ public class WorkspaceAgentRuntime {
                 + (maxModelTurns > 0 ? " within " + maxModelTurns + " model turns." : "."));
         return finishFailure(session, auditSession, WorkspaceAgentStopReason.MODEL_TURN_LIMIT,
                 lastToolName, lastToolResult, "Model-turn limit reached");
+    }
+
+    /** 识别兼容层包装的网络超时，避免把一般 HTTP 或代码错误当作可重试故障。 */
+    private boolean isTimeout(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof HttpTimeoutException) return true;
+        }
+        return false;
     }
 
     /**

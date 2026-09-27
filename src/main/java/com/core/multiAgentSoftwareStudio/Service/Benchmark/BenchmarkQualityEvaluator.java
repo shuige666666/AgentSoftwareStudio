@@ -110,7 +110,14 @@ public class BenchmarkQualityEvaluator {
     }
 
     private String summarize(String output) {
-        String normalized = output.replaceAll("\\s+", " ").trim();
+        // Maven 前置 Jansi 提示可能盖住真正失败；报告优先摘录构建或测试错误行。
+        String errors = output.lines().map(String::strip)
+                .filter(line -> line.startsWith("[ERROR]"))
+                .map(line -> line.substring("[ERROR]".length()).strip())
+                .filter(line -> !line.isBlank() && !line.startsWith("-> [Help")
+                        && !line.startsWith("To see ") && !line.startsWith("Please refer "))
+                .limit(3).reduce("", (left, right) -> left.isEmpty() ? right : left + " | " + right);
+        String normalized = (errors.isEmpty() ? output : errors).replaceAll("\\s+", " ").trim();
         return normalized.length() <= 240 ? normalized : normalized.substring(0, 240) + "...";
     }
 }

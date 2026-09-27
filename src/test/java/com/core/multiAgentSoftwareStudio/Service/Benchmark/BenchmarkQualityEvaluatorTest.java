@@ -115,6 +115,24 @@ class BenchmarkQualityEvaluatorTest {
         assertTrue(finding.evidence().contains("not executed"));
     }
 
+    /** 报告应呈现真实 Maven 失败，不让无关的 Jansi 提示占满证据摘要。 */
+    @Test
+    void highlightsTestFailureAfterJansiWarning() {
+        WorkflowExecutionResult execution = execution(false, List.of(), """
+                Failed to load native library:jansi-2.4.0.so. The native library is not executable.
+                [INFO] Running controller tests
+                [ERROR] Tests run: 18, Failures: 2, Errors: 0, Skipped: 0
+                [ERROR] ArticleControllerTest.updateArticle_success:201 expected redirect but was 200
+                """);
+
+        String evidence = evaluator.evaluate(benchmarkCase, execution).findings().stream()
+                .filter(item -> item.gate() == BenchmarkGate.TESTS_EXECUTED_AND_GREEN)
+                .findFirst().orElseThrow().evidence();
+
+        assertTrue(evidence.contains("ArticleControllerTest.updateArticle_success"));
+        assertFalse(evidence.contains("jansi"));
+    }
+
     private WorkflowExecutionResult execution(boolean platformSuccess, List<SourceCode> codes, String testResult) {
         return execution(platformSuccess, codes, testResult,
                 new ProjectQualityPolicyResult(true, List.of(), List.of()));
