@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 @RestController
 @RequiredArgsConstructor
@@ -50,13 +52,24 @@ public class SoftwareController {
     @PostMapping("/stream-chat")
     public SseEmitter streamChat(@RequestBody Map<String, String> request) {
         String message = request.get("message");
+        return streamWorkflow(log -> softwareStudioService.generateProjectStream(message, log));
+    }
+
+    /** 从当前 run 的磁盘候选与最近能力 checkpoint 续接同一项目。 */
+    @PostMapping("/projects/{projectId}/resume")
+    public SseEmitter resumeProject(@PathVariable String projectId) {
+        return streamWorkflow(log -> softwareStudioService.resumeProjectStream(projectId, log));
+    }
+
+    /** 初次生成与续接共用 SSE 完成事件和预览注册。 */
+    private SseEmitter streamWorkflow(Function<Consumer<String>, WorkflowExecutionResult> work) {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE); // Set timeout to infinity
         ExecutorService executor = Executors.newSingleThreadExecutor();
 
         executor.execute(() -> {
             try {
                 emitter.send(SseEmitter.event().data("Workflow started."));
-                WorkflowExecutionResult result = softwareStudioService.generateProjectStream(message, (log) -> {
+                WorkflowExecutionResult result = work.apply((log) -> {
                     try {
                         emitter.send(SseEmitter.event().data(log));
                     } catch (IOException e) {

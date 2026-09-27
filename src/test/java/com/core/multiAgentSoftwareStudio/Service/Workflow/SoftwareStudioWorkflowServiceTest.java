@@ -7,15 +7,17 @@ import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceCheckpoin
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
 import com.core.multiAgentSoftwareStudio.Service.Generation.ProjectScaffoldService;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
-import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.BatchPlanNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PersistenceNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PlanningNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.SlicePlanNodeService;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -59,6 +61,54 @@ class SoftwareStudioWorkflowServiceTest {
         assertTrue(failure.projectPath().contains("quality-first-workflow-test"));
     }
 
+    /** 固定规划重放创建新候选与全新预算，不再次调用规划节点或继承旧源码。 */
+    @Test
+    void replaySavedPlanningStartsFreshDevelopment() {
+        Fixture fixture = fixture();
+        SoftwareStudioWorkflowData saved = new SoftwareStudioWorkflowData("same requirement");
+        saved.projectPath = "old-candidate";
+        saved.developmentModelTurnsUsed = 24;
+        saved.developmentToolCallsUsed = 24;
+        saved.sliceDeliveryPlan = new com.core.multiAgentSoftwareStudio.Model.Generation.SliceDeliveryPlan(
+                List.of(), List.of(), "frozen-plan");
+        when(fixture.resume.load("source-project")).thenReturn(saved);
+        when(fixture.generation.generateProject(any(), any())).thenAnswer(invocation -> {
+            SoftwareStudioWorkflowData data = invocation.getArgument(0);
+            data.success = true;
+            return run(true);
+        });
+
+        var result = fixture.service.generateFromSavedPlanningWithResult(
+                "source-project", "same requirement", message -> { });
+
+        ArgumentCaptor<SoftwareStudioWorkflowData> captured =
+                ArgumentCaptor.forClass(SoftwareStudioWorkflowData.class);
+        verify(fixture.generation).generateProject(captured.capture(), any());
+        SoftwareStudioWorkflowData replay = captured.getValue();
+        assertTrue(result.platformSuccess());
+        assertEquals("target/quality-first-workflow-test", replay.projectPath);
+        assertEquals(0, replay.developmentModelTurnsUsed);
+        assertEquals(0, replay.developmentToolCallsUsed);
+        assertSame(saved.sliceDeliveryPlan, replay.sliceDeliveryPlan);
+        verify(fixture.planning, never()).requirements(any(), any());
+        verify(fixture.planning, never()).design(any(), any());
+        verify(fixture.slicePlan, never()).execute(any(), any());
+    }
+
+    /** 不能把另一需求的规划产物冒充为当前固定案例的对照输入。 */
+    @Test
+    void replayRejectsPlanningForDifferentRequirement() {
+        Fixture fixture = fixture();
+        when(fixture.resume.load("source-project"))
+                .thenReturn(new SoftwareStudioWorkflowData("different requirement"));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> fixture.service.generateFromSavedPlanningWithResult(
+                        "source-project", "current requirement", message -> { }));
+
+        verify(fixture.generation, never()).generateProject(any(), any());
+    }
+
     private WorkspaceAgentRunResult run(boolean completed) {
         return new WorkspaceAgentRunResult(completed,
                 completed ? WorkspaceAgentStopReason.COMPLETED : WorkspaceAgentStopReason.MODEL_TURN_LIMIT,
@@ -69,7 +119,8 @@ class SoftwareStudioWorkflowServiceTest {
         PlanningNodeService planning = passthrough(PlanningNodeService.class);
         ProjectScaffoldService scaffold = passthrough(ProjectScaffoldService.class);
         SlicePlanNodeService slicePlan = passthrough(SlicePlanNodeService.class);
-        BatchPlanNodeService batchPlan = passthrough(BatchPlanNodeService.class);
+        DevelopmentMilestoneService milestones = mock(DevelopmentMilestoneService.class);
+        DevelopmentResumeService resume = mock(DevelopmentResumeService.class);
         BatchGenerationService generation = mock(BatchGenerationService.class);
         PersistenceNodeService persistence = mock(PersistenceNodeService.class);
         WorkspaceCheckpointService checkpoint = mock(WorkspaceCheckpointService.class);
@@ -83,9 +134,9 @@ class SoftwareStudioWorkflowServiceTest {
         when(persistence.persistPlanningArtifacts(any(), any(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         SoftwareStudioWorkflowService service = new SoftwareStudioWorkflowService(
-                planning, scaffold, slicePlan, batchPlan, generation, persistence,
+                planning, scaffold, slicePlan, milestones, resume, generation, persistence,
                 checkpoint, metrics, journal);
-        return new Fixture(service, generation, checkpoint);
+        return new Fixture(service, generation, checkpoint, planning, slicePlan, resume);
     }
 
     private <T> T passthrough(Class<T> type) {
@@ -94,5 +145,6 @@ class SoftwareStudioWorkflowServiceTest {
     }
 
     private record Fixture(SoftwareStudioWorkflowService service, BatchGenerationService generation,
-                           WorkspaceCheckpointService checkpoint) { }
+                           WorkspaceCheckpointService checkpoint, PlanningNodeService planning,
+                           SlicePlanNodeService slicePlan, DevelopmentResumeService resume) { }
 }

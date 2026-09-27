@@ -22,7 +22,7 @@ public class AiConfig {
 
         // 基准报告与模型实例共用这组常量，防止记录参数与真实调用参数偏离。
         public static final String CODER_MODEL_BEAN_NAME = "coderModel";
-        public static final String CODER_MODEL_NAME = "qwen3.7-flash-2026-07-15";
+        public static final String CODER_MODEL_NAME = "qwen3.7-flash";
         public static final double CODER_MODEL_TEMPERATURE = 0.1;
         public static final int CODER_MODEL_MAX_OUTPUT_TOKENS = 8192;
         public static final Duration CODER_MODEL_TIMEOUT = Duration.ofMinutes(4);

@@ -3,6 +3,7 @@ package com.core.multiAgentSoftwareStudio.Service.Generation;
 import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ApiEndpointContract;
 import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.FrontendCallContract;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ViewContract;
 import com.core.multiAgentSoftwareStudio.Model.Generation.FileBlueprint;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
@@ -309,6 +310,42 @@ class SlicePlanningServiceTest {
         assertEquals(List.of("/articles/{id}/comments"), comments.contract().frontendCalls().stream()
                 .map(FrontendCallContract::path).toList());
         assertEquals(List.of("article-publishing"), comments.dependsOnSlices());
+    }
+
+    /** 展示评论和删除级联不应把文章能力与评论提交合并，页面及共享处理归入业务片。 */
+    @Test
+    void keepsArticleAndCommentAsSeparateBusinessMilestones() {
+        var article = file("src/main/java/com/example/ArticleController.java", "controller", "article-crud", List.of());
+        var comment = file("src/main/java/com/example/CommentController.java", "controller", "comment-submit", List.of());
+        var home = file("src/main/resources/templates/home.html", "frontend", "server-rendered-views", List.of());
+        var detail = file("src/main/resources/templates/article-detail.html", "frontend", "server-rendered-views", List.of());
+        var layout = file("src/main/resources/templates/layout.html", "frontend", "server-rendered-views", List.of());
+        var errors = file("src/main/java/com/example/GlobalExceptionHandler.java", "controller", "shared", List.of());
+        ProjectStructure structure = new ProjectStructure("com.example", "SPRING_BOOT", "com.example.App",
+                List.of(article, comment, home, detail, layout, errors));
+        ProjectContract contract = new ProjectContract(List.of(
+                new ApiEndpointContract("GET", "/articles/{id}", "", "", "ArticleController",
+                        "Renders article detail with comments list and comment form"),
+                new ApiEndpointContract("POST", "/articles/{id}/delete", "", "", "ArticleController",
+                        "Deletes article and all associated comments"),
+                new ApiEndpointContract("POST", "/articles/{id}/comments", "CommentForm", "", "CommentController",
+                        "Adds a comment to an article")),
+                List.of(
+                        new ViewContract("home", home.targetPath(), "ArticleController#home", ""),
+                        new ViewContract("article-detail", detail.targetPath(),
+                                "ArticleController#detail, CommentController#addComment", "")),
+                List.of(), List.of());
+
+        var plan = service.createPlan(structure, contract);
+
+        assertEquals(List.of("article-crud", "comment-submit"),
+                plan.slices().stream().map(slice -> slice.id()).toList());
+        assertTrue(plan.slices().getFirst().ownedFiles().containsAll(List.of(home.targetPath(), detail.targetPath(),
+                layout.targetPath(), errors.targetPath())));
+        assertEquals(List.of("/articles/{id}", "/articles/{id}/delete"),
+                plan.slices().getFirst().contract().endpoints().stream().map(ApiEndpointContract::path).toList());
+        assertEquals(List.of("/articles/{id}/comments"),
+                plan.slices().get(1).contract().endpoints().stream().map(ApiEndpointContract::path).toList());
     }
 
     /**

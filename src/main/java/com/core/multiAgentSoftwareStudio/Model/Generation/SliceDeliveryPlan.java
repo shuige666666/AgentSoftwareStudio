@@ -12,7 +12,7 @@ public record SliceDeliveryPlan(
         String policyVersion) implements Serializable {
 
     private static final long serialVersionUID = 1L;
-    public static final String CURRENT_POLICY_VERSION = "vertical-slice-v6";
+    public static final String CURRENT_POLICY_VERSION = "vertical-slice-v7";
 
     public SliceDeliveryPlan {
         slices = slices == null ? List.of() : List.copyOf(slices);

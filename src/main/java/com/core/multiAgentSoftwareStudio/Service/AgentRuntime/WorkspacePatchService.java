@@ -78,12 +78,17 @@ public class WorkspacePatchService {
             else throw failure("", "PATCH_FORMAT", "Expected file operation: " + header);
             String raw = header.substring(header.indexOf(": ") + 2);
             String relative = safePath(raw, session);
-            if (changes.containsKey(relative)) {
-                throw failure(relative, "DUPLICATE_FILE", "Combine changes for a file into one patch block");
+            Change staged = changes.get(relative);
+            if (staged != null && !"update".equals(operation)) {
+                throw failure(relative, "DUPLICATE_FILE", "Only sequential update blocks can repeat a file");
             }
             Path target = session.projectRoot().resolve(relative).normalize();
             try {
-                String before = Files.exists(target) ? Files.readString(target, StandardCharsets.UTF_8) : null;
+                // 同文件的多个更新块先在内存里顺序叠加，最后只向磁盘写入一次。
+                String original = staged == null
+                        ? Files.exists(target) ? Files.readString(target, StandardCharsets.UTF_8) : null
+                        : staged.before();
+                String before = staged == null ? original : staged.after();
                 if ("add".equals(operation) && before != null) {
                     throw failure(relative, "FILE_EXISTS", "New file already exists");
                 }
@@ -135,7 +140,7 @@ public class WorkspacePatchService {
                 }
                 // 常见补丁会在最后一个 hunk 后附加文件结束标记，它不是新文件操作。
                 if (index < lines.length && "*** End of File".equals(lines[index])) index++;
-                changes.put(relative, new Change(relative, target, before, after));
+                changes.put(relative, new Change(relative, target, original, after));
             } catch (IOException e) {
                 throw failure(relative, "READ_FAILED", e.getMessage());
             }
@@ -190,7 +195,8 @@ public class WorkspacePatchService {
                     converted.append(line.startsWith("+") ? line : "+" + line).append('\n');
                     continue;
                 }
-                if (line.isBlank()) continue;
+                // 单个空格是合法的空行上下文，不能当成补丁分隔空行丢弃。
+                if (line.isEmpty()) continue;
                 if (!hunkSeen || (line.charAt(0) != '+' && line.charAt(0) != '-'
                         && line.charAt(0) != ' ')) {
                     throw failure(path, "PATCH_FORMAT", "Invalid unified diff hunk line");
@@ -220,8 +226,37 @@ public class WorkspacePatchService {
                 location = start;
             }
         }
-        if (location < 0) throw failure(path, "PATCH_CONTEXT_NOT_FOUND", "Context does not match current file");
+        if (location < 0) throw failure(path, "PATCH_CONTEXT_NOT_FOUND",
+                mismatchHint(lines, oldLines, from));
         return location;
+    }
+
+    /** 给出最接近的上下文差异，帮助模型基于当前磁盘文件重新生成补丁。 */
+    private String mismatchHint(List<String> lines, List<String> oldLines, int from) {
+        int bestStart = -1;
+        int bestMatched = 0;
+        for (int start = from; start < lines.size(); start++) {
+            int matched = 0;
+            while (matched < oldLines.size() && start + matched < lines.size()
+                    && lines.get(start + matched).equals(oldLines.get(matched))) matched++;
+            if (matched > bestMatched) {
+                bestMatched = matched;
+                bestStart = start;
+            }
+        }
+        if (bestMatched == 0 || bestMatched == oldLines.size()) {
+            return "Context does not match current file; read the file and rebase the patch";
+        }
+        String actual = bestStart + bestMatched < lines.size()
+                ? lines.get(bestStart + bestMatched) : "<end of file>";
+        return "Context diverges near line " + (bestStart + bestMatched + 1)
+                + ": expected `" + briefLine(oldLines.get(bestMatched)) + "`, found `"
+                + briefLine(actual) + "`; read the file and rebase the patch";
+    }
+
+    /** 有界展示单行，避免把整个源码重复塞入模型上下文。 */
+    private String briefLine(String line) {
+        return line.length() <= 120 ? line : line.substring(0, 120) + "...";
     }
 
     private String safePath(String raw, WorkspaceAgentSession session) {

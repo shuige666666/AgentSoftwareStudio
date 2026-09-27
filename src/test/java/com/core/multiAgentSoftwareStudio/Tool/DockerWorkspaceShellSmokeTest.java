@@ -55,6 +55,14 @@ class DockerWorkspaceShellSmokeTest {
             assertTrue(absoluteCwd.execution().completedSuccessfully());
             assertTrue(absoluteCwd.execution().output().contains("/workspace"));
 
+            // 开发 Agent 常把构建输出接到 tail；前序失败必须仍报告给工具调用方。
+            var pipedFailure = sandbox.runWorkspaceCommand(shell,
+                    "false | tail -n 1", "/workspace", 30_000);
+            assertEquals(1, pipedFailure.execution().exitCode());
+            var pipedSuccess = sandbox.runWorkspaceCommand(shell,
+                    "true | tail -n 1", "/workspace", 30_000);
+            assertTrue(pipedSuccess.execution().completedSuccessfully());
+
             var build = sandbox.runWorkspaceCommand(shell, "mvn -q -DskipTests compile", "/workspace", 90_000);
             assertTrue(build.execution().completedSuccessfully(), build.execution().output()
                     + " " + build.execution().infrastructureError());

@@ -99,6 +99,12 @@ public class BenchmarkRunnerService {
         long batchStartedNanos = System.nanoTime();
         List<BenchmarkCase> selectedCases = caseRegistry.select(request == null ? List.of() : request.caseIds());
         int repetitions = resolveRepetitions(request == null ? null : request.repetitions());
+        String planningSourceProjectId = request == null ? null : request.planningSourceProjectId();
+        if (planningSourceProjectId != null && !planningSourceProjectId.isBlank()
+                && (selectedCases.size() != 1
+                || !planningSourceProjectId.matches("[\\p{L}\\p{N}_-]{1,120}"))) {
+            throw new IllegalArgumentException("Planning replay needs one case and a generated project ID");
+        }
         List<BenchmarkCase> cases = repeatCases(selectedCases, repetitions);
         Map<String, String> releaseLabels = request == null || request.modelReleaseLabels() == null
                 ? Map.of()
@@ -117,14 +123,16 @@ public class BenchmarkRunnerService {
                 new BenchmarkDevelopmentConfiguration(
                         limitsConfig.getDevelopment().getMaxModelTurns(),
                         limitsConfig.getDevelopment().getMaxToolCalls(),
-                        "snapshot-build-all-tests-contract-final-v1"));
+                        "snapshot-build-all-tests-contract-final-v1"),
+                planningSourceProjectId);
 
         System.out.println("[Benchmark] 质量基准测试进度：0/" + cases.size()
                 + "，每个案例重复 " + repetitions + " 次，准备执行。");
         for (int index = 0; index < cases.size(); index++) {
             BenchmarkCase benchmarkCase = cases.get(index);
             int repetitionIndex = index % repetitions + 1;
-            results.add(runCase(benchmarkCase, repetitionIndex, repetitions, index + 1, cases.size()));
+            results.add(runCase(benchmarkCase, repetitionIndex, repetitions, index + 1, cases.size(),
+                    planningSourceProjectId));
             // 每个重复样本完成后立即覆盖检查点；后续超时或进程中断不会丢失已经完成的结果。
             BenchmarkRunReport checkpoint = buildReport(
                     started, Instant.now(), models, agentModelAssignments, benchmarkConfig, results, reportPath);
@@ -180,6 +188,17 @@ public class BenchmarkRunnerService {
             int repetitionCount,
             int currentCase,
             int totalCases) {
+        return runCase(benchmarkCase, repetitionIndex, repetitionCount, currentCase, totalCases, null);
+    }
+
+    /** 固定规划样本与普通样本共用质量判卷，差异只在开发前是否重新调用规划模型。 */
+    BenchmarkCaseResult runCase(
+            BenchmarkCase benchmarkCase,
+            int repetitionIndex,
+            int repetitionCount,
+            int currentCase,
+            int totalCases,
+            String planningSourceProjectId) {
         long started = System.nanoTime();
         printProgress(benchmarkCase.id(), currentCase, totalCases, "正在执行", started);
         ScheduledExecutorService progressExecutor = Executors.newSingleThreadScheduledExecutor();
@@ -191,10 +210,12 @@ public class BenchmarkRunnerService {
         WorkflowExecutionResult execution = null;
         String phase = "WORKFLOW";
         try {
-            execution = workflowService.generateProjectWithResult(
-                    benchmarkCase.prompt(),
-                    message -> System.out.println("[Benchmark " + currentCase + "/" + totalCases + " "
-                            + benchmarkCase.id() + "] " + message));
+            java.util.function.Consumer<String> caseLogger = message -> System.out.println(
+                    "[Benchmark " + currentCase + "/" + totalCases + " " + benchmarkCase.id() + "] " + message);
+            execution = planningSourceProjectId == null || planningSourceProjectId.isBlank()
+                    ? workflowService.generateProjectWithResult(benchmarkCase.prompt(), caseLogger)
+                    : workflowService.generateFromSavedPlanningWithResult(
+                            planningSourceProjectId, benchmarkCase.prompt(), caseLogger);
             phase = "QUALITY";
             BenchmarkQualityResult quality = qualityEvaluator.evaluate(benchmarkCase, execution);
             phase = "BEHAVIOR";

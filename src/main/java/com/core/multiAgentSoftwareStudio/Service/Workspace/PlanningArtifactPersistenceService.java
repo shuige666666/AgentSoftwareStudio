@@ -136,6 +136,17 @@ public class PlanningArtifactPersistenceService {
         else data.codes.stream().filter(code -> code != null && code.filename() != null)
                 .map(code -> code.filename().replace('\\', '/')).distinct().sorted()
                 .forEach(path -> report.append("- ").append(path).append('\n'));
+        if (data.milestoneState != null && data.milestoneState.active()) {
+            report.append("\n## 业务里程碑\n\n");
+            data.milestoneState.tasks().forEach(task -> report.append("- ").append(task.id())
+                    .append("：").append(task.goal())
+                    .append(task.accepted() ? "；已接受" : "；待完成")
+                    .append(task.accepted() ? "；源码 SHA-256=" + task.sourceHash()
+                            + "；验证记录=" + task.checkpointReportPath() : "")
+                    .append('\n'));
+            report.append("\n里程碑接受表示对应源码版本通过当时的编译、已有测试及范围内契约检查；")
+                    .append("最终用户行为仍以独立验收为准。\n");
+        }
         report.append("\n## 运行与验证\n\n项目的具体运行方式见 README.md；Maven 工程可执行 `mvn test`。")
                 .append("平台以上述 checkpoint 的编译和全量测试为正式验证依据。\n")
                 .append("\n## 已知限制\n\n");

@@ -75,6 +75,10 @@ public class SlicePlanningService {
         // 同一个 Controller 若承载多个业务能力，单文件无法安全归属多个切片，保守合并这些后端能力。
         mergeControllerCoupledSlices(grouped, contract);
 
+        // 服务端页面与通用错误处理跟随实际业务入口，避免形成空泛的技术层里程碑。
+        coLocateServerViews(grouped, contract);
+        foldSharedSupport(grouped);
+
         // 蓝图显式依赖、方法描述或契约类型能够确定唯一消费者时，基础支持文件应随消费者交付，
         // 防止 Architect 漏写 dependsOn 后重新产生未来类型引用。
         coLocateSupportDependencies(grouped, contract);
@@ -111,6 +115,43 @@ public class SlicePlanningService {
                     dependencies.stream().map(idByName::get).toList(), List.copyOf(sharedPaths)));
         }
         return new SliceDeliveryPlan(slices, List.copyOf(sharedPaths), SliceDeliveryPlan.CURRENT_POLICY_VERSION);
+    }
+
+    /** 将 Thymeleaf 页面放到返回它的业务 Controller 所在能力，跨能力共用页面归首个入口。 */
+    private void coLocateServerViews(Map<String, List<FileBlueprint>> grouped, ProjectContract contract) {
+        if (contract == null || contract.views().isEmpty()) return;
+        Map<String, String> ownerByController = new LinkedHashMap<>();
+        grouped.forEach((name, files) -> files.stream()
+                .filter(file -> "controller".equals(file.effectiveLayer()))
+                .forEach(file -> ownerByController.put(simpleTypeNameFromPath(file.targetPath()), name)));
+        for (ViewContract view : contract.views()) {
+            String owner = java.util.regex.Pattern.compile("[A-Za-z_$][\\w$]*(?:Controller|Handler)")
+                    .matcher(view.returnedBy()).results()
+                    .map(match -> ownerByController.get(match.group()))
+                    .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+            if (owner == null) continue;
+            String template = sourceCodePathService.normalizePath(view.templatePath());
+            FileBlueprint blueprint = grouped.values().stream().flatMap(List::stream)
+                    .filter(file -> template.equals(sourceCodePathService.normalizePath(file.targetPath())))
+                    .findFirst().orElse(null);
+            if (blueprint == null) continue;
+            grouped.values().forEach(files -> files.remove(blueprint));
+            grouped.get(owner).add(blueprint);
+        }
+        grouped.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+    }
+
+    /** 共享异常处理等支持文件随最基础能力交付，不单独占用一次业务验收。 */
+    private void foldSharedSupport(Map<String, List<FileBlueprint>> grouped) {
+        if (grouped.size() < 2) return;
+        String firstBusiness = grouped.keySet().stream()
+                .filter(name -> !"shared".equals(name) && !"server-rendered-views".equals(name))
+                .min(java.util.Comparator.comparingInt(this::capabilityRank)).orElse(null);
+        if (firstBusiness == null) return;
+        for (String supportName : List.of("shared", "server-rendered-views")) {
+            List<FileBlueprint> support = grouped.remove(supportName);
+            if (support != null) grouped.get(firstBusiness).addAll(support);
+        }
     }
 
     /**
@@ -500,6 +541,7 @@ public class SlicePlanningService {
         // 响应 DTO 只能作为结果形态，不能决定动作归属；例如 VoteResultResponse 仍属于投票切片。
         String routingEvidence = (endpoint.method() + " " + path + " " + endpoint.requestDto() + " "
                 + endpoint.description()).toLowerCase(Locale.ROOT);
+        String actionEvidence = (path + " " + endpoint.requestDto()).toLowerCase(Locale.ROOT);
         String responseEvidence = endpoint.responseDto() == null
                 ? ""
                 : endpoint.responseDto().toLowerCase(Locale.ROOT);
@@ -507,7 +549,10 @@ public class SlicePlanningService {
         boolean voteAction = routingEvidence.matches(".*(?:vote|voting).*" );
         boolean resultAction = routingEvidence.matches(".*(?:result|results).*" )
                 || !voteAction && "GET".equals(endpoint.method()) && responseEvidence.contains("result");
-        boolean commentAction = routingEvidence.matches(".*(?:comment|comments).*" );
+        // 页面描述提到评论列表或删除级联，并不表示该路由负责提交评论。
+        boolean commentAction = actionEvidence.matches(".*(?:comment|comments).*" )
+                || endpoint.description().toLowerCase(Locale.ROOT)
+                .matches(".*(?:add|submit|post|create) (?:a )?comment.*");
         boolean adjunctEndpoint = commentAction || voteAction || resultAction;
 
         if (capability.matches(".*(?:comment|comments).*$")) {

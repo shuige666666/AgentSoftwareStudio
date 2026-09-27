@@ -14,6 +14,7 @@ import com.core.multiAgentSoftwareStudio.Model.Generation.SliceDeliveryPlan;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.RepairBudget;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowJournalEntry;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
 
@@ -45,6 +46,9 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public ProjectQualityPolicyResult qualityPolicyResult = ProjectQualityPolicyResult.empty();
     public GenerationPlan generationPlan = new GenerationPlan(List.of());
     public SliceDeliveryPlan sliceDeliveryPlan = SliceDeliveryPlan.empty();
+    public DevelopmentMilestoneState milestoneState;
+    public int developmentModelTurnsUsed;
+    public int developmentToolCallsUsed;
     public int currentSliceIndex;
     public List<String> acceptedSliceIds = new ArrayList<>();
     public List<String> acceptedTestFiles = new ArrayList<>();
@@ -59,6 +63,7 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public FailureKind pendingFailureKind = FailureKind.NONE;
     public VerificationResult verificationResult = VerificationResult.empty();
     public String lastCheckpointHash;
+    public String lastCheckpointSnapshotPath;
     public String lastCheckpointReportPath;
     public boolean success;
     public boolean shouldFix;

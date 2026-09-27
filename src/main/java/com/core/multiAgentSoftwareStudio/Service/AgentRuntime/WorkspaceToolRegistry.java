@@ -9,9 +9,11 @@ import com.core.multiAgentSoftwareStudio.Service.Contract.ProjectProfileService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PlanningNodeService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.PlanningArtifactPersistenceService;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.DevelopmentMilestoneService;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
@@ -47,6 +49,7 @@ public class WorkspaceToolRegistry {
     private final WorkspacePatchService patchService;
     private final WorkspaceCheckpointService checkpointService;
     private final PlanningNodeService planningNodeService;
+    private final DevelopmentMilestoneService milestoneService;
     private final Map<String, WorkspaceTool> tools = new LinkedHashMap<>();
 
     public WorkspaceToolRegistry(
@@ -56,7 +59,8 @@ public class WorkspaceToolRegistry {
             ProjectProfileService projectProfileService,
             WorkspacePatchService patchService,
             WorkspaceCheckpointService checkpointService,
-            PlanningNodeService planningNodeService) {
+            PlanningNodeService planningNodeService,
+            DevelopmentMilestoneService milestoneService) {
         this.objectMapper = objectMapper;
         this.sandboxService = sandboxService;
         this.workspaceService = workspaceService;
@@ -64,6 +68,7 @@ public class WorkspaceToolRegistry {
         this.patchService = patchService;
         this.checkpointService = checkpointService;
         this.planningNodeService = planningNodeService;
+        this.milestoneService = milestoneService;
         registerCoreTools();
     }
 
@@ -75,7 +80,7 @@ public class WorkspaceToolRegistry {
     public List<ToolDefinition> definitions(WorkspaceAgentMode mode) {
         if (mode != WorkspaceAgentMode.DEVELOPMENT) return definitions();
         return List.of("list_files", "search_code", "read_files", "get_current_diff",
-                        "bash", "apply_patch", "submit_checkpoint", "report_blocker")
+                        "bash", "apply_patch", "submit_checkpoint", "restore_checkpoint", "report_blocker")
                 .stream().map(name -> tools.get(name).definition()).toList();
     }
 
@@ -95,6 +100,10 @@ public class WorkspaceToolRegistry {
             JsonNode arguments = objectMapper.readTree(
                     rawArguments == null || rawArguments.isBlank() ? "{}" : rawArguments);
             return tool.execute(arguments, session);
+        } catch (JsonProcessingException e) {
+            // 模型一次提交过长参数时可能截断 JSON；提示缩小补丁而不是重试同一大请求。
+            return jsonError("TOOL_ARGUMENTS_INVALID_JSON",
+                    "Tool arguments are incomplete or invalid JSON. Resend valid JSON; split large patches into smaller related-file groups.");
         } catch (Exception e) {
             return jsonError("TOOL_EXECUTION_FAILED", e.getMessage());
         }
@@ -108,13 +117,16 @@ public class WorkspaceToolRegistry {
                 arrayPropertySchema("paths", true), this::readFiles);
         register("apply_edits", "原子应用一组精确文本替换；每个文件限一项，并携带 read_files 返回的 expectedHash。",
                 applyEditsSchema(), this::applyEdits);
-        register("apply_patch", "按上下文应用多文件补丁；支持新增、修改、删除，返回局部失败的实际落盘文件。",
+        register("apply_patch", "首选源码写入工具：一次补丁可新增、修改或删除多个相关文件。若上下文不匹配，先读取当前文件再重做补丁；返回实际落盘文件。",
                 objectSchema("patch", "string", "true"), this::applyPatch);
-        register("bash", "在断网非 root 持久容器中执行命令；cwd 可用 . 或 /workspace 表示项目根目录，超时毫秒数可选。",
+        register("bash", "在断网非 root 持久容器中运行编译、测试和诊断命令；常规源码修改使用 apply_patch。cwd 可用 . 或 /workspace 表示项目根目录，超时毫秒数可选。",
                 objectSchema("command", "string", "true", "cwd", "string", "false",
                         "timeoutMillis", "integer", "false"), this::bash);
         register("submit_checkpoint", "冻结当前源码，在独立副本执行完整编译和全量已有测试；final 另做契约验收。",
-                objectSchema("summary", "string", "true", "scope", "string", "true"), this::submitCheckpoint);
+                objectSchema("summary", "string", "true", "scope", "string", "true",
+                        "milestoneId", "string", "false"), this::submitCheckpoint);
+        register("restore_checkpoint", "恢复最近接受的业务里程碑源码版本，保留当前候选备份。",
+                objectSchema(), this::restoreCheckpoint);
         register("get_current_diff", "查看本会话相对开始快照发生变化的文件摘要。",
                 objectSchema(), this::currentDiff);
         register("compile_main", "在隔离 Docker 沙箱中编译当前生产代码。",
@@ -328,10 +340,43 @@ public class WorkspaceToolRegistry {
         result.put("timedOut", execution.timedOut());
         result.put("infrastructureError", execution.infrastructureError());
         result.put("output", limitHeadAndTail(execution.output(), 16_000));
+        if (!execution.completedSuccessfully()) {
+            // 先呈现真正的编译或测试错误；完整输出和原始日志仍保留供核对。
+            result.put("failureHighlights", failureHighlights(execution.output()));
+        }
         result.put("fullLogPath", run.logPath());
         ArrayNode files = result.putArray("changedFiles");
         changed.forEach(files::add);
         return result.toString();
+    }
+
+    /** 从有噪声的构建输出中提取少量关键失败行，不改变命令的退出状态。 */
+    static String failureHighlights(String output) {
+        if (output == null || output.isBlank()) return "No command output; inspect exitCode and fullLogPath";
+        StringBuilder highlights = new StringBuilder();
+        int lines = 0;
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+        for (String raw : output.split("\\R")) {
+            String line = raw.strip();
+            boolean error = line.startsWith("[ERROR]");
+            boolean detail = line.startsWith("symbol:") || line.startsWith("location:")
+                    || line.startsWith("Caused by:") && !line.contains("jansi")
+                    || line.contains("Tests run:") && (line.contains("Failures:") || line.contains("Errors:"));
+            if (!error && !detail) continue;
+            while (line.startsWith("[ERROR]")) line = line.substring(7).strip();
+            if (line.isBlank() || line.contains("jansi-") || line.startsWith("-> [Help")
+                    || line.contains("[Help ") || line.startsWith("To see ")
+                    || line.startsWith("For more ") || line.startsWith("Please refer ")
+                    || line.startsWith("Re-run ") || line.startsWith("http")
+                    || line.startsWith("Failed to execute goal ") || !seen.add(line)) continue;
+            if (highlights.length() + line.length() > 2_000 || lines >= 10) break;
+            if (highlights.length() > 0) highlights.append('\n');
+            highlights.append(line);
+            lines++;
+        }
+        if (!highlights.isEmpty()) return highlights.toString();
+        String stripped = output.strip();
+        return stripped.length() <= 800 ? stripped : stripped.substring(0, 800) + "...";
     }
 
     /** 正式验证在冻结版本上执行，只有 final 全部通过才结束当前开发会话。 */
@@ -339,12 +384,59 @@ public class WorkspaceToolRegistry {
         if (session.mode() != WorkspaceAgentMode.DEVELOPMENT) {
             return jsonError("TOOL_NOT_ALLOWED", "submit_checkpoint belongs to the development session");
         }
-        WorkspaceCheckpointService.CheckpointResult result = checkpointService.verify(session,
-                arguments.path("scope").asText("progress"), arguments.path("summary").asText(""));
+        String scope = arguments.path("scope").asText("progress");
+        String summary = arguments.path("summary").asText("");
+        var state = session.workflowData().milestoneState;
+        if (state != null && state.active()) {
+            if ("final".equals(scope) && !state.allAccepted()) {
+                return jsonError("MILESTONES_PENDING", "Accept every business milestone before final checkpoint");
+            }
+            if ("progress".equals(scope)) {
+                String id = arguments.path("milestoneId").asText("");
+                if (state.current() == null || !state.current().id().equals(id)) {
+                    return jsonError("MILESTONE_OUT_OF_ORDER", "Current milestone is "
+                            + (state.current() == null ? "none" : state.current().id()));
+                }
+                WorkspaceCheckpointService.CheckpointResult result = checkpointService.verify(
+                        session, scope, summary,
+                        milestoneService.contractThroughCurrent(session.workflowData()));
+                ObjectNode feedback = objectMapper.valueToTree(result);
+                if ("PASSED".equals(result.status())) {
+                    milestoneService.accept(session.workflowData(), id, result);
+                    var next = session.workflowData().milestoneState.current();
+                    feedback.put("acceptedMilestone", id);
+                    feedback.put("nextMilestone", next == null ? "" : next.id());
+                    feedback.put("allMilestonesAccepted", next == null);
+                    // 同一会话切换任务时交付下一项的具体边界，避免模型沿用上一项契约。
+                    if (next != null) {
+                        feedback.set("nextAcceptanceCriteria", objectMapper.valueToTree(next.acceptanceCriteria()));
+                        session.workflowData().sliceDeliveryPlan.slices().stream()
+                                .filter(slice -> slice.id().equals(next.id()))
+                                .findFirst()
+                                .ifPresent(slice -> feedback.set("nextMilestoneContract",
+                                        objectMapper.valueToTree(slice.contract())));
+                    }
+                }
+                return feedback.toString();
+            }
+        }
+        WorkspaceCheckpointService.CheckpointResult result = checkpointService.verify(session, scope, summary);
         if (result.allowCompletion()) {
             session.complete(arguments.path("summary").asText("Final checkpoint passed"));
         }
         return objectMapper.valueToTree(result).toString();
+    }
+
+    /** 回滚只针对最近通过的能力快照，当前候选先备份以便人工检查。 */
+    private String restoreCheckpoint(JsonNode ignored, WorkspaceAgentSession session) {
+        if (session.mode() != WorkspaceAgentMode.DEVELOPMENT) {
+            return jsonError("TOOL_NOT_ALLOWED", "restore_checkpoint belongs to the development session");
+        }
+        var state = session.workflowData().milestoneState;
+        if (state == null || !state.active() || state.lastAccepted() == null) {
+            return jsonError("NO_ACCEPTED_MILESTONE", "No accepted milestone is available for restore");
+        }
+        return objectMapper.valueToTree(checkpointService.restoreLatestAccepted(session)).toString();
     }
 
     private String currentDiff(JsonNode ignored, WorkspaceAgentSession session) {

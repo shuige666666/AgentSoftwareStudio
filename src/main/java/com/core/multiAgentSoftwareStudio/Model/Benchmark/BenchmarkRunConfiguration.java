@@ -14,7 +14,8 @@ public record BenchmarkRunConfiguration(
         boolean gitDirty,
         String workingTreeFingerprint,
         Map<String, String> requirementSha256,
-        BenchmarkDevelopmentConfiguration development) {
+        BenchmarkDevelopmentConfiguration development,
+        String planningSourceProjectId) {
 
     public BenchmarkRunConfiguration {
         requirementSha256 = requirementSha256 == null ? Map.of() : Map.copyOf(requirementSha256);
@@ -31,6 +32,15 @@ public record BenchmarkRunConfiguration(
                                      String gitCommit, boolean gitDirty, String workingTreeFingerprint,
                                      Map<String, String> requirementSha256) {
         this(caseIds, repetitions, repairBudget, gitCommit, gitDirty,
-                workingTreeFingerprint, requirementSha256, null);
+                workingTreeFingerprint, requirementSha256, null, null);
+    }
+
+    public BenchmarkRunConfiguration(List<String> caseIds, int repetitions,
+                                     BenchmarkRepairBudgetConfiguration repairBudget,
+                                     String gitCommit, boolean gitDirty, String workingTreeFingerprint,
+                                     Map<String, String> requirementSha256,
+                                     BenchmarkDevelopmentConfiguration development) {
+        this(caseIds, repetitions, repairBudget, gitCommit, gitDirty,
+                workingTreeFingerprint, requirementSha256, development, null);
     }
 }

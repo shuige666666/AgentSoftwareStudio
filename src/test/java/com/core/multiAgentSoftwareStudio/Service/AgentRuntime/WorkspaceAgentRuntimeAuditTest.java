@@ -75,7 +75,8 @@ class WorkspaceAgentRuntimeAuditTest {
                 new WorkspaceService(new SourceCodePathService()),
                 new LlmUsageMetricsService(),
                 new WorkspaceAgentLimitsConfig(),
-                new ToolCallAuditService(new ObjectMapper(), auditConfig));
+                new ToolCallAuditService(new ObjectMapper(), auditConfig),
+                new com.core.multiAgentSoftwareStudio.Service.Workflow.DevelopmentMilestoneService(new ObjectMapper()));
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("test");
         data.projectPath = project.toString();
 

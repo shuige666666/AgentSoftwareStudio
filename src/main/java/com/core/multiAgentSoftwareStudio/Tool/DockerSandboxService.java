@@ -181,7 +181,8 @@ public class DockerSandboxService {
             String execId = dockerClient.execCreateCmd(shell.containerId())
                     .withAttachStdout(true).withAttachStderr(true)
                     .withWorkingDir(containerCwd)
-                    .withCmd("bash", "-lc", command)
+                    // 管道中 Maven 等前序命令失败时，不能被 tail 的零退出码掩盖。
+                    .withCmd("bash", "-o", "pipefail", "-lc", command)
                     .exec().getId();
             StringBuilder preview = new StringBuilder();
             var callback = new com.github.dockerjava.api.async.ResultCallback.Adapter<Frame>() {

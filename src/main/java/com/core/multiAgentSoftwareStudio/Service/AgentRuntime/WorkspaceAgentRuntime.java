@@ -6,6 +6,7 @@ import com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolModelResponse;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.SoftwareStudioWorkflowData;
+import com.core.multiAgentSoftwareStudio.Service.Workflow.DevelopmentMilestoneService;
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
@@ -30,6 +31,7 @@ public class WorkspaceAgentRuntime {
     private final LlmUsageMetricsService metricsService;
     private final WorkspaceAgentLimitsConfig limitsConfig;
     private final ToolCallAuditService auditService;
+    private final DevelopmentMilestoneService milestoneService;
 
     public WorkspaceAgentRuntime(
             @Qualifier(CODER_MODEL_BEAN_NAME) ToolCallingModel model,
@@ -37,13 +39,15 @@ public class WorkspaceAgentRuntime {
             WorkspaceService workspaceService,
             LlmUsageMetricsService metricsService,
             WorkspaceAgentLimitsConfig limitsConfig,
-            ToolCallAuditService auditService) {
+            ToolCallAuditService auditService,
+            DevelopmentMilestoneService milestoneService) {
         this.model = model;
         this.toolRegistry = toolRegistry;
         this.workspaceService = workspaceService;
         this.metricsService = metricsService;
         this.limitsConfig = limitsConfig;
         this.auditService = auditService;
+        this.milestoneService = milestoneService;
     }
 
     /**
@@ -93,9 +97,16 @@ public class WorkspaceAgentRuntime {
                 new WorkspaceAgentContextCompactor(limitsConfig.getContext());
 
         try {
-            for (int turn = 1; maxModelTurns <= 0 || turn <= maxModelTurns; turn++) {
+            for (int turn = session.modelTurns() + 1; maxModelTurns <= 0 || turn <= maxModelTurns; turn++) {
                 logger.accept("   Tool model turn " + turn + "/" + limitLabel(maxModelTurns) + ".");
+                // 全局预算将尽时提醒先验证当前改动，避免最后几轮留下未编译的新文件。
+                if (mode == WorkspaceAgentMode.DEVELOPMENT && maxModelTurns > 0
+                        && turn == Math.max(1, maxModelTurns - Math.min(8, Math.max(3, maxModelTurns / 6)))) {
+                    session.messages().add(ToolChatMessage.user(developmentClosingPrompt(session,
+                            maxModelTurns - turn + 1)));
+                }
                 session.incrementModelTurns();
+                if (mode == WorkspaceAgentMode.DEVELOPMENT) milestoneService.persist(data);
                 auditService.recordModelTurn(auditSession, session, turn);
                 ToolModelResponse response = metricsService.withCallName(
                         "Workspace" + mode.name() + "Agent",
@@ -108,7 +119,7 @@ public class WorkspaceAgentRuntime {
                 session.messages().add(response.message());
                 if (!response.hasToolCalls()) {
                     session.messages().add(ToolChatMessage.user(mode == WorkspaceAgentMode.DEVELOPMENT
-                            ? "Continue editing and verifying. To request completion, call submit_checkpoint with scope=final."
+                            ? developmentContinuationPrompt(session)
                             : "Do not claim completion in text. Use tools to inspect and verify the workspace, then call complete_stage."));
                     continue;
                 }
@@ -120,6 +131,7 @@ public class WorkspaceAgentRuntime {
                                 lastToolName, lastToolResult, "Tool-call limit reached");
                     }
                     session.incrementToolCalls();
+                    if (mode == WorkspaceAgentMode.DEVELOPMENT) milestoneService.persist(data);
                     logger.accept("   Tool call " + session.toolCalls() + "/" + limitLabel(maxToolCalls)
                             + ": " + call.name());
                     auditService.recordToolRequested(auditSession, session, call);
@@ -242,6 +254,28 @@ public class WorkspaceAgentRuntime {
         return limit <= 0 ? "unlimited" : Integer.toString(limit);
     }
 
+    /** 无工具回复后重申当前交付门禁，防止多任务会话直接跳到 final。 */
+    private String developmentContinuationPrompt(WorkspaceAgentSession session) {
+        var state = session.workflowData().milestoneState;
+        if (state != null && state.active() && state.current() != null) {
+            return "Continue implementing and testing the current milestone " + state.current().id()
+                    + ". Submit scope=progress with that milestoneId before working on later milestones.";
+        }
+        return "Continue editing and verifying. To request completion, call submit_checkpoint with scope=final.";
+    }
+
+    /** 在剩余轮次有限时重申当前任务的验证和提交顺序。 */
+    private String developmentClosingPrompt(WorkspaceAgentSession session, int remainingTurns) {
+        var state = session.workflowData().milestoneState;
+        String current = state != null && state.active() && state.current() != null
+                ? "current milestone " + state.current().id() + " with submit_checkpoint(scope=progress, milestoneId="
+                        + state.current().id() + ")"
+                : "project with submit_checkpoint(scope=final)";
+        return "About " + remainingTurns + " model turns remain in the global budget. Prioritize compiling "
+                + "and running all existing tests, fixing their failures, then verifying the " + current
+                + ". Do not add unrelated future files or tests that cannot be verified before the budget ends.";
+    }
+
     private Set<String> normalizePaths(Set<String> paths) {
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         if (paths != null) {
@@ -258,7 +292,10 @@ public class WorkspaceAgentRuntime {
                     You are DevelopmentAgent, continuing one project in its real workspace.
                     You may edit production code, frontend files, development tests, pom.xml and README.md.
                     Keep every required user behavior and the public contract. Never edit platform acceptance assets.
-                    Use list_files/search_code/read_files, apply_patch for multi-file edits, and bash for local diagnosis.
+                    Use list_files/search_code/read_files to inspect the workspace. Prefer one apply_patch call for
+                    several related source files instead of spending one model turn per file. Use bash for builds,
+                    tests and diagnosis. If a patch reports a context mismatch, read the current file and rebase
+                    the patch; do not switch to repeated one-file shell writes.
                     Bash runs in a restricted container; it can change project files, so inspect current disk state after it.
                     Use submit_checkpoint(scope=progress) for full compile and all current tests while work continues.
                     A progress pass is feedback, not project completion. Use submit_checkpoint(scope=final) only after

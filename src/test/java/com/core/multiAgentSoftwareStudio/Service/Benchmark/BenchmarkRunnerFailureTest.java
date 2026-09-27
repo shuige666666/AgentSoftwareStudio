@@ -18,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class BenchmarkRunnerFailureTest {
@@ -57,6 +59,21 @@ class BenchmarkRunnerFailureTest {
 
         assertEquals("candidate", result.projectPath());
         assertTrue(result.workflowError().contains("UnsupportedOperationException"));
+    }
+
+    /** 固定规划样本仍进入普通判卷路径，开发入口复用已保存规划。 */
+    @Test
+    void routesFrozenPlanningCaseToReplayWorkflow() {
+        when(workflow.generateFromSavedPlanningWithResult(any(), any(), any())).thenThrow(
+                new WorkflowExecutionFailure("replay-candidate", new IllegalStateException("replay stopped")));
+
+        var result = runner.runCase(benchmarkCase, 1, 1, 1, 1, "source-project");
+
+        assertEquals("replay-candidate", result.projectPath());
+        verify(workflow).generateFromSavedPlanningWithResult(
+                org.mockito.ArgumentMatchers.eq("source-project"),
+                org.mockito.ArgumentMatchers.eq("prompt"), any());
+        verify(workflow, never()).generateProjectWithResult(any(), any());
     }
 
     /**

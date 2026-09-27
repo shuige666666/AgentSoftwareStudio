@@ -18,5 +18,13 @@ public record BenchmarkRunRequest(
         /**
          * 人工模型版本标签，用于区分供应商同名滚动版本。
          */
-        Map<String, String> modelReleaseLabels) {
+        Map<String, String> modelReleaseLabels,
+
+        /** 固定规划对照时复用该项目的规划产物，并在全新脚手架中重新开发。 */
+        String planningSourceProjectId) {
+
+    public BenchmarkRunRequest(List<String> caseIds, Integer repetitions,
+                               Map<String, String> modelReleaseLabels) {
+        this(caseIds, repetitions, modelReleaseLabels, null);
+    }
 }

@@ -41,4 +41,12 @@ public class SoftwareStudioService {
             }
         });
     }
+
+    /** 依据项目保存的开发状态续接生成，并继续向调用方发送日志。 */
+    public WorkflowExecutionResult resumeProjectStream(String projectId, Consumer<String> eventListener) {
+        return workflowService.resumeProjectWithResult(projectId, log -> {
+            System.out.println(log);
+            if (eventListener != null) eventListener.accept(log);
+        });
+    }
 }

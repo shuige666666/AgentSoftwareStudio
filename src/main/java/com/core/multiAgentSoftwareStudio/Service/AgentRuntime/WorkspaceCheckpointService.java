@@ -1,11 +1,13 @@
 package com.core.multiAgentSoftwareStudio.Service.AgentRuntime;
 
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectQualityPolicyResult;
+import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStage;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState;
 import com.core.multiAgentSoftwareStudio.Service.Contract.ProjectProfileService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.RunJournalService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.VerificationResultService;
@@ -44,6 +46,9 @@ public class WorkspaceCheckpointService {
                                    List<String> contractBlockers, String failureOutput,
                                    boolean allowCompletion, boolean reusedVerification) { }
 
+    public record RestoreResult(String milestoneId, String restoredHash, String backupPath,
+                                List<String> changedFiles) { }
+
     private final DockerSandboxService sandbox;
     private final VerificationResultService verification;
     private final ProjectProfileService profiles;
@@ -74,6 +79,12 @@ public class WorkspaceCheckpointService {
      * progress 只检查构建与已有测试；final 再检查契约，并且仅最终通过允许结束开发。
      */
     public CheckpointResult verify(WorkspaceAgentSession session, String scope, String summary) {
+        return verify(session, scope, summary, null);
+    }
+
+    /** 里程碑 progress 额外检查此前已接受能力和当前能力的公开契约。 */
+    public CheckpointResult verify(WorkspaceAgentSession session, String scope, String summary,
+                                   ProjectContract progressContract) {
         if (!"progress".equals(scope) && !"final".equals(scope)) {
             throw new IllegalArgumentException("Checkpoint scope must be progress or final");
         }
@@ -133,12 +144,13 @@ public class WorkspaceCheckpointService {
                 }
             }
 
-            boolean contractPassed = !finalScope;
+            boolean checkContract = finalScope || progressContract != null;
+            boolean contractPassed = !checkContract;
             List<String> blockers = List.of();
-            if (finalScope && build.passed() && test.passed()) {
+            if (checkContract && build.passed() && test.passed()) {
                 ProjectQualityPolicyResult quality = profiles.evaluate(session.workflowData().projectProfile,
                         workspace.loadProjectFromDisk(source, message -> { }),
-                        session.workflowData().contract, List.of());
+                        finalScope ? session.workflowData().contract : progressContract, List.of());
                 session.workflowData().qualityPolicyResult = quality;
                 blockers = quality.blockingFindings().stream()
                         .map(finding -> finding.gate() + ": " + finding.evidence()).toList();
@@ -161,6 +173,7 @@ public class WorkspaceCheckpointService {
                     reportDirectory.resolve("checkpoint.json").toString(), build, test, contractPassed,
                     blockers.stream().limit(12).toList(), failureOutput, allowCompletion, reuse);
             session.workflowData().lastCheckpointHash = hash;
+            session.workflowData().lastCheckpointSnapshotPath = result.snapshotPath();
             session.workflowData().lastCheckpointReportPath = result.reportPath();
             mapper.writerWithDefaultPrettyPrinter().writeValue(reportDirectory.resolve("checkpoint.json").toFile(),
                     new CheckpointRecord(OffsetDateTime.now().toString(), summary, result));
@@ -171,6 +184,92 @@ public class WorkspaceCheckpointService {
     }
 
     private record CheckpointRecord(String completedAt, String summary, CheckpointResult result) { }
+
+    /** 核对最近接受的快照哈希后恢复受管源码；先备份当前候选，不触碰平台元数据。 */
+    public RestoreResult restoreLatestAccepted(WorkspaceAgentSession session) {
+        DevelopmentMilestoneState state = session.workflowData().milestoneState;
+        DevelopmentMilestoneState.Task accepted = state == null ? null : state.lastAccepted();
+        if (accepted == null) throw new IllegalStateException("No accepted milestone checkpoint");
+        session.closeShell(sandbox);
+        Path root = session.projectRoot();
+        Path source = verifiedAcceptedSnapshot(root, accepted);
+        Path backup = Path.of("studio-run-logs", root.getFileName().toString(), "rollback-candidates",
+                UUID.randomUUID().toString(), "source").toAbsolutePath().normalize();
+        try {
+            Files.createDirectories(backup);
+            copyCandidate(root, backup);
+            List<Path> savedFiles;
+            try (Stream<Path> stream = Files.walk(source)) {
+                List<Path> entries = stream.toList();
+                rejectCandidateLinks(source, entries);
+                savedFiles = entries.stream().filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                        .filter(path -> included(source.relativize(path))).toList();
+            }
+            Set<Path> savedPaths = savedFiles.stream().map(source::relativize)
+                    .collect(java.util.stream.Collectors.toSet());
+            List<Path> currentFiles;
+            try (Stream<Path> stream = Files.walk(root)) {
+                List<Path> entries = stream.toList();
+                rejectCandidateLinks(root, entries);
+                currentFiles = entries.stream().filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                        .filter(path -> included(root.relativize(path))).toList();
+            }
+            List<String> changed = new java.util.ArrayList<>();
+            // 恢复受管文件集合；元数据、日志、缓存及构建产物均留在原处。
+            for (Path file : currentFiles) {
+                Path relative = root.relativize(file);
+                if (!savedPaths.contains(relative)) {
+                    Files.delete(file);
+                    changed.add(relative.toString().replace('\\', '/'));
+                }
+            }
+            for (Path file : savedFiles) {
+                Path relative = source.relativize(file);
+                Path destination = root.resolve(relative).normalize();
+                if (!destination.startsWith(root)) throw new IOException("Restore path escapes project workspace");
+                Files.createDirectories(destination.getParent());
+                Files.copy(file, destination, StandardCopyOption.REPLACE_EXISTING);
+                changed.add(relative.toString().replace('\\', '/'));
+            }
+            if (!fingerprint(root).equals(accepted.sourceHash())) {
+                throw new IOException("Restored candidate differs from accepted checkpoint");
+            }
+            changed.forEach(session::recordWrite);
+            session.workflowData().codes = workspace.loadProjectFromDisk(root, message -> { });
+            session.workflowData().verificationResult = VerificationResult.empty();
+            session.workflowData().qualityPolicyResult = ProjectQualityPolicyResult.empty();
+            session.workflowData().lastCheckpointHash = null;
+            session.workflowData().lastCheckpointSnapshotPath = null;
+            session.workflowData().lastCheckpointReportPath = null;
+            session.workflowData().success = false;
+            return new RestoreResult(accepted.id(), accepted.sourceHash(), backup.toString(),
+                    List.copyOf(changed));
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to restore accepted checkpoint; candidate backup is " + backup, e);
+        }
+    }
+
+    /** 续接和回滚都先核对快照归属、真实路径及源码哈希。 */
+    public Path verifiedAcceptedSnapshot(Path projectRoot, DevelopmentMilestoneState.Task accepted) {
+        if (accepted == null || accepted.snapshotPath().isBlank() || accepted.sourceHash().isBlank()) {
+            throw new IllegalStateException("Accepted milestone has no verified source snapshot");
+        }
+        Path root = projectRoot.toAbsolutePath().normalize();
+        Path allowed = Path.of("studio-run-logs", root.getFileName().toString(), "checkpoints")
+                .toAbsolutePath().normalize();
+        Path source = Path.of(accepted.snapshotPath()).toAbsolutePath().normalize();
+        try {
+            if (!source.startsWith(allowed) || !source.getFileName().toString().equals("source")
+                    || !Files.isDirectory(source) || Files.isSymbolicLink(source)
+                    || !source.toRealPath().startsWith(allowed.toRealPath())
+                    || !fingerprint(source).equals(accepted.sourceHash())) {
+                throw new IllegalStateException("Accepted checkpoint path or hash is invalid");
+            }
+            return source;
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to verify accepted checkpoint", e);
+        }
+    }
 
     /** 正式 Maven 验证只在断网容器运行；缓存缺项时由平台预取后重试同一命令。 */
     private SandboxExecutionResult runCheckpointCommand(Path source, String type, boolean build,

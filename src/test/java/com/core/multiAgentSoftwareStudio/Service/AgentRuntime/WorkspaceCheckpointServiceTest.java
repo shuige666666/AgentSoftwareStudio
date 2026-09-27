@@ -5,6 +5,7 @@ import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectProfile;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectQualityPolicyResult;
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectStructure;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState;
 import com.core.multiAgentSoftwareStudio.Service.Contract.ProjectProfileService;
 import com.core.multiAgentSoftwareStudio.Service.Source.SourceCodePathService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.RunJournalService;
@@ -234,5 +235,46 @@ class WorkspaceCheckpointServiceTest {
 
         assertEquals("BLOCKED", result.status());
         assertFalse(result.allowCompletion());
+    }
+
+    /** 回滚只恢复已验收源码，当前候选先备份，平台规划文件保持原样。 */
+    @Test
+    void restoresLatestAcceptedSourceWithoutTouchingMetadata() throws Exception {
+        Path source = root.resolve("src/main/java/demo/Demo.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class Demo {}\n");
+        Path metadata = root.resolve(".software-studio/plan.md");
+        Files.createDirectories(metadata.getParent());
+        Files.writeString(metadata, "original plan");
+        DockerSandboxService sandbox = mock(DockerSandboxService.class);
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp -DskipTests compile")))
+                .thenReturn(new SandboxExecutionResult("mvn compile", 0, "BUILD SUCCESS", 10, false, null));
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp test")))
+                .thenReturn(new SandboxExecutionResult("mvn test", 0,
+                        "Tests run: 1, Failures: 0, Errors: 0, Skipped: 0", 20, false, null));
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectPath = root.toString();
+        data.projectProfile = ProjectProfile.java17SpringBoot();
+        var session = new WorkspaceAgentSession(root, WorkspaceAgentMode.DEVELOPMENT,
+                data, message -> { }, Map.of(), Set.of());
+        var service = new WorkspaceCheckpointService(sandbox, new VerificationResultService(),
+                mock(ProjectProfileService.class), new WorkspaceService(new SourceCodePathService()),
+                new RunJournalService(), new ObjectMapper());
+        var accepted = service.verify(session, "progress", "first capability");
+        data.milestoneState = new DevelopmentMilestoneState(1, List.of(
+                new DevelopmentMilestoneState.Task("first", "first", List.of(), true,
+                        accepted.sourceHash(), accepted.snapshotPath(), accepted.reportPath())), 0, 0, "");
+        Files.writeString(source, "class Demo { int unfinished; }\n");
+        Path extra = root.resolve("src/main/java/demo/Extra.java");
+        Files.writeString(extra, "class Extra {}\n");
+
+        var restored = service.restoreLatestAccepted(session);
+
+        assertEquals("class Demo {}\n", Files.readString(source));
+        assertFalse(Files.exists(extra));
+        assertEquals("original plan", Files.readString(metadata));
+        assertEquals("class Demo { int unfinished; }\n", Files.readString(
+                Path.of(restored.backupPath()).resolve("src/main/java/demo/Demo.java")));
+        assertEquals(accepted.sourceHash(), restored.restoredHash());
     }
 }

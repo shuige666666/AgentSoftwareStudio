@@ -52,6 +52,11 @@ public final class WorkspaceAgentSession {
         this.logger = logger == null ? message -> { } : logger;
         this.baselineFiles = new LinkedHashMap<>(baselineFiles == null ? Map.of() : baselineFiles);
         this.allowedWritePaths = new LinkedHashSet<>(allowedWritePaths == null ? Set.of() : allowedWritePaths);
+        if (mode == WorkspaceAgentMode.DEVELOPMENT) {
+            // 中断续接沿用此前已消耗的全局预算，不为新会话重新发放轮次。
+            this.modelTurns = workflowData.developmentModelTurnsUsed;
+            this.toolCalls = workflowData.developmentToolCallsUsed;
+        }
     }
 
     public Path projectRoot() { return projectRoot; }
@@ -81,8 +86,14 @@ public final class WorkspaceAgentSession {
         shell = null;
     }
 
-    public void incrementModelTurns() { modelTurns++; }
-    public void incrementToolCalls() { toolCalls++; }
+    public void incrementModelTurns() {
+        modelTurns++;
+        if (mode == WorkspaceAgentMode.DEVELOPMENT) workflowData.developmentModelTurnsUsed = modelTurns;
+    }
+    public void incrementToolCalls() {
+        toolCalls++;
+        if (mode == WorkspaceAgentMode.DEVELOPMENT) workflowData.developmentToolCallsUsed = toolCalls;
+    }
 
     public void recordWrite(String path) {
         changedFiles.add(path);

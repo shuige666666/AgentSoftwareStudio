@@ -63,6 +63,11 @@ public class PlanningAgent extends AbstractJsonAgent {
             Arrays may be empty when inapplicable, but every HTTP endpoint must have explicit method and path.
             Use actual field names in requestFields and responseFields. Include required error semantics.
             behaviorCoverage must cover each B-numbered story with observable endpoint or UI interaction.
+            For a project with several independently observable capabilities, assign the same short business
+            batchName to files serving each capability (for example article-create-query, comment-submit).
+            A capability may span domain, API, UI and tests; do not use technical layer names as batches.
+            For a small single-capability project, one business batch is enough. Shared support files may
+            use a shared name. Preserve every required B-numbered behavior across the complete plan.
             Do not put test files, pom.xml, or the application bootstrap in structure.files; the platform
             creates the build scaffold before business coding. Keep file paths project-relative.
             """;

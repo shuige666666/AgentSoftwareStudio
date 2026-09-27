@@ -81,6 +81,7 @@ class WorkspaceAgentRuntimeTest {
         WorkspaceToolRegistry registry = mock(WorkspaceToolRegistry.class);
         when(registry.definitions(WorkspaceAgentMode.DEVELOPMENT)).thenReturn(List.of());
         when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.actualChangedFiles(any())).thenReturn(List.of());
         when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
             String name = invocation.getArgument(0);
             String arguments = invocation.getArgument(1);
@@ -247,6 +248,65 @@ class WorkspaceAgentRuntimeTest {
         assertEquals(7, result.modelTurns());
     }
 
+    /** 续接会话从已消耗轮次继续计数，不能因重启而重置全局开发预算。 */
+    @Test
+    void resumedDevelopmentUsesRemainingGlobalTurns() {
+        RecordingToolModel model = new RecordingToolModel(List.of(
+                response("call-36", "submit_checkpoint", "{\"scope\":\"final\",\"summary\":\"done\"}")));
+        WorkspaceToolRegistry registry = mock(WorkspaceToolRegistry.class);
+        when(registry.definitions(WorkspaceAgentMode.DEVELOPMENT)).thenReturn(List.of());
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.actualChangedFiles(any())).thenReturn(List.of());
+        when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
+            WorkspaceAgentSession session = invocation.getArgument(2);
+            session.complete("verified");
+            return "{\"status\":\"PASSED\"}";
+        });
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectPath = projectRoot.toString();
+        data.developmentModelTurnsUsed = 35;
+        data.developmentToolCallsUsed = 107;
+
+        WorkspaceAgentRunResult result = runtime(model, registry).runDetailed(data,
+                WorkspaceAgentMode.DEVELOPMENT, Set.of(), "resume", message -> { });
+
+        assertTrue(result.completed());
+        assertEquals(36, result.modelTurns());
+        assertEquals(108, result.toolCalls());
+        assertEquals(1, model.histories.size());
+    }
+
+    /** 预算收尾提醒只注入一次，并在续接会话中沿用已消耗轮次。 */
+    @Test
+    void developmentWarnsOnceBeforeGlobalTurnLimit() {
+        RecordingToolModel model = new RecordingToolModel(List.of(
+                response("call-30", "list_files", "{}"),
+                response("call-31", "submit_checkpoint", "{\"scope\":\"final\"}")));
+        WorkspaceToolRegistry registry = mock(WorkspaceToolRegistry.class);
+        when(registry.definitions(WorkspaceAgentMode.DEVELOPMENT)).thenReturn(List.of());
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.actualChangedFiles(any())).thenReturn(List.of());
+        when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
+            if ("submit_checkpoint".equals(invocation.getArgument(0))) {
+                ((WorkspaceAgentSession) invocation.getArgument(2)).complete("verified");
+            }
+            return "{}";
+        });
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectPath = projectRoot.toString();
+        data.developmentModelTurnsUsed = 29;
+
+        WorkspaceAgentRunResult result = runtime(model, registry).runDetailed(data,
+                WorkspaceAgentMode.DEVELOPMENT, Set.of(), "resume", message -> { });
+
+        assertTrue(result.completed());
+        assertEquals(31, result.modelTurns());
+        for (var history : model.histories) {
+            assertEquals(1, history.stream().filter(message -> "user".equals(message.role())
+                    && message.content().contains("About 7 model turns remain")).count());
+        }
+    }
+
     private ToolModelResponse response(String id, String name, String arguments) {
         return new ToolModelResponse(
                 ToolChatMessage.assistant("", List.of(new ToolCall(id, name, arguments))),
@@ -262,7 +322,8 @@ class WorkspaceAgentRuntimeTest {
                 new WorkspaceService(new SourceCodePathService()),
                 new LlmUsageMetricsService(),
                 new WorkspaceAgentLimitsConfig(),
-                new ToolCallAuditService(new ObjectMapper(), auditConfig));
+                new ToolCallAuditService(new ObjectMapper(), auditConfig),
+                new com.core.multiAgentSoftwareStudio.Service.Workflow.DevelopmentMilestoneService(new ObjectMapper()));
     }
 
     private static final class RecordingToolModel implements ToolCallingModel {
