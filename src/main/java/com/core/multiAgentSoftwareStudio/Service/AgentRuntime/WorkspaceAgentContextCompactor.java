@@ -2,6 +2,7 @@ package com.core.multiAgentSoftwareStudio.Service.AgentRuntime;
 
 import com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentLimitsConfig;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage;
+import com.core.multiAgentSoftwareStudio.Service.Generation.DevelopmentMilestoneObjective;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,7 +45,14 @@ final class WorkspaceAgentContextCompactor {
         int before = messages.size();
         List<ToolChatMessage> compacted = new ArrayList<>();
         compacted.add(messages.get(0));
-        compacted.add(messages.get(1));
+        // 动态任务切换后，首次说明可能仍指向旧任务；压缩时从权威状态重建当前说明。
+        if (session.mode() == WorkspaceAgentMode.DEVELOPMENT
+                && session.workflowData().milestoneState != null
+                && session.workflowData().milestoneState.active()) {
+            compacted.add(ToolChatMessage.user(DevelopmentMilestoneObjective.render(session.workflowData())));
+        } else {
+            compacted.add(messages.get(1));
+        }
         compacted.add(ToolChatMessage.user(summary(session, lastToolName, lastToolResult)));
         compacted.addAll(messages.subList(retainedStart, messages.size()));
         messages.clear();

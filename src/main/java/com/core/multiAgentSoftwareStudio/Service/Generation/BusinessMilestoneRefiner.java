@@ -29,7 +29,9 @@ public class BusinessMilestoneRefiner {
                     .filter(this::laterAction).toList();
             List<String> dependencies = slice.dependsOnSlices().stream()
                     .map(id -> lastIdByOriginal.getOrDefault(id, id)).toList();
-            if (core.size() < 2 || later.size() < 2 || !callsHaveEndpointOwner(slice.contract())) {
+            ViewPartition views = partitionViews(slice.contract(), core, later);
+            if (core.size() < 2 || later.size() < 2 || !callsHaveEndpointOwner(slice.contract())
+                    || views == null) {
                 result.add(new DeliverySlice(slice.id(), slice.name(), slice.acceptanceCriteria(),
                         slice.files(), slice.contract(), dependencies, slice.sharedFiles()));
                 lastIdByOriginal.put(slice.id(), slice.id());
@@ -37,8 +39,8 @@ public class BusinessMilestoneRefiner {
             }
             String coreId = slice.id() + "-create-query";
             String laterId = slice.id() + "-change-actions";
-            ProjectContract coreContract = scopedContract(slice.contract(), core, false);
-            ProjectContract laterContract = scopedContract(slice.contract(), later, true);
+            ProjectContract coreContract = scopedContract(slice.contract(), core, views.core());
+            ProjectContract laterContract = scopedContract(slice.contract(), later, views.later());
             List<DeliverySlice> coreMilestones = splitPageDetail(slice, coreContract, dependencies);
             if (coreMilestones.isEmpty()) {
                 result.add(new DeliverySlice(coreId, slice.name() + "：创建与查询",
@@ -85,11 +87,13 @@ public class BusinessMilestoneRefiner {
                         criteria(detailContract), List.of(), detailContract, List.of(baseId), slice.sharedFiles()));
     }
 
-    /** 只依据规划契约中的模板路径关联页面，避免从业务名称猜测页面归属。 */
+    /** 只依据契约中的模板路径关联页面，允许响应说明在路径后附加“view”等文字。 */
     private boolean returnsView(ApiEndpointContract endpoint, ViewContract view) {
         String response = endpoint.responseDto().replace('\\', '/');
         String template = view.templatePath().replace('\\', '/');
-        return response.endsWith(".html") && template.endsWith("/" + response);
+        int templates = template.indexOf("/templates/");
+        String relative = templates < 0 ? template : template.substring(templates + "/templates/".length());
+        return relative.endsWith(".html") && response.contains(relative);
     }
 
     /** 前端交互跟随其实际调用的接口。 */
@@ -108,12 +112,35 @@ public class BusinessMilestoneRefiner {
                 && !path.endsWith("/new");
     }
 
-    /** 前端调用按所调用端点归组；已规划的页面先随基础资源提供。 */
+    /** 页面只有明确归属或属于独立的共享处理器时才允许拆分。 */
+    private ViewPartition partitionViews(ProjectContract contract, List<ApiEndpointContract> core,
+                                         List<ApiEndpointContract> later) {
+        List<ViewContract> coreViews = new ArrayList<>();
+        List<ViewContract> laterViews = new ArrayList<>();
+        for (ViewContract view : contract.views()) {
+            boolean usedByCore = core.stream().anyMatch(endpoint -> returnsView(endpoint, view));
+            boolean usedByLater = later.stream().anyMatch(endpoint -> returnsView(endpoint, view));
+            if (!usedByCore && !usedByLater) {
+                boolean sameController = view.returnedBy().isBlank() || contract.endpoints().stream()
+                        .anyMatch(endpoint -> endpoint.implementedBy().equals(view.returnedBy()));
+                // 同一业务 Controller 的页面用途不明时保留原任务，不能提前交付未来页面。
+                if (sameController) return null;
+                usedByCore = true;
+            }
+            if (usedByCore) coreViews.add(view);
+            if (usedByLater) laterViews.add(view);
+        }
+        return new ViewPartition(coreViews, laterViews);
+    }
+
+    private record ViewPartition(List<ViewContract> core, List<ViewContract> later) { }
+
+    /** 前端调用按所调用端点归组，页面按已确认的端点归属交付。 */
     private ProjectContract scopedContract(ProjectContract original, List<ApiEndpointContract> endpoints,
-                                           boolean later) {
+                                           List<ViewContract> views) {
         List<FrontendCallContract> calls = original.frontendCalls().stream()
                 .filter(call -> endpoints.stream().anyMatch(endpoint -> matches(endpoint, call))).toList();
-        return new ProjectContract(endpoints, later ? List.of() : original.views(), calls, List.of());
+        return new ProjectContract(endpoints, views, calls, List.of());
     }
 
     /** 前端调用无法归属时保留原任务，防止拆分时遗漏已规划的跨层契约。 */

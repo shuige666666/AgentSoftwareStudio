@@ -114,7 +114,26 @@ public class SlicePlanningService {
                     idByName.get(sliceName), sliceName, criteria, sliceFiles, sliceContract,
                     dependencies.stream().map(idByName::get).toList(), List.copyOf(sharedPaths)));
         }
+        // 自由文本推断可能漏掉公开接口；归属不完整时保留一个完整任务，避免遗漏验收目标。
+        if (!coversContract(slices, contract)) {
+            ProjectContract complete = contract == null
+                    ? new ProjectContract(List.of(), List.of(), List.of(), List.of()) : contract;
+            return new SliceDeliveryPlan(List.of(new DeliverySlice("project-feature", "完整项目能力",
+                    acceptanceCriteria(complete, files), files, complete, List.of(),
+                    List.copyOf(sharedPaths))), List.copyOf(sharedPaths), SliceDeliveryPlan.CURRENT_POLICY_VERSION);
+        }
         return new SliceDeliveryPlan(slices, List.copyOf(sharedPaths), SliceDeliveryPlan.CURRENT_POLICY_VERSION);
+    }
+
+    /** 每个公开接口须恰有一个任务负责，页面和前端调用至少保留在一个任务中。 */
+    private boolean coversContract(List<DeliverySlice> slices, ProjectContract contract) {
+        if (contract == null) return true;
+        return contract.endpoints().stream().allMatch(endpoint -> slices.stream()
+                .filter(slice -> slice.contract().endpoints().contains(endpoint)).count() == 1)
+                && contract.views().stream().allMatch(view -> slices.stream()
+                .anyMatch(slice -> slice.contract().views().contains(view)))
+                && contract.frontendCalls().stream().allMatch(call -> slices.stream()
+                .anyMatch(slice -> slice.contract().frontendCalls().contains(call)));
     }
 
     /** 将 Thymeleaf 页面放到返回它的业务 Controller 所在能力，跨能力共用页面归首个入口。 */
@@ -286,7 +305,9 @@ public class SlicePlanningService {
                         || simpleTypes.contains(simpleTypeName(view.returnedBy())))
                 .toList();
         List<FrontendCallContract> calls = contract.frontendCalls().stream()
-                .filter(call -> paths.contains(sourceCodePathService.normalizePath(call.sourceFile())))
+                // 服务端模板可能被多个业务任务共用，交互契约按目标端点归属，不随模板文件提前交付。
+                .filter(call -> paths.contains(sourceCodePathService.normalizePath(call.sourceFile()))
+                        || call.sourceFile().replace('\\', '/').contains("/templates/"))
                 // 服务端模板只接收当前能力的交互契约，避免评论切片提前生成文章删除等未来入口。
                 .filter(call -> FRONTEND_INTEGRATION_SLICE.equalsIgnoreCase(sliceName)
                         || endpoints.stream().anyMatch(endpoint -> endpoint.method().equalsIgnoreCase(call.method())
@@ -542,13 +563,10 @@ public class SlicePlanningService {
         String routingEvidence = (endpoint.method() + " " + path + " " + endpoint.requestDto() + " "
                 + endpoint.description()).toLowerCase(Locale.ROOT);
         String actionEvidence = (path + " " + endpoint.requestDto()).toLowerCase(Locale.ROOT);
-        String responseEvidence = endpoint.responseDto() == null
-                ? ""
-                : endpoint.responseDto().toLowerCase(Locale.ROOT);
         boolean itemPath = path.contains("{}");
-        boolean voteAction = routingEvidence.matches(".*(?:vote|voting).*" );
-        boolean resultAction = routingEvidence.matches(".*(?:result|results).*" )
-                || !voteAction && "GET".equals(endpoint.method()) && responseEvidence.contains("result");
+        // 动作归属只看路由和请求；描述中的普通“results sorted”不能把列表接口划成结果动作。
+        boolean voteAction = actionEvidence.matches(".*(?:vote|voting).*" );
+        boolean resultAction = actionEvidence.matches(".*(?:result|results).*" );
         // 页面描述提到评论列表或删除级联，并不表示该路由负责提交评论。
         boolean commentAction = actionEvidence.matches(".*(?:comment|comments).*" )
                 || endpoint.description().toLowerCase(Locale.ROOT)

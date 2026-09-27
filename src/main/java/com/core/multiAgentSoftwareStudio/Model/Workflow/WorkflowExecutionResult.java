@@ -51,7 +51,7 @@ public record WorkflowExecutionResult(
     }
 
     /**
-     * 保留阶段一至三期间的完整调用签名，缺少最终质量策略时按无阻断项处理。
+     * 保留阶段一至三期间的完整调用签名，缺少最终质量策略时记录为未执行。
      */
     public WorkflowExecutionResult(
             List<SourceCode> codes,

@@ -1,6 +1,7 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow;
 
 import com.core.multiAgentSoftwareStudio.Model.Generation.SourceCode;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkReplayMode;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
@@ -121,6 +122,15 @@ public class SoftwareStudioWorkflowService {
     public WorkflowExecutionResult generateFromSavedPlanningWithResult(String sourceProjectId,
                                                                         String expectedRequest,
                                                                         Consumer<String> eventListener) {
+        return generateFromSavedPlanningWithResult(sourceProjectId, expectedRequest,
+                BenchmarkReplayMode.SAVED_MILESTONES, eventListener);
+    }
+
+    /** 两种对照方式都复用同一上游设计，在全新脚手架上重建当前确定性任务计划。 */
+    public WorkflowExecutionResult generateFromSavedPlanningWithResult(String sourceProjectId,
+                                                                        String expectedRequest,
+                                                                        BenchmarkReplayMode replayMode,
+                                                                        Consumer<String> eventListener) {
         Consumer<String> logger = eventListener == null ? message -> { } : eventListener;
         SoftwareStudioWorkflowData saved = resumeService.load(sourceProjectId);
         if (expectedRequest == null || !saved.userRequest.strip().equals(expectedRequest.strip())) {
@@ -144,9 +154,14 @@ public class SoftwareStudioWorkflowService {
             } finally {
                 persistenceNodeService.persistPlanningArtifacts(data, CONTRACT, logger);
             }
+            if (replayMode != BenchmarkReplayMode.SAVED_MILESTONES) {
+                data = slicePlanNodeService.execute(data, logger);
+            }
             data = persistenceNodeService.persistPlanningArtifacts(data, SLICE_PLAN, logger);
             data = persistenceNodeService.persistPlanningArtifacts(data, GENERATION_PLAN, logger);
-            milestoneService.initialize(data);
+            if (replayMode != BenchmarkReplayMode.CONTINUOUS) {
+                milestoneService.initialize(data);
+            }
             return executeDevelopment(data, logger);
         } catch (RuntimeException e) {
             throw new WorkflowExecutionFailure(data.projectPath, e);

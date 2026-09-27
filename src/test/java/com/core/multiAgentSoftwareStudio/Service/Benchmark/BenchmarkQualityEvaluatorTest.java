@@ -100,8 +100,24 @@ class BenchmarkQualityEvaluatorTest {
                 && !finding.passed()));
     }
 
+    /** 构建或测试失败后跳过的契约检查应在报告里明确显示未执行。 */
+    @Test
+    void reportsFinalContractAsNotExecutedAfterFailedTests() {
+        WorkflowExecutionResult execution = execution(false,
+                List.of(new SourceCode("src/test/java/com/example/AppTest.java", "java", "@SpringBootTest class AppTest {}")),
+                "Tests run: 1, Failures: 1, Errors: 0", ProjectQualityPolicyResult.empty());
+
+        var finding = evaluator.evaluate(benchmarkCase, execution).findings().stream()
+                .filter(item -> item.gate() == BenchmarkGate.CONTRACT_GATES_PASSED)
+                .findFirst().orElseThrow();
+
+        assertFalse(finding.passed());
+        assertTrue(finding.evidence().contains("not executed"));
+    }
+
     private WorkflowExecutionResult execution(boolean platformSuccess, List<SourceCode> codes, String testResult) {
-        return execution(platformSuccess, codes, testResult, ProjectQualityPolicyResult.empty());
+        return execution(platformSuccess, codes, testResult,
+                new ProjectQualityPolicyResult(true, List.of(), List.of()));
     }
 
     private WorkflowExecutionResult execution(boolean platformSuccess,

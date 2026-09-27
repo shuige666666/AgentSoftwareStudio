@@ -13,6 +13,7 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunConfigurati
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkDevelopmentConfiguration;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunReport;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkRunRequest;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkReplayMode;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
@@ -100,10 +101,16 @@ public class BenchmarkRunnerService {
         List<BenchmarkCase> selectedCases = caseRegistry.select(request == null ? List.of() : request.caseIds());
         int repetitions = resolveRepetitions(request == null ? null : request.repetitions());
         String planningSourceProjectId = request == null ? null : request.planningSourceProjectId();
+        BenchmarkReplayMode replayMode = request == null || request.replayMode() == null
+                ? BenchmarkReplayMode.SAVED_MILESTONES : request.replayMode();
         if (planningSourceProjectId != null && !planningSourceProjectId.isBlank()
                 && (selectedCases.size() != 1
                 || !planningSourceProjectId.matches("[\\p{L}\\p{N}_-]{1,120}"))) {
             throw new IllegalArgumentException("Planning replay needs one case and a generated project ID");
+        }
+        if (replayMode != BenchmarkReplayMode.SAVED_MILESTONES
+                && (planningSourceProjectId == null || planningSourceProjectId.isBlank())) {
+            throw new IllegalArgumentException("Development comparison needs a saved planning project ID");
         }
         List<BenchmarkCase> cases = repeatCases(selectedCases, repetitions);
         Map<String, String> releaseLabels = request == null || request.modelReleaseLabels() == null
@@ -124,7 +131,7 @@ public class BenchmarkRunnerService {
                         limitsConfig.getDevelopment().getMaxModelTurns(),
                         limitsConfig.getDevelopment().getMaxToolCalls(),
                         "snapshot-build-all-tests-contract-final-v1"),
-                planningSourceProjectId);
+                planningSourceProjectId, replayMode);
 
         System.out.println("[Benchmark] 质量基准测试进度：0/" + cases.size()
                 + "，每个案例重复 " + repetitions + " 次，准备执行。");
@@ -132,7 +139,7 @@ public class BenchmarkRunnerService {
             BenchmarkCase benchmarkCase = cases.get(index);
             int repetitionIndex = index % repetitions + 1;
             results.add(runCase(benchmarkCase, repetitionIndex, repetitions, index + 1, cases.size(),
-                    planningSourceProjectId));
+                    planningSourceProjectId, replayMode));
             // 每个重复样本完成后立即覆盖检查点；后续超时或进程中断不会丢失已经完成的结果。
             BenchmarkRunReport checkpoint = buildReport(
                     started, Instant.now(), models, agentModelAssignments, benchmarkConfig, results, reportPath);
@@ -188,7 +195,8 @@ public class BenchmarkRunnerService {
             int repetitionCount,
             int currentCase,
             int totalCases) {
-        return runCase(benchmarkCase, repetitionIndex, repetitionCount, currentCase, totalCases, null);
+        return runCase(benchmarkCase, repetitionIndex, repetitionCount, currentCase, totalCases,
+                null, BenchmarkReplayMode.SAVED_MILESTONES);
     }
 
     /** 固定规划样本与普通样本共用质量判卷，差异只在开发前是否重新调用规划模型。 */
@@ -199,6 +207,19 @@ public class BenchmarkRunnerService {
             int currentCase,
             int totalCases,
             String planningSourceProjectId) {
+        return runCase(benchmarkCase, repetitionIndex, repetitionCount, currentCase, totalCases,
+                planningSourceProjectId, BenchmarkReplayMode.SAVED_MILESTONES);
+    }
+
+    /** 两种开发方式复用同一保存的上游设计与最终判卷。 */
+    BenchmarkCaseResult runCase(
+            BenchmarkCase benchmarkCase,
+            int repetitionIndex,
+            int repetitionCount,
+            int currentCase,
+            int totalCases,
+            String planningSourceProjectId,
+            BenchmarkReplayMode replayMode) {
         long started = System.nanoTime();
         printProgress(benchmarkCase.id(), currentCase, totalCases, "正在执行", started);
         ScheduledExecutorService progressExecutor = Executors.newSingleThreadScheduledExecutor();
@@ -214,8 +235,11 @@ public class BenchmarkRunnerService {
                     "[Benchmark " + currentCase + "/" + totalCases + " " + benchmarkCase.id() + "] " + message);
             execution = planningSourceProjectId == null || planningSourceProjectId.isBlank()
                     ? workflowService.generateProjectWithResult(benchmarkCase.prompt(), caseLogger)
+                    : replayMode == BenchmarkReplayMode.SAVED_MILESTONES
+                    ? workflowService.generateFromSavedPlanningWithResult(
+                            planningSourceProjectId, benchmarkCase.prompt(), caseLogger)
                     : workflowService.generateFromSavedPlanningWithResult(
-                            planningSourceProjectId, benchmarkCase.prompt(), caseLogger);
+                            planningSourceProjectId, benchmarkCase.prompt(), replayMode, caseLogger);
             phase = "QUALITY";
             BenchmarkQualityResult quality = qualityEvaluator.evaluate(benchmarkCase, execution);
             phase = "BEHAVIOR";

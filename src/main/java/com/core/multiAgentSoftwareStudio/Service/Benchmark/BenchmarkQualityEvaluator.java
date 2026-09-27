@@ -99,9 +99,11 @@ public class BenchmarkQualityEvaluator {
         List<QualityPolicyFinding> blockers = qualityPolicyResult == null
                 ? List.of()
                 : qualityPolicyResult.contractBlockingFindings();
-        boolean passed = qualityPolicyResult != null && blockers.isEmpty();
-        String evidence = passed
-                ? "Final semantic contract gates passed."
+        boolean evaluated = qualityPolicyResult != null && qualityPolicyResult.evaluated();
+        boolean passed = evaluated && blockers.isEmpty();
+        String evidence = !evaluated
+                ? "Final semantic contract gates were not executed."
+                : passed ? "Final semantic contract gates passed."
                 : "Final semantic contract gates contain " + blockers.size() + " blocker(s): "
                         + blockers.stream().map(finding -> finding.gate()).distinct().toList();
         return new BenchmarkFinding(BenchmarkGate.CONTRACT_GATES_PASSED, passed, evidence);

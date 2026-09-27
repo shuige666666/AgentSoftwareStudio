@@ -21,10 +21,18 @@ public record BenchmarkRunRequest(
         Map<String, String> modelReleaseLabels,
 
         /** 固定规划对照时复用该项目的规划产物，并在全新脚手架中重新开发。 */
-        String planningSourceProjectId) {
+        String planningSourceProjectId,
+
+        /** 固定上游规划后对照当前里程碑与连续开发；省略时沿用保存的任务计划。 */
+        BenchmarkReplayMode replayMode) {
 
     public BenchmarkRunRequest(List<String> caseIds, Integer repetitions,
                                Map<String, String> modelReleaseLabels) {
-        this(caseIds, repetitions, modelReleaseLabels, null);
+        this(caseIds, repetitions, modelReleaseLabels, null, null);
+    }
+
+    public BenchmarkRunRequest(List<String> caseIds, Integer repetitions,
+                               Map<String, String> modelReleaseLabels, String planningSourceProjectId) {
+        this(caseIds, repetitions, modelReleaseLabels, planningSourceProjectId, null);
     }
 }

@@ -11,7 +11,8 @@ import java.util.List;
 public record ProjectQualityPolicyResult(
         boolean passed,
         List<QualityPolicyFinding> findings,
-        List<String> normalizedFiles) implements Serializable {
+        List<String> normalizedFiles,
+        boolean evaluated) implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -20,8 +21,15 @@ public record ProjectQualityPolicyResult(
         normalizedFiles = normalizedFiles == null ? List.of() : List.copyOf(normalizedFiles);
     }
 
+    /** 实际执行过质量策略的结果沿用原有三参数构造。 */
+    public ProjectQualityPolicyResult(boolean passed, List<QualityPolicyFinding> findings,
+                                      List<String> normalizedFiles) {
+        this(passed, findings, normalizedFiles, true);
+    }
+
+    /** 未运行门禁时明确标记未执行，不能把空阻断项解释为通过。 */
     public static ProjectQualityPolicyResult empty() {
-        return new ProjectQualityPolicyResult(true, List.of(), List.of());
+        return new ProjectQualityPolicyResult(false, List.of(), List.of(), false);
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.core.multiAgentSoftwareStudio.Service.Workflow;
 
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkReplayMode;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRunResult;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentStopReason;
@@ -109,6 +110,30 @@ class SoftwareStudioWorkflowServiceTest {
         verify(fixture.generation, never()).generateProject(any(), any());
     }
 
+    /** 两种对照均重建当前切片；连续方式不发放逐任务状态。 */
+    @Test
+    void comparisonReplaysSameDesignWithSelectableDevelopmentProtocol() {
+        for (BenchmarkReplayMode mode : List.of(BenchmarkReplayMode.CURRENT_MILESTONES,
+                BenchmarkReplayMode.CONTINUOUS)) {
+            Fixture fixture = fixture();
+            when(fixture.resume.load("source-project"))
+                    .thenReturn(new SoftwareStudioWorkflowData("same requirement"));
+            when(fixture.generation.generateProject(any(), any())).thenReturn(run(false));
+
+            fixture.service.generateFromSavedPlanningWithResult(
+                    "source-project", "same requirement", mode, message -> { });
+
+            verify(fixture.planning, never()).requirements(any(), any());
+            verify(fixture.planning, never()).design(any(), any());
+            verify(fixture.slicePlan).execute(any(), any());
+            if (mode == BenchmarkReplayMode.CONTINUOUS) {
+                verify(fixture.milestones, never()).initialize(any());
+            } else {
+                verify(fixture.milestones).initialize(any());
+            }
+        }
+    }
+
     private WorkspaceAgentRunResult run(boolean completed) {
         return new WorkspaceAgentRunResult(completed,
                 completed ? WorkspaceAgentStopReason.COMPLETED : WorkspaceAgentStopReason.MODEL_TURN_LIMIT,
@@ -136,7 +161,7 @@ class SoftwareStudioWorkflowServiceTest {
         SoftwareStudioWorkflowService service = new SoftwareStudioWorkflowService(
                 planning, scaffold, slicePlan, milestones, resume, generation, persistence,
                 checkpoint, metrics, journal);
-        return new Fixture(service, generation, checkpoint, planning, slicePlan, resume);
+        return new Fixture(service, generation, checkpoint, planning, slicePlan, resume, milestones);
     }
 
     private <T> T passthrough(Class<T> type) {
@@ -146,5 +171,6 @@ class SoftwareStudioWorkflowServiceTest {
 
     private record Fixture(SoftwareStudioWorkflowService service, BatchGenerationService generation,
                            WorkspaceCheckpointService checkpoint, PlanningNodeService planning,
-                           SlicePlanNodeService slicePlan, DevelopmentResumeService resume) { }
+                           SlicePlanNodeService slicePlan, DevelopmentResumeService resume,
+                           DevelopmentMilestoneService milestones) { }
 }

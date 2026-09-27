@@ -442,6 +442,44 @@ class SlicePlanningServiceTest {
         assertTrue(plan.slices().getFirst().ownedFiles().contains(serviceFile.targetPath()));
     }
 
+    /** 列表描述中的 results 不得使公开 GET 接口从所有任务契约里消失。 */
+    @Test
+    void preservesListEndpointWhenDescriptionMentionsSortedResults() {
+        ProjectStructure structure = new ProjectStructure("com.example", "SPRING_BOOT", "com.example.App", List.of(
+                file("src/main/java/com/example/ArticleController.java", "controller", "article-crud", List.of()),
+                file("src/main/java/com/example/CommentController.java", "controller", "comment-submit", List.of())));
+        ProjectContract contract = new ProjectContract(List.of(
+                new ApiEndpointContract("GET", "/articles", "keyword", "articles/list.html view",
+                        "ArticleController", "List articles, results sorted by date"),
+                new ApiEndpointContract("POST", "/articles", "ArticleRequest", "redirect",
+                        "ArticleController", "create article"),
+                new ApiEndpointContract("POST", "/articles/{id}/comments", "CommentRequest", "redirect",
+                        "CommentController", "submit comment")), List.of(), List.of(), List.of());
+
+        var plan = service.createPlan(structure, contract);
+
+        assertEquals(2, plan.slices().size());
+        assertEquals(1, plan.slices().stream().flatMap(slice -> slice.contract().endpoints().stream())
+                .filter(endpoint -> endpoint.method().equals("GET") && endpoint.path().equals("/articles"))
+                .count());
+    }
+
+    /** 归属无法确定时退化成完整任务，保证公开契约没有静默漏项。 */
+    @Test
+    void keepsCompleteContractWhenAnEndpointHasNoReliableOwner() {
+        ProjectStructure structure = new ProjectStructure("com.example", "SPRING_BOOT", "com.example.App", List.of(
+                file("src/main/java/com/example/ArticleController.java", "controller", "article-crud", List.of()),
+                file("src/main/java/com/example/CommentController.java", "controller", "comment-submit", List.of())));
+        ProjectContract contract = new ProjectContract(List.of(
+                new ApiEndpointContract("POST", "/unowned/{id}/votes", "", "", "UnknownController", "")),
+                List.of(), List.of(), List.of());
+
+        var plan = service.createPlan(structure, contract);
+
+        assertEquals(1, plan.slices().size());
+        assertEquals(contract.endpoints(), plan.slices().getFirst().contract().endpoints());
+    }
+
     private FileBlueprint file(String path, String layer, String batchName, List<String> dependencies) {
         return new FileBlueprint(
                 java.nio.file.Path.of(path).getFileName().toString(), path, layer, batchName,

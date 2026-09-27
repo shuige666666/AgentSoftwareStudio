@@ -108,6 +108,55 @@ class BusinessMilestoneRefinerTest {
         assertEquals(List.of("article-detail-query"), refined.slices().get(2).dependsOnSlices());
     }
 
+    /** 页面按明确响应归属交付，编辑页和动作接口不得提前放进创建任务。 */
+    @Test
+    void assignsCreateDetailAndEditPagesToTheirEndpointMilestones() {
+        var endpoints = List.of(
+                new ApiEndpointContract("GET", "/articles", "", "articles/list.html view", "ArticleController", ""),
+                new ApiEndpointContract("GET", "/articles/new", "", "articles/create.html view", "ArticleController", ""),
+                new ApiEndpointContract("POST", "/articles", "", "articles/create.html on error", "ArticleController", ""),
+                new ApiEndpointContract("GET", "/articles/{id}", "", "articles/detail.html view", "ArticleController", ""),
+                new ApiEndpointContract("GET", "/articles/{id}/edit", "", "articles/edit.html view", "ArticleController", ""),
+                new ApiEndpointContract("POST", "/articles/{id}", "", "articles/edit.html on error", "ArticleController", ""));
+        var views = List.of(
+                view("list"), view("create"), view("detail"), view("edit"));
+        var article = new DeliverySlice("article", "article", List.of(), List.of(),
+                new ProjectContract(endpoints, views, List.of(), List.of()), List.of(), List.of());
+
+        var refined = refiner.refine(new SliceDeliveryPlan(List.of(article), List.of(), "test"));
+
+        assertEquals(List.of("article-create-list", "article-detail-query", "article-change-actions"),
+                refined.slices().stream().map(DeliverySlice::id).toList());
+        assertEquals(List.of("list", "create"), refined.slices().get(0).contract().views().stream()
+                .map(ViewContract::name).toList());
+        assertEquals(List.of("detail"), refined.slices().get(1).contract().views().stream()
+                .map(ViewContract::name).toList());
+        assertEquals(List.of("edit"), refined.slices().get(2).contract().views().stream()
+                .map(ViewContract::name).toList());
+    }
+
+    /** 无法从接口契约确定同一 Controller 的页面用途时，不强行拆分。 */
+    @Test
+    void keepsCoarseTaskWhenBusinessViewHasNoEndpointOwner() {
+        var endpoints = List.of(
+                new ApiEndpointContract("GET", "/articles", "", "", "ArticleController", ""),
+                new ApiEndpointContract("POST", "/articles", "", "", "ArticleController", ""),
+                new ApiEndpointContract("GET", "/articles/{id}/edit", "", "", "ArticleController", ""),
+                new ApiEndpointContract("POST", "/articles/{id}", "", "", "ArticleController", ""));
+        var article = new DeliverySlice("article", "article", List.of(), List.of(),
+                new ProjectContract(endpoints, List.of(view("edit")), List.of(), List.of()),
+                List.of(), List.of());
+
+        var refined = refiner.refine(new SliceDeliveryPlan(List.of(article), List.of(), "test"));
+
+        assertEquals(List.of("article"), refined.slices().stream().map(DeliverySlice::id).toList());
+    }
+
+    private ViewContract view(String name) {
+        return new ViewContract(name, "src/main/resources/templates/articles/" + name + ".html",
+                "ArticleController", "");
+    }
+
     private DeliverySlice slice(String id, List<ApiEndpointContract> endpoints, List<String> dependencies) {
         return new DeliverySlice(id, id, List.of(), List.of(),
                 new ProjectContract(endpoints, List.of(), List.of(), List.of()), dependencies, List.of());

@@ -3,6 +3,7 @@ package com.core.multiAgentSoftwareStudio.Service.Benchmark;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkCase;
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkQualityResult;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkReplayMode;
 import com.core.multiAgentSoftwareStudio.Model.Metric.LlmUsageSnapshot;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionResult;
@@ -74,6 +75,22 @@ class BenchmarkRunnerFailureTest {
                 org.mockito.ArgumentMatchers.eq("source-project"),
                 org.mockito.ArgumentMatchers.eq("prompt"), any());
         verify(workflow, never()).generateProjectWithResult(any(), any());
+    }
+
+    /** 对照模式明确传给工作流，且仍沿用同一独立判卷入口。 */
+    @Test
+    void routesContinuousComparisonToReplayWorkflow() {
+        when(workflow.generateFromSavedPlanningWithResult(any(), any(), any(), any())).thenThrow(
+                new WorkflowExecutionFailure("continuous-candidate", new IllegalStateException("stopped")));
+
+        var result = runner.runCase(benchmarkCase, 1, 1, 1, 1,
+                "source-project", BenchmarkReplayMode.CONTINUOUS);
+
+        assertEquals("continuous-candidate", result.projectPath());
+        verify(workflow).generateFromSavedPlanningWithResult(
+                org.mockito.ArgumentMatchers.eq("source-project"),
+                org.mockito.ArgumentMatchers.eq("prompt"),
+                org.mockito.ArgumentMatchers.eq(BenchmarkReplayMode.CONTINUOUS), any());
     }
 
     /**
