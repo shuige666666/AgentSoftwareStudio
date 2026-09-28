@@ -101,6 +101,11 @@ public class WorkspaceAgentRuntime {
         try {
             for (int turn = session.modelTurns() + 1; maxModelTurns <= 0 || turn <= maxModelTurns; turn++) {
                 logger.accept("   Tool model turn " + turn + "/" + limitLabel(maxModelTurns) + ".");
+                // 在预算约三分之二处先验证一次，给真实错误留下足够修复轮次。
+                if (mode == WorkspaceAgentMode.DEVELOPMENT && maxModelTurns >= 12
+                        && turn == Math.max(1, maxModelTurns * 2 / 3)) {
+                    session.messages().add(ToolChatMessage.user(developmentVerificationPrompt()));
+                }
                 // 全局预算将尽时提醒先验证当前改动，避免最后几轮留下未编译的新文件。
                 if (mode == WorkspaceAgentMode.DEVELOPMENT && maxModelTurns > 0
                         && turn == Math.max(1, maxModelTurns - Math.min(8, Math.max(3, maxModelTurns / 6)))) {
@@ -111,12 +116,15 @@ public class WorkspaceAgentRuntime {
                 if (mode == WorkspaceAgentMode.DEVELOPMENT) milestoneService.persist(data);
                 auditService.recordModelTurn(auditSession, session, turn);
                 ToolModelResponse response;
+                long modelCallStarted = System.nanoTime();
                 try {
                     response = metricsService.withCallName(
                             "Workspace" + mode.name() + "Agent",
                             () -> model.generateWithTools(session.messages(), toolRegistry.definitions(mode)));
                     retriedTimeout = false;
                 } catch (RuntimeException e) {
+                    auditService.recordModelFailure(auditSession, session, isTimeout(e),
+                            (System.nanoTime() - modelCallStarted) / 1_000_000L);
                     // 只有超时才重试一次；失败调用仍计入全局轮次，且尚未执行任何工具。
                     if (mode == WorkspaceAgentMode.DEVELOPMENT && !retriedTimeout
                             && isTimeout(e) && (maxModelTurns <= 0 || turn < maxModelTurns)) {
@@ -126,7 +134,8 @@ public class WorkspaceAgentRuntime {
                     }
                     throw e;
                 }
-                auditService.recordModelResponse(auditSession, session, response);
+                auditService.recordModelResponse(auditSession, session, response,
+                        (System.nanoTime() - modelCallStarted) / 1_000_000L);
                 if (response.message() == null) {
                     return finishFailure(session, auditSession, WorkspaceAgentStopReason.MODEL_RETURNED_NO_MESSAGE,
                             lastToolName, lastToolResult, "Model returned no assistant message");
@@ -193,7 +202,8 @@ public class WorkspaceAgentRuntime {
                     }
                 }
                 WorkspaceAgentContextCompactor.Result compaction =
-                        contextCompactor.compact(session, lastToolName, lastToolResult);
+                        contextCompactor.compact(session, lastToolName, lastToolResult,
+                                maxModelTurns > 0 ? maxModelTurns - session.modelTurns() : -1);
                 if (compaction.compacted()) {
                     logger.accept("   Tool context compacted from " + compaction.messagesBefore()
                             + " to " + compaction.messagesAfter() + " messages.");
@@ -299,6 +309,14 @@ public class WorkspaceAgentRuntime {
                 + ". Do not add unrelated future files or tests that cannot be verified before the budget ends.";
     }
 
+    /** 在尚有修复预算时要求获得第一份全套测试反馈。 */
+    private String developmentVerificationPrompt() {
+        return "The development budget is about two thirds used. Run a full compile and all current tests now "
+                + "(prefer submit_checkpoint(scope=progress)); inspect every failure before adding more files. "
+                + "Use the remaining turns to fix the implementation or invalid test fixtures, rerun tests, "
+                + "and submit the required final checkpoint.";
+    }
+
     private Set<String> normalizePaths(Set<String> paths) {
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         if (paths != null) {
@@ -327,6 +345,10 @@ public class WorkspaceAgentRuntime {
                     If the original request conflicts with a planning-derived public contract, report_blocker with
                     kind=planning_conflict and specific evidence; continue after the tool returns a decision.
                     Do not weaken valid tests, remove required behavior or claim an unverified result.
+                    When writing behavior tests, keep success-case fixtures within declared validation constraints;
+                    use invalid values only when asserting rejection. Assert the observable behavior being tested,
+                    including ordering, persistence changes, and HTTP responses; a request without assertions is not a test.
+                    Do not assume generated database IDs start at a fixed value; use the ID returned by persistence or HTTP.
                     """;
         }
         return """

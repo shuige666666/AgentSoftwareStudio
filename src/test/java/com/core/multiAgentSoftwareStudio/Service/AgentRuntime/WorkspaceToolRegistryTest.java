@@ -82,6 +82,74 @@ class WorkspaceToolRegistryTest {
         assertFalse(highlights.contains("[Help 1]"));
     }
 
+    /** 整体测试失败时，前面测试类的绿色摘要不能占据错误摘要容量。 */
+    @Test
+    void skipsPassingTestClassSummariesBeforeActualFailures() {
+        String output = "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0\n".repeat(12)
+                + "[ERROR] Tests run: 16, Failures: 2, Errors: 1, Skipped: 0\n"
+                + "[ERROR] ArticleControllerTest.shouldUpdate: expected 302 but was 200";
+
+        String highlights = WorkspaceToolRegistry.failureHighlights(output);
+
+        assertTrue(highlights.contains("Failures: 2, Errors: 1"));
+        assertTrue(highlights.contains("expected 302 but was 200"));
+        assertFalse(highlights.contains("Failures: 0, Errors: 0"));
+    }
+
+    /** 测试失败跨文件改动仍待验证；普通编译成功不能把它误清除。 */
+    @Test
+    void retainsFailedMavenTestUntilLaterGreenTestRun() {
+        var data = new SoftwareStudioWorkflowData("test");
+        var session = new WorkspaceAgentSession(projectRoot, WorkspaceAgentMode.DEVELOPMENT,
+                data, message -> { }, Map.of(), Set.of());
+        session.recordWrite("src/test/java/demo/AppTest.java");
+
+        WorkspaceToolRegistry.recordBashVerification(session, "mvn test",
+                new SandboxExecutionResult("mvn test", 1, """
+                        Failed to load native library:jansi-2.4.0.so
+                        [ERROR] /workspace/src/test/java/demo/AppTest.java:[57,35] method attribute cannot be applied
+                        """, 1, false, null));
+        session.recordWrite("src/main/java/demo/App.java");
+        WorkspaceToolRegistry.recordBashVerification(session, "mvn compile",
+                new SandboxExecutionResult("mvn compile", 0, "BUILD SUCCESS", 1, false, null));
+
+        assertEquals(1, session.unresolvedFailureVersion());
+        assertTrue(session.unresolvedVerificationFailure().contains("AppTest.java:[57,35]"));
+        assertFalse(session.unresolvedVerificationFailure().contains("jansi"));
+
+        WorkspaceToolRegistry.recordBashVerification(session, "mvn -Dtest=OtherTest test",
+                new SandboxExecutionResult("mvn -Dtest=OtherTest test", 0,
+                        "Tests run: 1, Failures: 0, Errors: 0, Skipped: 0", 1, false, null));
+        assertTrue(session.unresolvedVerificationFailure().contains("AppTest.java:[57,35]"));
+
+        WorkspaceToolRegistry.recordBashVerification(session, "mvn test",
+                new SandboxExecutionResult("mvn test", 0,
+                        "Tests run: 4, Failures: 0, Errors: 0, Skipped: 0", 1, false, null));
+        assertEquals("", session.unresolvedVerificationFailure());
+    }
+
+    /** run_tests 的定向成功不能冒充全套成功，也不能清除其他测试的错误。 */
+    @Test
+    void retainsRunTestsFailureUntilWholeSuitePasses() {
+        var session = new WorkspaceAgentSession(projectRoot, WorkspaceAgentMode.DEVELOPMENT,
+                new SoftwareStudioWorkflowData("test"), message -> { }, Map.of(), Set.of());
+        session.recordWrite("src/test/java/demo/AppTest.java");
+        WorkspaceToolRegistry.recordTestToolVerification(session, List.of(),
+                new SandboxExecutionResult("mvn test", 1, "[ERROR] AppTest failed", 1, false, null));
+        WorkspaceToolRegistry.recordTestToolVerification(session, List.of("OtherTest"),
+                new SandboxExecutionResult("mvn -Dtest=OtherTest test", 0,
+                        "Tests run: 1, Failures: 0, Errors: 0", 1, false, null));
+
+        assertTrue(session.unresolvedVerificationFailure().contains("AppTest failed"));
+        assertFalse(session.testsCurrent());
+
+        WorkspaceToolRegistry.recordTestToolVerification(session, List.of(),
+                new SandboxExecutionResult("mvn test", 0,
+                        "Tests run: 2, Failures: 0, Errors: 0", 1, false, null));
+        assertEquals("", session.unresolvedVerificationFailure());
+        assertTrue(session.testsCurrent());
+    }
+
     /** 截断的补丁参数应返回可执行的恢复建议，不进入磁盘写入。 */
     @Test
     void rejectsTruncatedPatchArgumentsWithRecoveryHint() {

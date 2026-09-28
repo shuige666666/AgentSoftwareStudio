@@ -43,7 +43,7 @@ class WorkspaceAgentContextCompactorTest {
         var policy = new WorkspaceAgentLimitsConfig().getContext();
         policy.setMaxContextTokens(100);
         WorkspaceAgentContextCompactor.Result result = new WorkspaceAgentContextCompactor(policy)
-                .compact(session, "read_files", "result-7");
+                .compact(session, "read_files", "result-7", -1);
 
         assertTrue(result.compacted());
         assertEquals("system", session.messages().get(0).content());
@@ -87,7 +87,7 @@ class WorkspaceAgentContextCompactorTest {
         policy.setMaxContextTokens(100);
 
         var result = new WorkspaceAgentContextCompactor(policy)
-                .compact(session, "read_files", "result-10");
+                .compact(session, "read_files", "result-10", 5);
 
         assertTrue(result.compacted());
         String objective = session.messages().get(1).content();
@@ -96,6 +96,36 @@ class WorkspaceAgentContextCompactorTest {
         assertTrue(objective.contains("create item [accepted at accepted-hash]"));
         assertFalse(objective.contains("Current milestone: create"));
         assertFalse(session.messages().stream().anyMatch(message -> message.content().contains("closing reminder")));
+        assertTrue(session.messages().get(2).content().contains("remaining model turns: 5"));
         assertEquals("call-10", session.messages().getLast().toolCallId());
+    }
+
+    /** 连续开发的失败测试被后续读文件挤出历史时，压缩摘要仍保留待修错误。 */
+    @Test
+    void keepsUnresolvedTestFailureAfterLaterToolRounds() {
+        var session = new WorkspaceAgentSession(projectRoot, WorkspaceAgentMode.DEVELOPMENT,
+                new SoftwareStudioWorkflowData("build project"), message -> { }, Map.of(), Set.of());
+        session.messages().add(ToolChatMessage.system("system"));
+        session.messages().add(ToolChatMessage.user("complete project"));
+        session.recordWrite("src/test/java/demo/AppTest.java");
+        for (int turn = 1; turn <= 10; turn++) {
+            session.messages().add(ToolChatMessage.assistant("assistant-" + turn,
+                    List.of(new ToolCall("call-" + turn, "read_files", "{}"))));
+            session.messages().add(ToolChatMessage.tool("call-" + turn, "result-" + turn));
+            if (turn == 5) session.recordVerificationFailure(
+                    "mvn test: AppTest.java:[57,35] method attribute cannot be applied");
+        }
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxContextTokens(100);
+
+        var result = new WorkspaceAgentContextCompactor(policy)
+                .compact(session, "read_files", "result-10", 5);
+
+        assertTrue(result.compacted());
+        assertTrue(session.messages().get(2).content().contains("AppTest.java:[57,35]"));
+        assertTrue(session.messages().get(2).content().contains("write version 1"));
+        assertFalse(session.messages().stream().anyMatch(message -> message.content().equals("result-5")));
+        session.recordTestsPassed();
+        assertEquals("", session.unresolvedVerificationFailure());
     }
 }

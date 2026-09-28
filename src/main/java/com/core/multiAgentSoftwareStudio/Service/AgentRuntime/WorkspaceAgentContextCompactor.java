@@ -24,7 +24,8 @@ final class WorkspaceAgentContextCompactor {
     Result compact(
             WorkspaceAgentSession session,
             String lastToolName,
-            String lastToolResult) {
+            String lastToolResult,
+            int remainingModelTurns) {
         List<ToolChatMessage> messages = session.messages();
         if (messages.size() <= 3 || estimatedTokens(messages) <
                 (long) policy.getMaxContextTokens() * policy.getCompactAtPercent() / 100) {
@@ -53,7 +54,8 @@ final class WorkspaceAgentContextCompactor {
         } else {
             compacted.add(messages.get(1));
         }
-        compacted.add(ToolChatMessage.user(summary(session, lastToolName, lastToolResult)));
+        compacted.add(ToolChatMessage.user(summary(session, lastToolName, lastToolResult,
+                remainingModelTurns)));
         compacted.addAll(messages.subList(retainedStart, messages.size()));
         messages.clear();
         messages.addAll(compacted);
@@ -72,7 +74,14 @@ final class WorkspaceAgentContextCompactor {
         return (characters + 1) / 2;
     }
 
-    private String summary(WorkspaceAgentSession session, String lastToolName, String lastToolResult) {
+    /** 压缩后重建当前验证信息；临近预算时使用实时剩余轮次，避免保留过期提醒。 */
+    private String summary(WorkspaceAgentSession session, String lastToolName, String lastToolResult,
+                           int remainingModelTurns) {
+        String closingReminder = session.mode() == WorkspaceAgentMode.DEVELOPMENT
+                && remainingModelTurns >= 0 && remainingModelTurns <= 8
+                ? "- remaining model turns: " + remainingModelTurns
+                        + "; prioritize fixing unresolved verification failures, rerunning tests, and submitting the current checkpoint.\n"
+                : "";
         return """
                 Platform context checkpoint (authoritative; older conversational history was compacted):
                 - mode: %s
@@ -81,8 +90,11 @@ final class WorkspaceAgentContextCompactor {
                 - latest compile current: %s
                 - latest tests current: %s
                 - latest contract validation current: %s
+                - unresolved verification failure from write version %d (re-run tests after edits; empty means none):
+                %s
                 - latest tool: %s
                 - latest real tool result:
+                %s
                 %s
 
                 Re-read the current files before editing. Continue from this evidence and do not assume omitted history.
@@ -93,8 +105,11 @@ final class WorkspaceAgentContextCompactor {
                 session.compileCurrent(),
                 session.testsCurrent(),
                 session.contractCurrent(),
+                session.unresolvedFailureVersion(),
+                bounded(session.unresolvedVerificationFailure()),
                 lastToolName == null ? "" : lastToolName,
-                bounded(lastToolResult));
+                bounded(lastToolResult),
+                closingReminder);
     }
 
     private String bounded(String value) {

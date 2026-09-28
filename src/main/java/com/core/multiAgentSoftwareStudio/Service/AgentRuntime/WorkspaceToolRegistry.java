@@ -31,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.function.BiFunction;
 import java.util.stream.Stream;
 
@@ -41,6 +42,10 @@ import java.util.stream.Stream;
 public class WorkspaceToolRegistry {
     private static final int MAX_FILE_CHARS = 40_000;
     private static final int MAX_SEARCH_RESULTS = 80;
+    private static final Pattern GREEN_TEST_SUMMARY = Pattern.compile(
+            "Tests run:\\s*[1-9]\\d*,\\s*Failures:\\s*0,\\s*Errors:\\s*0");
+    private static final Pattern FULL_MAVEN_TEST_COMMAND = Pattern.compile(
+            "(?i)(?:^|[\\s/\\\\])mvnw?(?:\\.cmd)?\\b.*\\b(?:test|verify)\\b");
 
     private final ObjectMapper objectMapper;
     private final DockerSandboxService sandboxService;
@@ -331,6 +336,7 @@ public class WorkspaceToolRegistry {
         changed.forEach(session::recordWrite);
         ObjectNode result = objectMapper.createObjectNode();
         SandboxExecutionResult execution = run.execution();
+        recordBashVerification(session, command, execution);
         result.put("passed", execution.completedSuccessfully());
         result.put("command", command);
         result.put("cwd", cwd.isBlank() ? "." : cwd);
@@ -350,6 +356,21 @@ public class WorkspaceToolRegistry {
         return result.toString();
     }
 
+    /** 失败反馈跨压缩保留，直到后续真实测试通过；普通成功命令不能清除测试错误。 */
+    static void recordBashVerification(WorkspaceAgentSession session, String command,
+                                       SandboxExecutionResult execution) {
+        if (!execution.completedSuccessfully() && command.contains("mvn")) {
+            // 保留最近的 Maven 失败，避免后续读取与补丁把错误反馈挤出压缩上下文。
+            session.recordVerificationFailure("command=" + command + "\n" + failureHighlights(execution.output()));
+        } else if (execution.completedSuccessfully()
+                && FULL_MAVEN_TEST_COMMAND.matcher(command).find()
+                && !command.contains("-Dtest=") && !command.contains("-DskipTests")
+                && GREEN_TEST_SUMMARY.matcher(execution.output()).find()) {
+            // 只有后来跑绿全套测试才清除旧失败；单测通过不代表原错误已修复。
+            session.clearVerificationFailure();
+        }
+    }
+
     /** 从有噪声的构建输出中提取少量关键失败行，不改变命令的退出状态。 */
     static String failureHighlights(String output) {
         if (output == null || output.isBlank()) return "No command output; inspect exitCode and fullLogPath";
@@ -361,7 +382,8 @@ public class WorkspaceToolRegistry {
             boolean error = line.startsWith("[ERROR]");
             boolean detail = line.startsWith("symbol:") || line.startsWith("location:")
                     || line.startsWith("Caused by:") && !line.contains("jansi")
-                    || line.contains("Tests run:") && (line.contains("Failures:") || line.contains("Errors:"));
+                    || line.contains("Tests run:") && (line.contains("Failures:") || line.contains("Errors:"))
+                    && !GREEN_TEST_SUMMARY.matcher(line).find();
             if (!error && !detail) continue;
             while (line.startsWith("[ERROR]")) line = line.substring(7).strip();
             if (line.isBlank() || line.contains("jansi-") || line.startsWith("-> [Help")
@@ -400,6 +422,7 @@ public class WorkspaceToolRegistry {
                 WorkspaceCheckpointService.CheckpointResult result = checkpointService.verify(
                         session, scope, summary,
                         milestoneService.contractThroughCurrent(session.workflowData()));
+                recordCheckpointFeedback(session, result);
                 ObjectNode feedback = objectMapper.valueToTree(result);
                 if ("PASSED".equals(result.status())) {
                     milestoneService.accept(session.workflowData(), id, result);
@@ -421,10 +444,21 @@ public class WorkspaceToolRegistry {
             }
         }
         WorkspaceCheckpointService.CheckpointResult result = checkpointService.verify(session, scope, summary);
+        recordCheckpointFeedback(session, result);
         if (result.allowCompletion()) {
             session.complete(arguments.path("summary").asText("Final checkpoint passed"));
         }
         return objectMapper.valueToTree(result).toString();
+    }
+
+    /** 正式快照的失败或通过同样更新压缩摘要，避免只记住最后一次文件读取。 */
+    private void recordCheckpointFeedback(WorkspaceAgentSession session,
+                                          WorkspaceCheckpointService.CheckpointResult result) {
+        if ("PASSED".equals(result.status())) {
+            session.clearVerificationFailure();
+        } else if (!result.failureOutput().isBlank()) {
+            session.recordVerificationFailure("checkpoint " + result.scope() + ": " + result.failureOutput());
+        }
     }
 
     /** 回滚只针对最近通过的能力快照，当前候选先备份以便人工检查。 */
@@ -465,6 +499,8 @@ public class WorkspaceToolRegistry {
                 session.projectRoot(), projectType(session));
         if (execution.completedSuccessfully()) {
             session.recordCompilePassed();
+        } else {
+            session.recordVerificationFailure("compile_main: " + failureHighlights(execution.output()));
         }
         return executionJson(execution);
     }
@@ -478,11 +514,20 @@ public class WorkspaceToolRegistry {
         }
         SandboxExecutionResult execution = sandboxService.runTestsInSandboxWithResult(
                 session.projectRoot(), projectType(session), selectors);
-        if (execution.completedSuccessfully()) {
+        recordTestToolVerification(session, selectors, execution);
+        return executionJson(execution);
+    }
+
+    /** 定向测试只用于定位问题；只有全套测试通过才更新会话的完成门禁。 */
+    static void recordTestToolVerification(WorkspaceAgentSession session, List<String> selectors,
+                                           SandboxExecutionResult execution) {
+        if (execution.completedSuccessfully() && (selectors == null || selectors.isEmpty())) {
             session.recordCompilePassed();
             session.recordTestsPassed();
+        } else if (!execution.completedSuccessfully()) {
+            session.recordVerificationFailure("run_tests" + (selectors == null || selectors.isEmpty()
+                    ? "" : " selectors=" + selectors) + ": " + failureHighlights(execution.output()));
         }
-        return executionJson(execution);
     }
 
     private String validateContract(JsonNode ignored, WorkspaceAgentSession session) {

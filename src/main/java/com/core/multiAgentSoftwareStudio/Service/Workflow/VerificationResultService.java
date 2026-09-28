@@ -88,6 +88,10 @@ public class VerificationResultService {
                 || lower.contains("docker execution error") || lower.contains("cannot connect to the docker daemon")) {
             return FailureKind.ENVIRONMENT;
         }
+        // JVM 无法创建系统线程时测试根本未完成，不能被正常的 testCompile 生命周期文字误判为源码错误。
+        if (lower.contains("unable to create native thread") || lower.contains("pthread_create failed")) {
+            return FailureKind.ENVIRONMENT;
+        }
         if (lower.contains("some problems were encountered while processing the poms")
                 || lower.contains("projectbuildingexception")
                 || lower.contains("dependencies.dependency.version")

@@ -95,6 +95,26 @@ class VerificationResultServiceTest {
         assertEquals(FailureKind.TEST_ASSERTION, result.failureKind());
     }
 
+    /** Surefire 因系统线程耗尽崩溃时，正常出现的 testCompile 文字不能触发测试源码修复。 */
+    @Test
+    void classifiesNativeThreadExhaustionAsEnvironmentFailure() {
+        SandboxExecutionResult execution = new SandboxExecutionResult(
+                "mvn test", 1,
+                """
+                        [INFO] --- maven-compiler-plugin:3.11.0:testCompile (default-testCompile) ---
+                        [ERROR] Error occurred during initialization of VM
+                        [ERROR] java.lang.OutOfMemoryError: unable to create native thread
+                        [ERROR] The forked VM terminated without properly saying goodbye.
+                        """,
+                100, false, null);
+
+        VerificationStepResult result = service.toStep(VerificationStage.TEST, execution);
+
+        assertFalse(result.passed());
+        assertEquals(FailureKind.ENVIRONMENT, result.failureKind());
+        assertEquals(com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStatus.BLOCKED, result.status());
+    }
+
     /**
      * Surefire 同时打印逐类和最终总计时，只采用最后一个总计，防止测试数量翻倍。
      */

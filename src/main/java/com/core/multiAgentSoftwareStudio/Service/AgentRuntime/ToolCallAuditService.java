@@ -2,6 +2,7 @@ package com.core.multiAgentSoftwareStudio.Service.AgentRuntime;
 
 import com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentAuditConfig;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolCall;
+import com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolModelResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -79,19 +80,50 @@ public class ToolCallAuditService {
             int turn) {
         ObjectNode event = baseEvent(auditSession, workspaceSession, "MODEL_TURN_STARTED");
         event.put("modelTurn", turn);
+        // 只记录规模，不重复保存每轮提示正文；超时轮也能与成功轮比较输入负担。
+        List<ToolChatMessage> messages = workspaceSession.messages();
+        long contentChars = 0;
+        long toolArgumentChars = 0;
+        for (ToolChatMessage message : messages) {
+            contentChars += message.content() == null ? 0 : message.content().length();
+            for (ToolCall call : message.toolCalls()) {
+                toolArgumentChars += call.arguments() == null ? 0 : call.arguments().length();
+            }
+        }
+        event.put("modelInputMessageCount", messages.size());
+        event.put("modelInputContentChars", contentChars);
+        event.put("modelInputToolArgumentChars", toolArgumentChars);
+        append(auditSession, workspaceSession, event);
+    }
+
+    /** 记录超时等失败请求的轮次和耗时，便于与该轮输入规模对应。 */
+    public void recordModelFailure(ToolCallAuditSession auditSession,
+                                   WorkspaceAgentSession workspaceSession,
+                                   boolean timedOut, long durationMillis) {
+        ObjectNode event = baseEvent(auditSession, workspaceSession, "MODEL_CALL_FAILED");
+        event.put("modelTurn", workspaceSession.modelTurns());
+        event.put("failureType", timedOut ? "TIMEOUT" : "RUNTIME_ERROR");
+        event.put("durationMillis", Math.max(0, durationMillis));
         append(auditSession, workspaceSession, event);
     }
 
     public void recordModelResponse(
             ToolCallAuditSession auditSession,
             WorkspaceAgentSession workspaceSession,
-            ToolModelResponse response) {
+            ToolModelResponse response,
+            long durationMillis) {
         ObjectNode event = baseEvent(auditSession, workspaceSession, "MODEL_RESPONSE");
+        event.put("modelTurn", workspaceSession.modelTurns());
+        event.put("durationMillis", Math.max(0, durationMillis));
         event.put("finishReason", response == null ? "" : safe(response.finishReason()));
         String content = response == null || response.message() == null ? "" : response.message().content();
         putLimited(event, "assistantContent", redactText(content), config.getMaxResultChars());
         event.put("toolCallCount", response == null || response.message() == null
                 ? 0 : response.message().toolCalls().size());
+        long argumentChars = response == null || response.message() == null ? 0
+                : response.message().toolCalls().stream()
+                        .mapToLong(call -> call.arguments() == null ? 0 : call.arguments().length()).sum();
+        event.put("toolArgumentChars", argumentChars);
         append(auditSession, workspaceSession, event);
     }
 

@@ -309,6 +309,37 @@ class WorkspaceAgentRuntimeTest {
         }
     }
 
+    /** 中段提醒在续接会话中只出现一次，并要求先取得全套测试反馈。 */
+    @Test
+    void developmentRequestsVerificationWithRepairTurnsRemaining() {
+        RecordingToolModel model = new RecordingToolModel(List.of(
+                response("call-24", "list_files", "{}"),
+                response("call-25", "submit_checkpoint", "{\"scope\":\"final\"}")));
+        WorkspaceToolRegistry registry = mock(WorkspaceToolRegistry.class);
+        when(registry.definitions(WorkspaceAgentMode.DEVELOPMENT)).thenReturn(List.of());
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
+            if ("submit_checkpoint".equals(invocation.getArgument(0))) {
+                ((WorkspaceAgentSession) invocation.getArgument(2)).complete("verified");
+            }
+            return "{}";
+        });
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectPath = projectRoot.toString();
+        data.developmentModelTurnsUsed = 23;
+
+        WorkspaceAgentRunResult result = runtime(model, registry).runDetailed(data,
+                WorkspaceAgentMode.DEVELOPMENT, Set.of(), "resume", message -> { });
+
+        assertTrue(result.completed());
+        assertEquals(25, result.modelTurns());
+        for (var history : model.histories) {
+            assertEquals(1, history.stream().filter(message -> "user".equals(message.role())
+                    && message.content().contains("Run a full compile and all current tests now")).count());
+            assertTrue(history.get(0).content().contains("keep success-case fixtures within declared validation constraints"));
+        }
+    }
+
     /** 超时重试沿用原消息并消耗剩余全局轮次，成功响应仍可继续交付。 */
     @Test
     void developmentRetriesOneTimeoutWithinGlobalBudget() {

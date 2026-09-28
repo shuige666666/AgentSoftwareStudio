@@ -38,6 +38,8 @@ public final class WorkspaceAgentSession {
     private String lastCheckpointHash = "";
     private boolean lastCheckpointPassed;
     private boolean finalCheckpointPassed;
+    private String unresolvedVerificationFailure = "";
+    private int unresolvedFailureVersion = -1;
 
     public WorkspaceAgentSession(
             Path projectRoot,
@@ -109,11 +111,28 @@ public final class WorkspaceAgentSession {
     }
 
     public void recordCompilePassed() { compiledVersion = writeVersion; }
-    public void recordTestsPassed() { testedVersion = writeVersion; }
+    public void recordTestsPassed() {
+        testedVersion = writeVersion;
+        clearVerificationFailure();
+    }
     public void recordContractPassed() { contractValidatedVersion = writeVersion; }
     public boolean compileCurrent() { return compiledVersion == writeVersion; }
     public boolean testsCurrent() { return testedVersion == writeVersion; }
     public boolean contractCurrent() { return contractValidatedVersion == writeVersion; }
+
+    /** 保留最近未被成功测试清除的失败，供压缩后的开发会话继续定位。 */
+    public void recordVerificationFailure(String failure) {
+        unresolvedVerificationFailure = failure == null ? "" : failure;
+        unresolvedFailureVersion = writeVersion;
+    }
+
+    public void clearVerificationFailure() {
+        unresolvedVerificationFailure = "";
+        unresolvedFailureVersion = -1;
+    }
+
+    public String unresolvedVerificationFailure() { return unresolvedVerificationFailure; }
+    public int unresolvedFailureVersion() { return unresolvedFailureVersion; }
 
     public void complete(String summary) {
         completed = true;

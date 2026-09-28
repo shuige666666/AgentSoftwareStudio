@@ -29,7 +29,7 @@ public class AiConfig {
         public static final boolean CODER_MODEL_JSON_OUTPUT_ENABLED = true;
 
         public static final String LOGIC_MODEL_BEAN_NAME = "logicModel";
-        public static final String LOGIC_MODEL_NAME = "qwen3.7-max-2026-05-20";
+        public static final String LOGIC_MODEL_NAME = "qwen3.8-max-0902";
         public static final double LOGIC_MODEL_TEMPERATURE = 0.4;
         public static final int LOGIC_MODEL_MAX_OUTPUT_TOKENS = 8192;
         public static final Duration LOGIC_MODEL_TIMEOUT = Duration.ofMinutes(8);

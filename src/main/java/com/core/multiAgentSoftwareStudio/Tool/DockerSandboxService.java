@@ -115,7 +115,9 @@ public class DockerSandboxService {
         String id = dockerClient.createContainerCmd(image)
                 .withUser("1000:1000")
                 .withWorkingDir("/workspace")
-                .withEnv("HOME=/tmp", "MAVEN_OPTS=-Djansi.mode=off -Dmaven.repo.local=/usr/share/maven/ref/repository")
+                // 容器只有 128 个进程额度，限制 JVM 可见处理器数以免测试启动过多线程。
+                .withEnv("HOME=/tmp", "MAVEN_OPTS=-Djansi.mode=off -Dmaven.repo.local=/usr/share/maven/ref/repository",
+                        "JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=2")
                 .withHostConfig(host)
                 .withCmd("sleep", "infinity")
                 .exec().getId();
@@ -184,7 +186,7 @@ public class DockerSandboxService {
                     // 管道中 Maven 等前序命令失败时，不能被 tail 的零退出码掩盖。
                     .withCmd("bash", "-o", "pipefail", "-lc", command)
                     .exec().getId();
-            StringBuilder preview = new StringBuilder();
+            WorkspaceOutputPreview preview = new WorkspaceOutputPreview();
             var callback = new com.github.dockerjava.api.async.ResultCallback.Adapter<Frame>() {
                 @Override public void onNext(Frame frame) {
                     String chunk = new String(frame.getPayload(), StandardCharsets.UTF_8);
@@ -193,9 +195,7 @@ public class DockerSandboxService {
                     } catch (IOException e) {
                         throw new IllegalStateException("Unable to save shell output", e);
                     }
-                    if (preview.length() < 32_000) {
-                        preview.append(chunk, 0, Math.min(chunk.length(), 32_000 - preview.length()));
-                    }
+                    preview.append(chunk);
                 }
             };
             dockerClient.execStartCmd(execId).exec(callback);
@@ -205,11 +205,11 @@ public class DockerSandboxService {
                 // 超时后销毁整个会话容器，避免后台子进程继续修改宿主挂载目录。
                 closeWorkspaceShell(shell);
                 return new WorkspaceCommandResult(new SandboxExecutionResult(command, null,
-                        preview.toString(), elapsedMillis(started), true, null), logPath.toString());
+                        preview.snapshot(), elapsedMillis(started), true, null), logPath.toString());
             }
             Long code = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
             return new WorkspaceCommandResult(new SandboxExecutionResult(command,
-                    code == null ? null : code.intValue(), preview.toString(), elapsedMillis(started),
+                    code == null ? null : code.intValue(), preview.snapshot(), elapsedMillis(started),
                     false, null), logPath.toString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -221,6 +221,36 @@ public class DockerSandboxService {
             return new WorkspaceCommandResult(new SandboxExecutionResult(command, null,
                     String.valueOf(e.getMessage()), elapsedMillis(started), false,
                     "Shell execution failed: " + e.getMessage()), logPath.toString());
+        }
+    }
+
+    /** 限制模型可见输出大小，同时保留 Maven 等长命令结束时的真实失败清单。 */
+    static final class WorkspaceOutputPreview {
+        private static final int MAX_CHARS = 32_000;
+        private static final int HEAD_CHARS = 8_000;
+        private static final int TAIL_CHARS = 23_000;
+        private final StringBuilder head = new StringBuilder();
+        private StringBuilder tail;
+
+        void append(String chunk) {
+            if (chunk == null || chunk.isEmpty()) return;
+            if (tail == null) {
+                head.append(chunk);
+                if (head.length() <= MAX_CHARS) return;
+                // 超过预览上限后切换到首尾窗口，完整输出仍保存在独立日志。
+                tail = new StringBuilder(head.substring(head.length() - TAIL_CHARS));
+                head.setLength(HEAD_CHARS);
+            } else {
+                tail.append(chunk);
+                if (tail.length() > TAIL_CHARS) {
+                    tail.delete(0, tail.length() - TAIL_CHARS);
+                }
+            }
+        }
+
+        String snapshot() {
+            return tail == null ? head.toString()
+                    : head + "\n...[middle truncated; full output in shell log]...\n" + tail;
         }
     }
 
