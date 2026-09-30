@@ -102,6 +102,8 @@ public class WorkspaceAgentLimitsConfig {
         private int retainedModelTurns = 3;
         private int maxLatestToolResultChars = 6_000;
         private int maxContextTokens = 64_000;
+        // 工作预算与模型窗口分开，避免合法但冗长的历史拖慢开发和超时重试。
+        private int maxWorkingContextTokens = 24_000;
         private int compactAtPercent = 70;
 
         public int getRetainedModelTurns() { return retainedModelTurns; }
@@ -109,6 +111,8 @@ public class WorkspaceAgentLimitsConfig {
         public int getMaxLatestToolResultChars() { return maxLatestToolResultChars; }
         public void setMaxLatestToolResultChars(int value) { this.maxLatestToolResultChars = requirePositive(value); }
         public int getMaxContextTokens() { return maxContextTokens; }
+        public int getMaxWorkingContextTokens() { return maxWorkingContextTokens; }
+        public void setMaxWorkingContextTokens(int value) { this.maxWorkingContextTokens = requirePositive(value); }
         public void setMaxContextTokens(int value) { this.maxContextTokens = requirePositive(value); }
         public int getCompactAtPercent() { return compactAtPercent; }
         public void setCompactAtPercent(int value) {

@@ -42,6 +42,9 @@ import java.util.stream.Stream;
 public class WorkspaceToolRegistry {
     private static final int MAX_FILE_CHARS = 40_000;
     private static final int MAX_SEARCH_RESULTS = 80;
+    private static final Set<String> PLANNING_DOCUMENTS = Set.of(
+            "user-request.md", "prd.json", "architecture.json", "contract.json", "overall-design.json",
+            "slice-plan.json", "generation-plan.json", "planning-overview.md", "scaffold-spec.json", "scaffold-build.json");
     private static final Pattern GREEN_TEST_SUMMARY = Pattern.compile(
             "Tests run:\\s*[1-9]\\d*,\\s*Failures:\\s*0,\\s*Errors:\\s*0");
     private static final Pattern FULL_MAVEN_TEST_COMMAND = Pattern.compile(
@@ -84,7 +87,7 @@ public class WorkspaceToolRegistry {
     /** 连续开发会话只暴露当前协议，避免模型转回旧的阶段完成路径。 */
     public List<ToolDefinition> definitions(WorkspaceAgentMode mode) {
         if (mode != WorkspaceAgentMode.DEVELOPMENT) return definitions();
-        return List.of("list_files", "search_code", "read_files", "get_current_diff",
+        return List.of("list_files", "search_code", "read_files", "read_planning", "get_current_diff",
                         "bash", "apply_patch", "submit_checkpoint", "restore_checkpoint", "report_blocker")
                 .stream().map(name -> tools.get(name).definition()).toList();
     }
@@ -120,6 +123,8 @@ public class WorkspaceToolRegistry {
                 objectSchema("query", "string", "true", "glob", "string", "false"), this::searchCode);
         register("read_files", "读取项目文件并返回完整文件 SHA-256。诊断先用 search_code 定位，再用可选 startLine/endLine 读取相关范围（从1开始，含结束行，对所有 paths 生效）；省略范围仍读整文件。片段内容不是完整文件，不可用它覆盖整文件。",
                 readFilesSchema(), this::readFiles);
+        register("read_planning", "只读获取完整需求、设计、公开契约和规划。document 使用列出的元数据文件名；可按 startLine/endLine 定位，读取不会改变规划或验收约定。",
+                readPlanningSchema(), this::readPlanning);
         register("apply_edits", "原子应用一组精确文本替换；每个文件限一项，并携带 read_files 返回的 expectedHash。",
                 applyEditsSchema(), this::applyEdits);
         register("apply_patch", """
@@ -230,6 +235,22 @@ public class WorkspaceToolRegistry {
 
     /** 支持精确行范围读取，减少诊断时的整文件重复输入；哈希始终对应磁盘完整文件。 */
     private String readFiles(JsonNode arguments, WorkspaceAgentSession session) {
+        return readFiles(arguments, session, false);
+    }
+
+    /** 只开放明确的规划文件，仍禁止 Agent 写入平台元数据。 */
+    private String readPlanning(JsonNode arguments, WorkspaceAgentSession session) {
+        String document = arguments.path("document").asText("");
+        if (!PLANNING_DOCUMENTS.contains(document)) {
+            return jsonError("INVALID_PLANNING_DOCUMENT", "Use a listed planning document: " + PLANNING_DOCUMENTS);
+        }
+        ObjectNode request = arguments.deepCopy();
+        request.putArray("paths").add(PlanningArtifactPersistenceService.METADATA_DIRECTORY + "/" + document);
+        return readFiles(request, session, true);
+    }
+
+    /** 源码和规划读取共用行范围与哈希规则；元数据通道由固定白名单控制。 */
+    private String readFiles(JsonNode arguments, WorkspaceAgentSession session, boolean planning) {
         boolean ranged = arguments.has("startLine") || arguments.has("endLine");
         int startLine = arguments.path("startLine").asInt(1);
         int endLine = arguments.path("endLine").asInt(Integer.MAX_VALUE);
@@ -239,7 +260,7 @@ public class WorkspaceToolRegistry {
         ArrayNode files = objectMapper.createArrayNode();
         for (JsonNode item : arguments.path("paths")) {
             String relative = normalizeRelative(item.asText(), session);
-            if (!isReadableProjectFile(relative)) {
+            if (!planning && !isReadableProjectFile(relative)) {
                 files.addObject().put("path", relative).put("error", "FILE_NOT_READABLE");
                 continue;
             }
@@ -252,6 +273,10 @@ public class WorkspaceToolRegistry {
                 continue;
             }
             try {
+                if (planning && !path.toRealPath().startsWith(session.projectRoot().toRealPath())) {
+                    file.put("error", "PLANNING_PATH_OUTSIDE_WORKSPACE");
+                    continue;
+                }
                 String content = Files.readString(path, StandardCharsets.UTF_8);
                 file.put("sha256", sha256(content));
                 String selected = content;
@@ -357,6 +382,8 @@ public class WorkspaceToolRegistry {
         String command = arguments.path("command").asText("");
         String cwd = arguments.path("cwd").asText("");
         long timeout = arguments.path("timeoutMillis").asLong(120_000);
+        Map<Path, java.nio.file.attribute.FileTime> reportsBefore = command.contains("mvn")
+                ? SurefireFailureFeedback.snapshot(session.projectRoot()) : Map.of();
         DockerSandboxService.WorkspaceCommandResult run = sandboxService.runWorkspaceCommand(
                 session.shell(), command, cwd, timeout);
         if (session.shell().closed()) session.setShell(null);
@@ -369,7 +396,9 @@ public class WorkspaceToolRegistry {
         changed.forEach(session::recordWrite);
         ObjectNode result = objectMapper.createObjectNode();
         SandboxExecutionResult execution = run.execution();
-        recordBashVerification(session, command, execution);
+        String testEvidence = !execution.completedSuccessfully() && command.contains("mvn")
+                ? SurefireFailureFeedback.read(session.projectRoot(), reportsBefore) : "";
+        recordBashVerification(session, command, execution, testEvidence);
         result.put("passed", execution.completedSuccessfully());
         result.put("command", command);
         result.put("cwd", cwd.isBlank() ? "." : cwd);
@@ -383,6 +412,7 @@ public class WorkspaceToolRegistry {
             // 先呈现真正的编译或测试错误；完整输出和原始日志仍保留供核对。
             result.put("failureHighlights", failureHighlights(execution.output()));
         }
+        if (!testEvidence.isBlank()) result.put("testFailureEvidence", testEvidence);
         result.put("fullLogPath", run.logPath());
         ArrayNode files = result.putArray("changedFiles");
         changed.forEach(files::add);
@@ -392,9 +422,20 @@ public class WorkspaceToolRegistry {
     /** 失败反馈跨压缩保留，直到后续真实测试通过；普通成功命令不能清除测试错误。 */
     static void recordBashVerification(WorkspaceAgentSession session, String command,
                                        SandboxExecutionResult execution) {
+        recordBashVerification(session, command, execution, "");
+    }
+
+    /** XML 明细与原始日志共同保留，编译或工具失败不借用旧测试结果。 */
+    private static void recordBashVerification(WorkspaceAgentSession session, String command,
+                                               SandboxExecutionResult execution, String testEvidence) {
         if (!execution.completedSuccessfully() && command.contains("mvn")) {
+            // 网络/资源/命令不可用不能抹掉尚未修好的源码失败，最新环境事实仍在工具原结果中。
+            if (execution.timedOut() || execution.infrastructureError() != null
+                    || Integer.valueOf(126).equals(execution.exitCode())
+                    || Integer.valueOf(127).equals(execution.exitCode())
+                    || execution.output().contains("unable to create native thread")) return;
             // 保留最近的 Maven 失败，避免后续读取与补丁把错误反馈挤出压缩上下文。
-            session.recordVerificationFailure("command=" + command + "\n" + failureHighlights(execution.output()));
+            session.recordVerificationFailure("command=" + command + "\n" + testEvidence + "\n" + failureHighlights(execution.output()));
         } else if (execution.completedSuccessfully()
                 && FULL_MAVEN_TEST_COMMAND.matcher(command).find()
                 && !command.contains("-Dtest=") && !command.contains("-DskipTests")
@@ -767,6 +808,16 @@ public class WorkspaceToolRegistry {
     /** 行范围是兼容可选项，原有 paths 调用保持有效。 */
     private ObjectNode readFilesSchema() {
         ObjectNode schema = arrayPropertySchema("paths", true);
+        schema.with("properties").putObject("startLine").put("type", "integer").put("minimum", 1);
+        schema.with("properties").putObject("endLine").put("type", "integer").put("minimum", 1);
+        return schema;
+    }
+
+    /** 文档名是固定枚举，不能借此读取任意状态文件或凭据。 */
+    private ObjectNode readPlanningSchema() {
+        ObjectNode schema = objectSchema("document", "string", "true");
+        ArrayNode values = schema.with("properties").with("document").putArray("enum");
+        PLANNING_DOCUMENTS.stream().sorted().forEach(values::add);
         schema.with("properties").putObject("startLine").put("type", "integer").put("minimum", 1);
         schema.with("properties").putObject("endLine").put("type", "integer").put("minimum", 1);
         return schema;

@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -421,6 +422,47 @@ class WorkspaceAgentRuntimeTest {
         assertEquals("tool", history.get(history.size() - 2).role());
         assertEquals("user", history.get(history.size() - 1).role());
         assertTrue(history.get(history.size() - 1).content().contains("failing test setup"));
+    }
+
+    /** 模拟真实网络超时，证明重试压缩输入但不重新执行工具、不补发全局预算。 */
+    @Test
+    void retryReducesReadHistoryAndPreservesUnresolvedFailure() throws Exception {
+        var histories = new ArrayList<List<ToolChatMessage>>();
+        ToolCallingModel model = (messages, tools) -> {
+            histories.add(List.copyOf(messages));
+            if (histories.size() == 1) return response("read", "read_files", "{}");
+            if (histories.size() == 2) throw new IllegalStateException("timeout", new HttpTimeoutException("timeout"));
+            return response("final", "submit_checkpoint", "{\"scope\":\"final\"}");
+        };
+        WorkspaceToolRegistry registry = mock(WorkspaceToolRegistry.class);
+        when(registry.definitions(WorkspaceAgentMode.DEVELOPMENT)).thenReturn(List.of());
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
+            WorkspaceAgentSession session = invocation.getArgument(2);
+            if ("read_files".equals(invocation.getArgument(0))) {
+                session.recordVerificationFailure("AppTest: expected 404 but was 200");
+                var result = new ObjectMapper().createObjectNode();
+                result.putArray("files").addObject().put("path", "App.java").put("sha256", "hash")
+                        .put("content", "large-source".repeat(1_000));
+                return result.toString();
+            }
+            session.complete("verified");
+            return "{\"status\":\"PASSED\"}";
+        });
+        var data = new SoftwareStudioWorkflowData("complete public goal");
+        data.projectPath = projectRoot.toString();
+
+        var result = runtime(model, registry).runDetailed(data, WorkspaceAgentMode.DEVELOPMENT,
+                Set.of(), "complete public goal", message -> { });
+
+        assertTrue(result.completed());
+        assertEquals(3, result.modelTurns());
+        assertEquals(2, result.toolCalls());
+        assertTrue(WorkspaceAgentContextCompactor.estimatedTokens(histories.get(2))
+                < WorkspaceAgentContextCompactor.estimatedTokens(histories.get(1)));
+        assertEquals("complete public goal", histories.get(2).get(1).content());
+        assertTrue(histories.get(2).get(2).content().contains("expected 404 but was 200"));
+        verify(registry, times(1)).execute(eq("read_files"), anyString(), any());
     }
 
     private ToolModelResponse response(String id, String name, String arguments) {

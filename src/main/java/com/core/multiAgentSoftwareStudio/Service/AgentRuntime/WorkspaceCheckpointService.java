@@ -169,6 +169,11 @@ public class WorkspaceCheckpointService {
             String failureOutput = passed ? "" : shortOutput(!build.passed()
                     ? buildExecution.output() : !test.passed() && testExecution != null
                     ? testExecution.output() : String.join("\n", blockers));
+            if (!passed && build.passed() && !test.passed() && !reuse) {
+                // 新执行副本没有旧报告，先给出实际失败方法和源码位置，再保留有界日志。
+                String evidence = SurefireFailureFeedback.read(verificationWork, Map.of());
+                if (!evidence.isBlank()) failureOutput = evidence + "\n" + failureOutput;
+            }
             CheckpointResult result = new CheckpointResult(scope, status, hash, source.toString(),
                     reportDirectory.resolve("checkpoint.json").toString(), build, test, contractPassed,
                     blockers.stream().limit(12).toList(), failureOutput, allowCompletion, reuse);

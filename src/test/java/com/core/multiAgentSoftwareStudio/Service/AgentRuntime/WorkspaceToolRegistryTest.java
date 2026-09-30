@@ -41,6 +41,46 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class WorkspaceToolRegistryTest {
+    /** 环境故障不能覆盖之前尚未修好的业务或编译失败。 */
+    @Test
+    void keepsSourceFailureAcrossAnInfrastructureFailure() {
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, Map.of());
+        session.recordVerificationFailure("AppTest expected 404 but was 200");
+        WorkspaceToolRegistry.recordBashVerification(session, "mvn test",
+                new SandboxExecutionResult("mvn test", null, "connection failed", 1, false, "Docker unavailable"));
+        assertEquals("AppTest expected 404 but was 200", session.unresolvedVerificationFailure());
+        WorkspaceToolRegistry.recordBashVerification(session, "mvn test",
+                new SandboxExecutionResult("mvn test", 1, "unable to create native thread", 1, false, null));
+        assertEquals("AppTest expected 404 but was 200", session.unresolvedVerificationFailure());
+    }
+    /** 规划读取提供完整契约与精确行范围，但不会改变规划内容或写入权限。 */
+    @Test
+    void readsWhitelistedPlanningAndKeepsMetadataProtected() throws Exception {
+        Path contract = projectRoot.resolve(".software-studio/contract.json");
+        Files.createDirectories(contract.getParent());
+        String body = "{\r\n  \"errorResponses\": \"400/404\"\r\n}\r\n";
+        Files.writeString(contract, body, StandardCharsets.UTF_8);
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, Map.of());
+        assertTrue(registry.definitions(WorkspaceAgentMode.DEVELOPMENT).stream()
+                .anyMatch(def -> def.name().equals("read_planning")));
+        var full = objectMapper.readTree(registry.execute("read_planning",
+                "{\"document\":\"contract.json\"}", session)).at("/files/0");
+        var range = objectMapper.readTree(registry.execute("read_planning",
+                "{\"document\":\"contract.json\",\"startLine\":2,\"endLine\":2}", session)).at("/files/0");
+
+        assertEquals(body, full.path("content").asText());
+        assertEquals("  \"errorResponses\": \"400/404\"\r\n", range.path("content").asText());
+        assertEquals(full.path("sha256").asText(), range.path("sha256").asText());
+        var invalid = objectMapper.readTree(registry.execute("read_planning",
+                "{\"document\":\"../private.yml\"}", session));
+        assertEquals("INVALID_PLANNING_DOCUMENT", invalid.path("error").asText());
+        String write = registry.execute("apply_patch",
+                "{\"patch\":\"*** Begin Patch\\n*** Delete File: .software-studio/contract.json\\n*** End Patch\"}", session);
+        assertFalse(objectMapper.readTree(write).path("ok").asBoolean());
+        assertEquals(body, Files.readString(contract));
+        assertTrue(session.changedFiles().isEmpty());
+    }
+
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final DockerSandboxService sandboxService = mock(DockerSandboxService.class);

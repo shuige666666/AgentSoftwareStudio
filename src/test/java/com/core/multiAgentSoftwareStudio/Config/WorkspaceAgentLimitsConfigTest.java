@@ -37,6 +37,8 @@ class WorkspaceAgentLimitsConfigTest {
         assertEquals(8, config.getStagnation().getMaxCallsWithoutNewEvidence());
         assertEquals(2, config.getStagnation().getMaxRepeatedVerificationFailuresAfterEdit());
         assertEquals(64_000, config.getContext().getMaxContextTokens());
+        assertEquals(24_000, config.getContext().getMaxWorkingContextTokens());
+        assertThrows(IllegalArgumentException.class, () -> config.getContext().setMaxWorkingContextTokens(0));
         assertEquals(70, config.getContext().getCompactAtPercent());
         assertEquals(3, config.getContext().getRetainedModelTurns());
         assertEquals(6_000, config.getContext().getMaxLatestToolResultChars());

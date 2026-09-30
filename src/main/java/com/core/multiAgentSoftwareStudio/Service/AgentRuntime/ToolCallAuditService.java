@@ -170,6 +170,11 @@ public class ToolCallAuditService {
         event.put("modelTurn", workspaceSession.modelTurns());
         event.put("messagesBefore", result.messagesBefore());
         event.put("messagesAfter", result.messagesAfter());
+        event.put("estimatedTokensBefore", result.estimatedTokensBefore());
+        event.put("estimatedTokensAfter", result.estimatedTokensAfter());
+        event.put("workingBudgetTokens", result.workingBudgetTokens());
+        event.put("withinWorkingBudget", result.withinWorkingBudget());
+        event.put("reason", result.reason());
         append(auditSession, workspaceSession, event);
     }
 

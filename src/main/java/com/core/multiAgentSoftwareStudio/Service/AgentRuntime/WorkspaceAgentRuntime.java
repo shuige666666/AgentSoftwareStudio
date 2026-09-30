@@ -112,6 +112,10 @@ public class WorkspaceAgentRuntime {
                     session.messages().add(ToolChatMessage.user(developmentClosingPrompt(session,
                             maxModelTurns - turn + 1)));
                 }
+                // 包括无工具回复后的续跑，统一在下一次请求前按合法工具边界整理历史。
+                recordCompaction(contextCompactor.compact(session, lastToolName, lastToolResult,
+                        maxModelTurns > 0 ? maxModelTurns - session.modelTurns() : -1),
+                        auditSession, session);
                 session.incrementModelTurns();
                 if (mode == WorkspaceAgentMode.DEVELOPMENT) milestoneService.persist(data);
                 auditService.recordModelTurn(auditSession, session, turn);
@@ -129,6 +133,9 @@ public class WorkspaceAgentRuntime {
                     if (mode == WorkspaceAgentMode.DEVELOPMENT && !retriedTimeout
                             && isTimeout(e) && (maxModelTurns <= 0 || turn < maxModelTurns)) {
                         retriedTimeout = true;
+                        recordCompaction(contextCompactor.compactForRetry(session, lastToolName, lastToolResult,
+                                maxModelTurns > 0 ? maxModelTurns - session.modelTurns() : -1),
+                                auditSession, session);
                         logger.accept("   Tool model request timed out; retrying once within the remaining model-turn budget.");
                         continue;
                     }
@@ -211,14 +218,7 @@ public class WorkspaceAgentRuntime {
                     auditService.recordRuntimeGuidance(auditSession, session, runtimeGuidance);
                     logger.accept("   Repeated verification failure: diagnostic guidance added before the next attempt.");
                 }
-                WorkspaceAgentContextCompactor.Result compaction =
-                        contextCompactor.compact(session, lastToolName, lastToolResult,
-                                maxModelTurns > 0 ? maxModelTurns - session.modelTurns() : -1);
-                if (compaction.compacted()) {
-                    logger.accept("   Tool context compacted from " + compaction.messagesBefore()
-                            + " to " + compaction.messagesAfter() + " messages.");
-                    auditService.recordContextCompacted(auditSession, session, compaction);
-                }
+
             }
         } catch (RuntimeException e) {
             logger.accept("   Tool Agent stopped because the model or runtime failed: " + e.getMessage());
@@ -232,6 +232,18 @@ public class WorkspaceAgentRuntime {
                 + (maxModelTurns > 0 ? " within " + maxModelTurns + " model turns." : "."));
         return finishFailure(session, auditSession, WorkspaceAgentStopReason.MODEL_TURN_LIMIT,
                 lastToolName, lastToolResult, "Model-turn limit reached");
+    }
+
+    /** 记录实际请求前的体积变化；必要目标超出预算时明确报告，不截断需求来制造达标。 */
+    private void recordCompaction(WorkspaceAgentContextCompactor.Result result,
+                                  ToolCallAuditSession audit, WorkspaceAgentSession session) {
+        if (!result.compacted()) return;
+        auditService.recordContextCompacted(audit, session, result);
+        session.logger().accept("   Tool context compacted: " + result.estimatedTokensBefore()
+                + " -> " + result.estimatedTokensAfter() + " estimated tokens (" + result.reason() + ").");
+        if (!result.withinWorkingBudget()) {
+            session.logger().accept("   Mandatory objective/evidence exceeds the working context budget; retained intact.");
+        }
     }
 
     /** 识别兼容层包装的网络超时，避免把一般 HTTP 或代码错误当作可重试故障。 */

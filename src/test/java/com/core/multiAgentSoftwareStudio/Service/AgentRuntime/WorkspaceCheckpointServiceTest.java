@@ -39,6 +39,46 @@ import static org.mockito.Mockito.when;
 class WorkspaceCheckpointServiceTest {
     @TempDir Path root;
 
+    /** 正式冻结验证将新报告的失败方法和源码位置交还会话，不改写原日志或放行失败。 */
+    @Test
+    void includesFreshSurefireEvidenceInFailedCheckpoint() throws Exception {
+        Path testSource = root.resolve("src/test/java/demo/AppTest.java");
+        Files.createDirectories(testSource.getParent());
+        Files.writeString(testSource, "package demo; class AppTest {}");
+        Files.writeString(root.resolve("pom.xml"), "<project/>");
+        DockerSandboxService sandbox = mock(DockerSandboxService.class);
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp -DskipTests compile")))
+                .thenReturn(new SandboxExecutionResult("compile", 0, "BUILD SUCCESS", 1, false, null));
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp test"))).thenAnswer(invocation -> {
+            Path work = invocation.getArgument(0);
+            Path report = work.resolve("target/surefire-reports/TEST-demo.AppTest.xml");
+            Files.createDirectories(report.getParent());
+            Files.writeString(report, """
+                    <testsuite><testcase classname="demo.AppTest" name="shouldReturn404">
+                    <failure message="Status expected:&lt;404&gt; but was:&lt;200&gt;">at demo.AppTest.setUp(AppTest.java:22)</failure>
+                    </testcase></testsuite>
+                    """);
+            return new SandboxExecutionResult("mvn test", 1, "RAW TEST LOG: failed", 1, false, null);
+        });
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectPath = root.toString();
+        data.projectProfile = ProjectProfile.java17SpringBoot();
+        var session = new WorkspaceAgentSession(root, WorkspaceAgentMode.DEVELOPMENT,
+                data, message -> { }, Map.of(), Set.of());
+        var service = new WorkspaceCheckpointService(sandbox, new VerificationResultService(),
+                mock(ProjectProfileService.class), new WorkspaceService(new SourceCodePathService()),
+                new RunJournalService(), new ObjectMapper());
+
+        var result = service.verify(session, "final", "ready");
+
+        assertEquals("FAILED", result.status());
+        assertFalse(result.allowCompletion());
+        assertTrue(result.failureOutput().contains("demo.AppTest.shouldReturn404"));
+        assertTrue(result.failureOutput().contains("expected:<404> but was:<200>"));
+        assertTrue(result.failureOutput().contains("src/test/java/demo/AppTest.java:22"));
+        assertEquals("RAW TEST LOG: failed", Files.readString(Path.of(result.reportPath()).getParent().resolve("test.log")));
+    }
+
     /**
      * progress 绿色仍继续开发；final 在新快照完成全量验证后才允许结束。
      */

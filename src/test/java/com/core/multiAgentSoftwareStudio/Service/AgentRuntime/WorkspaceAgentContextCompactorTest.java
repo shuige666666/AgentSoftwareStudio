@@ -22,6 +22,176 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorkspaceAgentContextCompactorTest {
+    /** 重复读取只保留最新准确正文；旧哈希仍明确属于历史，全部工具 ID 保持配对。 */
+    @Test
+    void boundsRepeatedFileReadsAndPreservesNewestText() throws Exception {
+        var session = contextSession();
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        for (int turn = 1; turn <= 3; turn++) {
+            var result = mapper.createObjectNode();
+            result.putArray("files").addObject().put("path", "App.java").put("sha256", "version-" + turn)
+                    .put("content", ("exact-version-" + turn + "\r\n").repeat(550));
+            addRound(session, "call-" + turn, "read_files", "{}", result.toString());
+        }
+        session.recordWrite("App.java");
+        session.recordVerificationFailure("AppTest: expected 404 but was 200");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(7_000);
+
+        var result = new WorkspaceAgentContextCompactor(policy).compact(session, "read_files",
+                session.messages().getLast().content(), 5);
+
+        assertTrue(result.compacted());
+        assertTrue(result.withinWorkingBudget());
+        assertEquals(3, session.messages().stream().filter(m -> "assistant".equals(m.role())).count());
+        var old = mapper.readTree(session.messages().get(4).content()).at("/files/0");
+        assertFalse(old.has("content"));
+        assertTrue(old.path("contentOmitted").asBoolean());
+        assertEquals("version-1", old.path("sha256").asText());
+        var newest = mapper.readTree(session.messages().getLast().content()).at("/files/0");
+        assertEquals(("exact-version-3\r\n").repeat(550), newest.path("content").asText());
+        assertTrue(session.messages().get(2).content().contains("expected 404 but was 200"));
+        assertPairs(session.messages());
+    }
+
+    /** 最近一轮有多个大读取时，移出正文也不拆开工具响应，磁盘文件不被改写。 */
+    @Test
+    void dropsOversizedBodiesWithoutProvidingTruncatedEditableCode() throws Exception {
+        var session = contextSession();
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        session.messages().add(ToolChatMessage.assistant("inspect", List.of(
+                new ToolCall("read-a", "read_files", "{}"), new ToolCall("read-b", "read_files", "{}"))));
+        for (String id : List.of("read-a", "read-b")) {
+            var result = mapper.createObjectNode();
+            result.putArray("files").addObject().put("path", id + ".java").put("sha256", id)
+                    .put("content", "exact-source-body".repeat(3_000));
+            session.messages().add(ToolChatMessage.tool(id, result.toString()));
+        }
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(2_000);
+
+        var result = new WorkspaceAgentContextCompactor(policy).compact(session, "read_files",
+                session.messages().getLast().content(), 12);
+
+        assertTrue(result.withinWorkingBudget());
+        assertPairs(session.messages());
+        assertFalse(session.messages().stream().anyMatch(m -> m.content().contains("exact-source-body")));
+        assertTrue(session.messages().stream().anyMatch(m -> m.content().contains("contentOmitted")));
+        assertEquals("original objective", session.messages().get(1).content());
+    }
+
+    /** 大补丁整体移出历史，不修改已完成调用的参数或制造孤立 tool 消息。 */
+    @Test
+    void evictsAnOversizedPatchAsAWholeTurn() {
+        var session = contextSession();
+        addRound(session, "patch", "apply_patch", "complete-patch".repeat(6_000),
+                "{\"changedFiles\":[\"App.java\"],\"ok\":true}");
+        session.recordWrite("App.java");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(2_000);
+
+        var result = new WorkspaceAgentContextCompactor(policy).compact(session, "apply_patch",
+                session.messages().getLast().content(), 4);
+
+        assertTrue(result.withinWorkingBudget());
+        assertEquals(3, session.messages().size());
+        assertTrue(session.messages().getLast().content().contains("App.java"));
+        assertTrue(session.messages().getLast().content().contains("write version: 1"));
+        assertPairs(session.messages());
+    }
+
+    /** 预算不足以容纳目标时明确报告，不以删需求或删未解决错误制造达标。 */
+    @Test
+    void preservesMandatoryFactsEvenWhenPinnedContextExceedsBudget() {
+        var session = contextSession();
+        session.recordVerificationFailure("critical-public-contract-failure");
+        addRound(session, "call", "read_files", "{}", "{}");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(10);
+
+        var result = new WorkspaceAgentContextCompactor(policy).compact(session, "read_files", "{}", 2);
+
+        assertFalse(result.withinWorkingBudget());
+        assertEquals("original objective", session.messages().get(1).content());
+        assertTrue(session.messages().get(2).content().contains("critical-public-contract-failure"));
+        assertTrue(session.messages().get(2).content().contains("remaining model turns: 2"));
+    }
+
+    /** 首次请求仍在工作预算内时，超时重试也会整理读取正文并保留原调用配对。 */
+    @Test
+    void reducesRedundantReadsForRetryBelowTheNormalThreshold() throws Exception {
+        var session = contextSession();
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var response = mapper.createObjectNode();
+        response.putArray("files").addObject().put("path", "App.java").put("sha256", "current-hash")
+                .put("content", "large-exact-body".repeat(1_000));
+        addRound(session, "read", "read_files", "{}", response.toString());
+        var compactor = new WorkspaceAgentContextCompactor(new WorkspaceAgentLimitsConfig().getContext());
+        assertFalse(compactor.compact(session, "read_files", response.toString(), 10).compacted());
+
+        var result = compactor.compactForRetry(session, "read_files", response.toString(), 9);
+
+        assertTrue(result.compacted());
+        assertEquals("timeout_retry", result.reason());
+        assertTrue(result.estimatedTokensAfter() < result.estimatedTokensBefore());
+        assertTrue(session.messages().getLast().content().contains("current-hash"));
+        assertPairs(session.messages());
+    }
+
+    /** 文件在读取后已修改，未重新读取的旧正文必须失效，但工具证据配对仍完整。 */
+    @Test
+    void invalidatesReadBodiesAfterALaterWorkspaceWrite() throws Exception {
+        var session = contextSession();
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var read = mapper.createObjectNode();
+        read.putArray("files").addObject().put("path", "App.java").put("sha256", "old")
+                .put("content", "old-accurate-source");
+        addRound(session, "read", "read_files", "{}", read.toString());
+        addRound(session, "patch", "apply_patch", "{}",
+                "{\"changedFiles\":[\"App.java\"],\"ok\":true}");
+        session.recordWrite("App.java");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setCompactAtPercent(1);
+        policy.setMaxContextTokens(2_000);
+
+        new WorkspaceAgentContextCompactor(policy).compact(session, "apply_patch",
+                session.messages().getLast().content(), 6);
+
+        assertFalse(session.messages().stream().anyMatch(m -> m.content().contains("old-accurate-source")));
+        var historical = mapper.readTree(session.messages().get(4).content()).at("/files/0");
+        assertTrue(historical.path("contentOmitted").asBoolean());
+        assertEquals("old", historical.path("sha256").asText());
+        assertPairs(session.messages());
+    }
+
+    private WorkspaceAgentSession contextSession() {
+        var session = new WorkspaceAgentSession(projectRoot, WorkspaceAgentMode.DEVELOPMENT,
+                new SoftwareStudioWorkflowData("test"), message -> { }, Map.of(), Set.of());
+        session.messages().add(ToolChatMessage.system("system"));
+        session.messages().add(ToolChatMessage.user("original objective"));
+        return session;
+    }
+
+    private void addRound(WorkspaceAgentSession session, String id, String name, String arguments, String result) {
+        session.messages().add(ToolChatMessage.assistant("", List.of(new ToolCall(id, name, arguments))));
+        session.messages().add(ToolChatMessage.tool(id, result));
+    }
+
+    /** 每个保留的 assistant 调用恰有一个响应，且响应在任何下一条 user/assistant 前完成。 */
+    private void assertPairs(List<ToolChatMessage> messages) {
+        var pending = new java.util.HashSet<String>();
+        for (var message : messages) {
+            if ("assistant".equals(message.role())) {
+                assertTrue(pending.isEmpty());
+                message.toolCalls().forEach(call -> assertTrue(pending.add(call.id())));
+            } else if ("tool".equals(message.role())) {
+                assertTrue(pending.remove(message.toolCallId()));
+            } else {
+                assertTrue(pending.isEmpty());
+            }
+        }
+        assertTrue(pending.isEmpty());
+    }
 
     @TempDir
     Path projectRoot;
@@ -41,7 +211,8 @@ class WorkspaceAgentContextCompactorTest {
         }
 
         var policy = new WorkspaceAgentLimitsConfig().getContext();
-        policy.setMaxContextTokens(100);
+        policy.setMaxContextTokens(2_000);
+        policy.setCompactAtPercent(1);
         WorkspaceAgentContextCompactor.Result result = new WorkspaceAgentContextCompactor(policy)
                 .compact(session, "read_files", "result-7", -1);
 
@@ -84,7 +255,8 @@ class WorkspaceAgentContextCompactorTest {
             if (turn == 7) session.messages().add(ToolChatMessage.user("closing reminder for edit"));
         }
         var policy = new WorkspaceAgentLimitsConfig().getContext();
-        policy.setMaxContextTokens(100);
+        policy.setMaxContextTokens(2_000);
+        policy.setCompactAtPercent(1);
 
         var result = new WorkspaceAgentContextCompactor(policy)
                 .compact(session, "read_files", "result-10", 5);
@@ -116,7 +288,8 @@ class WorkspaceAgentContextCompactorTest {
                     "mvn test: AppTest.java:[57,35] method attribute cannot be applied");
         }
         var policy = new WorkspaceAgentLimitsConfig().getContext();
-        policy.setMaxContextTokens(100);
+        policy.setMaxContextTokens(2_000);
+        policy.setCompactAtPercent(1);
 
         var result = new WorkspaceAgentContextCompactor(policy)
                 .compact(session, "read_files", "result-10", 5);
