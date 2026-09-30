@@ -1,0 +1,205 @@
+{
+  "startedAt" : "2026-09-30T05:28:15.056827300Z",
+  "finishedAt" : "2026-09-30T05:44:20.063204Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : "qwen3.7-flash alias 2026-09-30"
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.8-max-0902",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : "qwen3.8-max-0902"
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "PlanningAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "task-api-basic" ],
+    "repetitions" : 1,
+    "repairBudget" : null,
+    "gitCommit" : "11352b54b1e4d6cce0567fb2028fce35de298d5b",
+    "gitDirty" : true,
+    "workingTreeFingerprint" : "1723686f2273f1e7e2398a10fb776e1101f4c441c0029a1e53c3e95dee7cc02e",
+    "requirementSha256" : {
+      "task-api-basic" : "5925c763234074903111d8bb0e6c267275125c15280e7db6371a35ba3c08eca4"
+    },
+    "development" : {
+      "maxModelTurns" : 36,
+      "maxToolCalls" : 108,
+      "verificationProtocol" : "snapshot-build-all-tests-contract-final-v1"
+    },
+    "planningSourceProjectId" : null,
+    "replayMode" : "SAVED_MILESTONES"
+  },
+  "cases" : [ {
+    "caseId" : "task-api-basic",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : true,
+    "independentQualityPassed" : true,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Java_17_Spring_Boot_任务管理_REST_API_20260930_133029",
+    "elapsedMillis" : 964797,
+    "quality" : {
+      "passed" : true,
+      "findings" : [ {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "CONTRACT_GATES_PASSED",
+        "passed" : true,
+        "evidence" : "Final semantic contract gates passed."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      } ]
+    },
+    "usage" : {
+      "calls" : 37,
+      "successfulCalls" : 36,
+      "failedCalls" : 1,
+      "durationMillis" : 835512,
+      "inputCacheHitTokens" : 388480,
+      "inputCacheMissTokens" : 83510,
+      "outputTokens" : 31445,
+      "totalTokens" : 503435,
+      "cacheMetricsAvailable" : true,
+      "finishReasonCounts" : {
+        "stop" : 2,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 34,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 1,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      },
+      "modelUsage" : {
+        "qwen3.8-max-0902" : {
+          "calls" : 2,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 0,
+          "inputCacheMissTokens" : 1548,
+          "outputTokens" : 13683,
+          "totalTokens" : 15231
+        },
+        "qwen3.7-flash" : {
+          "calls" : 35,
+          "failedCalls" : 1,
+          "inputCacheHitTokens" : 388480,
+          "inputCacheMissTokens" : 81962,
+          "outputTokens" : 17762,
+          "totalTokens" : 488204
+        }
+      }
+    },
+    "attemptsUsed" : 1,
+    "finalFailureKind" : "NONE",
+    "validationWarningCount" : 0,
+    "verificationSummary" : {
+      "buildExitCode" : 0,
+      "testExitCode" : 0,
+      "buildPassed" : true,
+      "testPassed" : true,
+      "testsRun" : 15,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 5816,
+      "testDurationMillis" : 18993,
+      "primaryFailureKind" : "NONE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 2,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : { },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 1,
+        "acceptedSlices" : 1,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 0,
+        "sliceRepairSafetyLimit" : 0,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 3,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "",
+        "slicePolicyVersion" : "vertical-slice-v7",
+        "declaredProjectType" : "SPRING_BOOT",
+        "effectiveProjectType" : "SPRING_BOOT",
+        "projectProfileId" : "java17-spring-boot-3.2"
+      }
+    },
+    "workflowError" : null,
+    "behavior" : {
+      "status" : "NOT_APPLICABLE",
+      "findings" : [ ],
+      "reason" : null
+    }
+  } ],
+  "platformSuccessCount" : 1,
+  "independentQualityPassCount" : 1,
+  "falseSuccessCount" : 0,
+  "falseSuccessRate" : 0.0,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-09-30T05-28-15.056827300Z.json",
+  "fullWorkflowSuccessRate" : 1.0
+}

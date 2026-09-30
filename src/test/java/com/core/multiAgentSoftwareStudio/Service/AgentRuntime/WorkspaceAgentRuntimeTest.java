@@ -391,6 +391,38 @@ class WorkspaceAgentRuntimeTest {
         verify(model, times(2)).generateWithTools(any(), any());
     }
 
+    /** 重复失败提示实际进入下一轮消息，且不会插在同一响应的多个工具结果之间。 */
+    @Test
+    void developmentDeliversRepeatedFailureAdviceAfterAllToolResponses() {
+        var second = new ToolModelResponse(ToolChatMessage.assistant("", List.of(
+                new ToolCall("test-2", "bash", "{\"command\":\"mvn test\"}"),
+                new ToolCall("read-2", "read_files", "{\"paths\":[\"App.java\"]}"))), "tool_calls");
+        var model = new RecordingToolModel(List.of(
+                response("test-1", "bash", "{\"command\":\"mvn test\"}"), second,
+                response("final", "submit_checkpoint", "{\"scope\":\"final\"}")));
+        WorkspaceToolRegistry registry = mock(WorkspaceToolRegistry.class);
+        when(registry.definitions(WorkspaceAgentMode.DEVELOPMENT)).thenReturn(List.of());
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
+            WorkspaceAgentSession session = invocation.getArgument(2);
+            if ("bash".equals(invocation.getArgument(0))) {
+                session.recordWrite("App.java");
+                return "{\"passed\":false,\"output\":\"[ERROR] AppTest.setUp:22 Status expected:<404> but was:<200>\"}";
+            }
+            if ("submit_checkpoint".equals(invocation.getArgument(0))) session.complete("verified");
+            return "{}";
+        });
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectPath = projectRoot.toString();
+
+        assertTrue(runtime(model, registry).runDetailed(data, WorkspaceAgentMode.DEVELOPMENT,
+                Set.of(), "develop", message -> { }).completed());
+        var history = model.histories.get(2);
+        assertEquals("tool", history.get(history.size() - 2).role());
+        assertEquals("user", history.get(history.size() - 1).role());
+        assertTrue(history.get(history.size() - 1).content().contains("failing test setup"));
+    }
+
     private ToolModelResponse response(String id, String name, String arguments) {
         return new ToolModelResponse(
                 ToolChatMessage.assistant("", List.of(new ToolCall(id, name, arguments))),

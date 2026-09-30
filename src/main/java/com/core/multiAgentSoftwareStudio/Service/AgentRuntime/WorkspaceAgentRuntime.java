@@ -148,6 +148,7 @@ public class WorkspaceAgentRuntime {
                     continue;
                 }
 
+                String runtimeGuidance = "";
                 for (ToolCall call : response.message().toolCalls()) {
                     if (maxToolCalls > 0 && session.toolCalls() >= maxToolCalls) {
                         logger.accept("   Tool Agent stopped at the current session tool-call limit.");
@@ -195,11 +196,20 @@ public class WorkspaceAgentRuntime {
                     }
                     WorkspaceAgentStagnationTracker.Decision stagnation =
                             stagnationTracker.observe(call, result, session);
+                    if (!stagnation.guidance().isBlank()) {
+                        runtimeGuidance = stagnation.guidance();
+                    }
                     if (stagnation.stop()) {
                         logger.accept("   Tool Agent stopped after detecting stagnation: " + stagnation.reason() + ".");
                         return finishFailure(session, auditSession, WorkspaceAgentStopReason.STAGNATED,
                                 lastToolName, lastToolResult, stagnation.reason());
                     }
+                }
+                if (!runtimeGuidance.isBlank()) {
+                    // 一个响应的全部 tool_call_id 配对完成后再交付提示，保持兼容接口消息序列合法。
+                    session.messages().add(ToolChatMessage.user(runtimeGuidance));
+                    auditService.recordRuntimeGuidance(auditSession, session, runtimeGuidance);
+                    logger.accept("   Repeated verification failure: diagnostic guidance added before the next attempt.");
                 }
                 WorkspaceAgentContextCompactor.Result compaction =
                         contextCompactor.compact(session, lastToolName, lastToolResult,
@@ -337,6 +347,7 @@ public class WorkspaceAgentRuntime {
                     several related source files instead of spending one model turn per file. Use bash for builds,
                     tests and diagnosis. If a patch reports a context mismatch, read the current file and rebase
                     the patch; do not switch to repeated one-file shell writes.
+                    After a coherent production/test edit, compile and run the relevant tests before further refactoring.
                     Bash runs in a restricted container; it can change project files, so inspect current disk state after it.
                     Use submit_checkpoint(scope=progress) for full compile and all current tests while work continues.
                     A progress pass is feedback, not project completion. Use submit_checkpoint(scope=final) only after
@@ -349,6 +360,8 @@ public class WorkspaceAgentRuntime {
                     use invalid values only when asserting rejection. Assert the observable behavior being tested,
                     including ordering, persistence changes, and HTTP responses; a request without assertions is not a test.
                     Do not assume generated database IDs start at a fixed value; use the ID returned by persistence or HTTP.
+                    Tests sharing an application context must isolate mutable state with controlled fixtures or a fresh context.
+                    Do not assume an initially empty store or exact record count unless each test establishes that state.
                     """;
         }
         return """

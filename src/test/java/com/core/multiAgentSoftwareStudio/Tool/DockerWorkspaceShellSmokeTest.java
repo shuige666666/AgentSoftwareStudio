@@ -55,6 +55,14 @@ class DockerWorkspaceShellSmokeTest {
             assertTrue(absoluteCwd.execution().completedSuccessfully());
             assertTrue(absoluteCwd.execution().output().contains("/workspace"));
 
+            // Maven 能启动 JVM 不代表 java / jar 在 PATH 中；覆盖登录 shell 曾抹去镜像 PATH 的缺陷。
+            var javaTools = sandbox.runWorkspaceCommand(shell,
+                    "command -v java && command -v jar && java -version && jar --version",
+                    "/workspace", 30_000);
+            assertTrue(javaTools.execution().completedSuccessfully(), javaTools.execution().output());
+            assertTrue(javaTools.execution().output().contains("/usr/local/openjdk-17/bin/java"));
+            assertTrue(javaTools.execution().output().contains("/usr/local/openjdk-17/bin/jar"));
+
             // 开发 Agent 常把构建输出接到 tail；前序失败必须仍报告给工具调用方。
             var pipedFailure = sandbox.runWorkspaceCommand(shell,
                     "false | tail -n 1", "/workspace", 30_000);

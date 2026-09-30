@@ -173,6 +173,15 @@ public class ToolCallAuditService {
         append(auditSession, workspaceSession, event);
     }
 
+    /** 保存实际交付模型的重复失败提示，便于区分提示已接入与修复效果已发生。 */
+    public void recordRuntimeGuidance(ToolCallAuditSession auditSession,
+                                      WorkspaceAgentSession workspaceSession, String guidance) {
+        ObjectNode event = baseEvent(auditSession, workspaceSession, "RUNTIME_GUIDANCE");
+        event.put("modelTurn", workspaceSession.modelTurns());
+        putLimited(event, "guidance", redactText(guidance), config.getMaxResultChars());
+        append(auditSession, workspaceSession, event);
+    }
+
     /**
      * 会话所有退出路径统一写入停止原因和真实变更文件，便于事后重建时间线。
      */

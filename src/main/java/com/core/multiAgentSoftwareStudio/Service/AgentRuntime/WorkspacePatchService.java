@@ -12,12 +12,17 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * 在真实工作区应用多文件补丁；先检查全部匹配，再逐文件写入并报告实际落盘结果。
  */
 @Service
 public class WorkspacePatchService {
+
+    private static final Pattern UNIFIED_RANGE = Pattern.compile(
+            "^@@ -\\d+(?:,(\\d+))? \\+\\d+(?:,(\\d+))? @@.*$");
+    private static final Pattern NATIVE_END = Pattern.compile("(?m)^\\h*\\*\\*\\* End Patch\\h*(?:\\R\\s*)?\\z");
 
     public record PatchResult(boolean ok, List<String> applied, String failedPath,
                               String error, String message) { }
@@ -29,8 +34,9 @@ public class WorkspacePatchService {
      */
     public PatchResult apply(String patch, WorkspaceAgentSession session) {
         List<Change> changes;
+        List<String> warnings = new ArrayList<>();
         try {
-            changes = prepare(patch, session);
+            changes = prepare(patch, session, warnings);
         } catch (PatchException e) {
             return new PatchResult(false, List.of(), e.path, e.code, e.getMessage());
         }
@@ -56,12 +62,15 @@ public class WorkspacePatchService {
                         "WRITE_FAILED", e.getMessage());
             }
         }
-        return new PatchResult(true, List.copyOf(applied), "", "", "Patch applied");
+        String message = "Patch applied; file writes only, not compilation/test success.";
+        if (!warnings.isEmpty()) message += " " + String.join(" ", warnings.stream().limit(3).toList());
+        return new PatchResult(true, List.copyOf(applied), "", "", message);
     }
 
-    private List<Change> prepare(String patch, WorkspaceAgentSession session) {
+    private List<Change> prepare(String patch, WorkspaceAgentSession session, List<String> warnings) {
         if (patch == null || patch.isBlank()) throw failure("", "EMPTY_PATCH", "Patch is required");
-        if (!patch.stripLeading().startsWith("*** Begin Patch")) patch = convertUnifiedDiff(patch);
+        patch = normalizeEnvelope(patch);
+        if (!patch.stripLeading().startsWith("*** Begin Patch")) patch = convertUnifiedDiff(patch, warnings);
         else patch = patch.stripLeading();
         String[] lines = patch.replace("\r\n", "\n").split("\n", -1);
         if (!"*** Begin Patch".equals(lines[0])) {
@@ -119,7 +128,8 @@ public class WorkspacePatchService {
                         while (index < lines.length && !lines[index].startsWith("*** ")
                                 && !lines[index].startsWith("@@")) {
                             String line = lines[index++];
-                            if (line.isEmpty()) throw failure(relative, "PATCH_FORMAT", "Hunk lines need a prefix");
+                            // 模型可能省略空行前的上下文空格；仍须匹配磁盘空行，不能凭空插入内容。
+                            if (line.isEmpty()) line = " ";
                             char prefix = line.charAt(0);
                             String content = line.substring(1);
                             if (prefix == ' ' || prefix == '-') oldLines.add(content);
@@ -154,8 +164,18 @@ public class WorkspacePatchService {
         return List.copyOf(changes.values());
     }
 
+    /** 明确的原生文件操作片段只补外围标记，不改变正文或猜测应删除的源码。 */
+    private String normalizeEnvelope(String patch) {
+        String fragment = patch.stripLeading();
+        if (!fragment.startsWith("*** Add File: ") && !fragment.startsWith("*** Update File: ")
+                && !fragment.startsWith("*** Delete File: ")) return patch;
+        var ending = NATIVE_END.matcher(fragment);
+        if (ending.find()) fragment = fragment.substring(0, ending.start());
+        return "*** Begin Patch\n" + fragment + (fragment.endsWith("\n") ? "" : "\n") + "*** End Patch\n";
+    }
+
     /** 模型若返回标准 unified diff，转换为同一套已预检的多文件补丁语义。 */
-    private String convertUnifiedDiff(String patch) {
+    private String convertUnifiedDiff(String patch, List<String> warnings) {
         String[] lines = patch.replace("\r\n", "\n").split("\n", -1);
         StringBuilder converted = new StringBuilder("*** Begin Patch\n");
         int index = 0;
@@ -168,7 +188,8 @@ public class WorkspacePatchService {
                     index++;
                     continue;
                 }
-                throw failure("", "PATCH_FORMAT", "Expected unified diff file header");
+                throw failure("", "PATCH_FORMAT", "Use native file operations (*** Update/Add/Delete File: path with @@ hunks),"
+                        + " or unified diff ---/+++ file headers; do not mix the formats");
             }
             String oldPath = lines[index++].substring(4).strip();
             String newPath = lines[index++].substring(4).strip();
@@ -181,9 +202,16 @@ public class WorkspacePatchService {
                     .append(" File: ").append(path).append('\n');
             files++;
             boolean hunkSeen = false;
+            String hunkHeader = "";
+            int oldCount = 0;
+            int newCount = 0;
             while (index < lines.length && !isUnifiedHeader(lines, index)) {
                 String line = lines[index++];
                 if (line.startsWith("@@ ")) {
+                    if (!add && !delete) warnRangeMismatch(path, hunkHeader, oldCount, newCount, warnings);
+                    hunkHeader = line;
+                    oldCount = 0;
+                    newCount = 0;
                     hunkSeen = true;
                     if (!add && !delete) converted.append("@@\n");
                     continue;
@@ -201,12 +229,30 @@ public class WorkspacePatchService {
                         && line.charAt(0) != ' ')) {
                     throw failure(path, "PATCH_FORMAT", "Invalid unified diff hunk line");
                 }
+                if (line.charAt(0) != '+') oldCount++;
+                if (line.charAt(0) != '-') newCount++;
                 if (!delete) converted.append(line).append('\n');
             }
+            if (!add && !delete) warnRangeMismatch(path, hunkHeader, oldCount, newCount, warnings);
             if (!hunkSeen) throw failure(path, "PATCH_FORMAT", "Unified diff file has no hunk");
         }
         if (files == 0) throw failure("", "PATCH_FORMAT", "No unified diff files found");
         return converted.append("*** End Patch\n").toString();
+    }
+
+    /** 行数不可靠时继续按唯一上下文应用，但反馈可能把替换误写成插入的证据。 */
+    private void warnRangeMismatch(String path, String header, int oldCount, int newCount,
+                                   List<String> warnings) {
+        var range = UNIFIED_RANGE.matcher(header);
+        if (!range.matches()) return;
+        String expectedOld = range.group(1) == null ? "1" : range.group(1);
+        String expectedNew = range.group(2) == null ? "1" : range.group(2);
+        if (expectedOld.equals(Integer.toString(oldCount)) && expectedNew.equals(Integer.toString(newCount))) return;
+        if (warnings.size() < 3) warnings.add("Unified diff range mismatch in " + path
+                + ": declared old/new=" + expectedOld + "/" + expectedNew
+                + ", actual=" + oldCount + "/" + newCount
+                + ". Applied by exact context; '+' inserts content, so replacement must include '-' for removed text."
+                + " Read the affected file and compile/test before accepting it.");
     }
 
     private boolean isUnifiedHeader(String[] lines, int index) {

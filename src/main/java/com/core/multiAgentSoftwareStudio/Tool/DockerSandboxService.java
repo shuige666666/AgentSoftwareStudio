@@ -183,8 +183,8 @@ public class DockerSandboxService {
             String execId = dockerClient.execCreateCmd(shell.containerId())
                     .withAttachStdout(true).withAttachStderr(true)
                     .withWorkingDir(containerCwd)
-                    // 管道中 Maven 等前序命令失败时，不能被 tail 的零退出码掩盖。
-                    .withCmd("bash", "-o", "pipefail", "-lc", command)
+                    // 非登录 shell 保留镜像的 Java PATH；仍用 pipefail 防止 tail 掩盖构建失败。
+                    .withCmd("bash", "-o", "pipefail", "-c", command)
                     .exec().getId();
             WorkspaceOutputPreview preview = new WorkspaceOutputPreview();
             var callback = new com.github.dockerjava.api.async.ResultCallback.Adapter<Frame>() {

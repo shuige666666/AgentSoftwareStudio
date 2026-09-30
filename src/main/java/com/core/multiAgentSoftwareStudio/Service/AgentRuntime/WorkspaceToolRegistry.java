@@ -118,13 +118,26 @@ public class WorkspaceToolRegistry {
         register("list_files", "列出候选项目中的源码、测试和配置文件。", objectSchema(), this::listFiles);
         register("search_code", "在候选项目中搜索文本或符号，返回文件和行号。",
                 objectSchema("query", "string", "true", "glob", "string", "false"), this::searchCode);
-        register("read_files", "读取一个或多个项目文件并返回内容和 SHA-256。",
-                arrayPropertySchema("paths", true), this::readFiles);
+        register("read_files", "读取项目文件并返回完整文件 SHA-256。诊断先用 search_code 定位，再用可选 startLine/endLine 读取相关范围（从1开始，含结束行，对所有 paths 生效）；省略范围仍读整文件。片段内容不是完整文件，不可用它覆盖整文件。",
+                readFilesSchema(), this::readFiles);
         register("apply_edits", "原子应用一组精确文本替换；每个文件限一项，并携带 read_files 返回的 expectedHash。",
                 applyEditsSchema(), this::applyEdits);
-        register("apply_patch", "首选源码写入工具：一次补丁可新增、修改或删除多个相关文件。若上下文不匹配，先读取当前文件再重做补丁；返回实际落盘文件。",
+        register("apply_patch", """
+                首选源码写入工具，一次可编辑多个相关文件。推荐使用以下格式（路径相对项目根目录）：
+                *** Begin Patch
+                *** Update File: src/main/java/demo/Example.java
+                @@
+                -旧内容
+                +新内容
+                *** End Patch
+                Update 的上下文行以空格开头，删除行以 - 开头，新增行以 + 开头；不需要填写行号。
+                替换必须写出被删除的旧行；只有 + 的块表示插入，不会自动覆盖已有类或方法。
+                Add 使用 *** Add File: 路径，正文每行以 + 开头；Delete 使用 *** Delete File: 路径。
+                也兼容标准 unified diff，但不得混用两种格式。上下文不匹配时先读取当前文件再重做补丁。
+                返回实际落盘文件及提示；ok 只表示写入成功，仍须编译和测试。
+                """,
                 objectSchema("patch", "string", "true"), this::applyPatch);
-        register("bash", "在断网非 root 持久容器中运行编译、测试和诊断命令；常规源码修改使用 apply_patch。cwd 可用 . 或 /workspace 表示项目根目录，超时毫秒数可选。",
+        register("bash", "在断网非 root 持久容器中运行编译、测试和诊断命令；预装 Java 17 和 Maven，可直接运行 java、jar、mvn。Maven 只读依赖仓库为 /usr/share/maven/ref/repository，不是 ~/.m2；不预装 Python 或 unzip。使用 ./mvnw 前须确认项目中有该脚本。常规源码修改使用 apply_patch。cwd 可用 . 或 /workspace 表示项目根目录，超时毫秒数可选。",
                 objectSchema("command", "string", "true", "cwd", "string", "false",
                         "timeoutMillis", "integer", "false"), this::bash);
         register("submit_checkpoint", "冻结当前源码，在独立副本执行完整编译和全量已有测试；final 另做契约验收。",
@@ -215,7 +228,14 @@ public class WorkspaceToolRegistry {
         return result.toString();
     }
 
+    /** 支持精确行范围读取，减少诊断时的整文件重复输入；哈希始终对应磁盘完整文件。 */
     private String readFiles(JsonNode arguments, WorkspaceAgentSession session) {
+        boolean ranged = arguments.has("startLine") || arguments.has("endLine");
+        int startLine = arguments.path("startLine").asInt(1);
+        int endLine = arguments.path("endLine").asInt(Integer.MAX_VALUE);
+        if (ranged && (startLine < 1 || endLine < startLine)) {
+            return jsonError("INVALID_LINE_RANGE", "Use 1-based startLine <= endLine");
+        }
         ArrayNode files = objectMapper.createArrayNode();
         for (JsonNode item : arguments.path("paths")) {
             String relative = normalizeRelative(item.asText(), session);
@@ -234,8 +254,21 @@ public class WorkspaceToolRegistry {
             try {
                 String content = Files.readString(path, StandardCharsets.UTF_8);
                 file.put("sha256", sha256(content));
-                file.put("content", limit(content, MAX_FILE_CHARS));
-                file.put("truncated", content.length() > MAX_FILE_CHARS);
+                String selected = content;
+                if (ranged) {
+                    // 保留原始换行字节，片段可直接用于精确文本替换，不把 CRLF 改成 LF。
+                    String[] lines = content.split("(?<=\\n)", -1);
+                    int total = lines.length - (lines[lines.length - 1].isEmpty() ? 1 : 0);
+                    int last = Math.min(endLine, total);
+                    selected = String.join("", java.util.Arrays.copyOfRange(lines,
+                            Math.min(startLine - 1, total), Math.max(Math.min(startLine - 1, total), last)));
+                    file.put("startLine", startLine);
+                    file.put("endLine", last);
+                    file.put("totalLines", total);
+                    file.put("partial", startLine > 1 || last < total);
+                }
+                file.put("content", limit(selected, MAX_FILE_CHARS));
+                file.put("truncated", selected.length() > MAX_FILE_CHARS);
             } catch (IOException e) {
                 file.put("error", e.getMessage());
             }
@@ -728,6 +761,14 @@ public class WorkspaceToolRegistry {
         if (required) {
             schema.withArray("required").add(name);
         }
+        return schema;
+    }
+
+    /** 行范围是兼容可选项，原有 paths 调用保持有效。 */
+    private ObjectNode readFilesSchema() {
+        ObjectNode schema = arrayPropertySchema("paths", true);
+        schema.with("properties").putObject("startLine").put("type", "integer").put("minimum", 1);
+        schema.with("properties").putObject("endLine").put("type", "integer").put("minimum", 1);
         return schema;
     }
 

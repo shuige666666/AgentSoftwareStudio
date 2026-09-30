@@ -424,6 +424,47 @@ class WorkspaceToolRegistryTest {
         assertTrue(registry.actualChangedFiles(session).isEmpty());
     }
 
+    /** 片段读取保留 CRLF 与完整哈希，可以继续执行受哈希保护的精确编辑。 */
+    @Test
+    void readsLineRangeWithFullHashAndExactNewlines() throws Exception {
+        String original = "first\r\nsecond\r\nthird\r\n";
+        String path = "src/main/java/demo/Example.java";
+        Files.createDirectories(projectRoot.resolve(path).getParent());
+        Files.writeString(projectRoot.resolve(path), original, StandardCharsets.UTF_8);
+        var session = new WorkspaceAgentSession(projectRoot, WorkspaceAgentMode.IMPLEMENT,
+                new SoftwareStudioWorkflowData("test"), message -> { },
+                Map.of(path, original), Set.of(path));
+        String hash = readHash(session, path);
+        JsonNode result = objectMapper.readTree(registry.execute("read_files",
+                "{\"paths\":[\"src/main/java/demo/Example.java\"],\"startLine\":2,\"endLine\":2}", session)).at("/files/0");
+        assertEquals("second\r\n", result.path("content").asText());
+        assertEquals(hash, result.path("sha256").asText());
+        assertEquals(3, result.path("totalLines").asInt());
+        assertTrue(result.path("partial").asBoolean());
+        var edit = objectMapper.createObjectNode();
+        var item = edit.putArray("edits").addObject();
+        item.put("path", path).put("expectedHash", hash);
+        item.put("oldText", result.path("content").asText())
+                .put("newText", "changed\r\n");
+        JsonNode applied = objectMapper.readTree(registry.execute("apply_edits", edit.toString(), session));
+        assertTrue(applied.has("changedFiles"), applied.toString());
+        assertEquals("first\r\nchanged\r\nthird\r\n", Files.readString(projectRoot.resolve(path)));
+    }
+
+    /** 错误范围给出明确反馈，完整读取保持原语义。 */
+    @Test
+    void rejectsInvalidLineRangeAndPreservesFullRead() throws Exception {
+        Files.writeString(projectRoot.resolve("README.md"), "first\nsecond", StandardCharsets.UTF_8);
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, Map.of());
+        JsonNode invalid = objectMapper.readTree(registry.execute("read_files",
+                "{\"paths\":[\"README.md\"],\"startLine\":2,\"endLine\":1}", session));
+        assertEquals("INVALID_LINE_RANGE", invalid.path("error").asText());
+        JsonNode full = objectMapper.readTree(registry.execute("read_files",
+                "{\"paths\":[\"README.md\"]}", session)).at("/files/0");
+        assertEquals("first\nsecond", full.path("content").asText());
+        assertFalse(full.path("truncated").asBoolean());
+    }
+
     private WorkspaceAgentSession session(WorkspaceAgentMode mode, Map<String, String> baseline) {
         return new WorkspaceAgentSession(
                 projectRoot,
