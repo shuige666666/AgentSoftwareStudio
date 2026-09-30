@@ -108,6 +108,24 @@ public class BenchmarkCaseRegistry {
                                 支持文章的发布、修改、删除、查询和评论功能。
                                 提供可使用的 Web 页面和必要的自动化测试。
                                 """,
+                        SPRING_BASELINE_GATES),
+                new BenchmarkCase(
+                        "blog-form-behavior-v1",
+                        "博客表单行为基线 v1",
+                        """
+                                请生成 Java 17、Spring Boot 博客，使用默认 8080 端口和以下公开 HTTP 契约。
+                                GET /articles 返回 HTML 列表，每篇文章链接 /articles/{id}，支持 keyword 在标题/内容中搜索；
+                                GET /articles/new 返回 title/content 创建表单。
+                                POST /articles 接收表单 title（5-100 字符）、content（1-5000 字符），成功 302/303 跳转 /articles。
+                                GET /articles/{id} 显示完整内容、评论及 nickname/content 评论表单；
+                                GET /articles/{id}/edit 返回预填编辑表单；POST /articles/{id} 接收 title/content，
+                                成功 302/303 跳转该文章详情；POST /articles/{id}/delete 删除并 302/303 跳转 /articles。
+                                POST /articles/{id}/comments 接收 nickname（2-20 字符）、content（5-500 字符），
+                                成功 302/303 跳转文章详情，详情需展示评论内容及昵称。
+                                创建、修改、评论的非法输入返回 400（创建需保留表单），不能改坏已保存数据。
+                                查询详情、编辑、修改、删除、评论涉及不存在文章时均返回 404。
+                                可使用内存存储，保留必要的自动化测试；不要求登录。
+                                """,
                         SPRING_BASELINE_GATES)
         );
     }

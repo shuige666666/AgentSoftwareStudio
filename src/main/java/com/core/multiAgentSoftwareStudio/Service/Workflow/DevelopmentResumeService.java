@@ -71,6 +71,10 @@ public class DevelopmentResumeService {
                     .replaceFirst("(?s)^# User Request\\R\\R", "").strip();
             SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData(request);
             data.projectPath = root.toString();
+            if (Files.isRegularFile(metadata.resolve("behavior-check.json"))) {
+                data.behaviorCheckId = read(metadata, "behavior-check.json", com.fasterxml.jackson.databind.JsonNode.class)
+                        .path("checkId").asText();
+            }
             data.prd = read(metadata, "prd.json", PrdDocument.class);
             data.structure = read(metadata, "architecture.json", ProjectStructure.class);
             data.contract = read(metadata, "contract.json", ProjectContract.class);

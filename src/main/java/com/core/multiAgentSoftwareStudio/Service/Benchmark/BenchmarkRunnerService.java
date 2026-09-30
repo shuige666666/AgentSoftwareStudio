@@ -233,13 +233,20 @@ public class BenchmarkRunnerService {
         try {
             java.util.function.Consumer<String> caseLogger = message -> System.out.println(
                     "[Benchmark " + currentCase + "/" + totalCases + " " + benchmarkCase.id() + "] " + message);
+            String behaviorCheckId = BenchmarkBehaviorEvaluator.isBehaviorCase(benchmarkCase.id())
+                    ? benchmarkCase.id() : null;
             execution = planningSourceProjectId == null || planningSourceProjectId.isBlank()
-                    ? workflowService.generateProjectWithResult(benchmarkCase.prompt(), caseLogger)
-                    : replayMode == BenchmarkReplayMode.SAVED_MILESTONES
-                    ? workflowService.generateFromSavedPlanningWithResult(
-                            planningSourceProjectId, benchmarkCase.prompt(), caseLogger)
-                    : workflowService.generateFromSavedPlanningWithResult(
-                            planningSourceProjectId, benchmarkCase.prompt(), replayMode, caseLogger);
+                    ? behaviorCheckId == null
+                        ? workflowService.generateProjectWithResult(benchmarkCase.prompt(), caseLogger)
+                        : workflowService.generateProjectWithResult(benchmarkCase.prompt(), behaviorCheckId, caseLogger)
+                    : behaviorCheckId != null
+                        ? workflowService.generateFromSavedPlanningWithResult(
+                            planningSourceProjectId, benchmarkCase.prompt(), replayMode, behaviorCheckId, caseLogger)
+                        : replayMode == BenchmarkReplayMode.SAVED_MILESTONES
+                            ? workflowService.generateFromSavedPlanningWithResult(
+                                planningSourceProjectId, benchmarkCase.prompt(), caseLogger)
+                            : workflowService.generateFromSavedPlanningWithResult(
+                                planningSourceProjectId, benchmarkCase.prompt(), replayMode, caseLogger);
             phase = "QUALITY";
             BenchmarkQualityResult quality = qualityEvaluator.evaluate(benchmarkCase, execution);
             phase = "BEHAVIOR";

@@ -113,6 +113,8 @@ final class WorkspaceAgentContextCompactor {
                 ObjectNode result = (ObjectNode) MAPPER.readTree(message.content());
                 // 后续 patch/Bash 已改动文件时，即使没有再次读取，旧正文也不能继续当作当前版本。
                 result.path("changedFiles").forEach(path -> writtenLater.add(path.asText()));
+                // patch 的真实响应使用 applied，Bash 使用 changedFiles，两种写入都使旧正文失效。
+                result.path("applied").forEach(path -> { if (path.isTextual()) writtenLater.add(path.asText()); });
                 if (!isRead(toolNames.get(message.toolCallId()))) continue;
                 boolean changed = false;
                 for (var entry : result.path("files")) {

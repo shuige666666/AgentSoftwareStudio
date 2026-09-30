@@ -107,7 +107,9 @@ public class DevelopmentMilestoneService {
 
     /** 模型与工具轮次使用同一全局预算，续接时按持久记录恢复已消耗值。 */
     public void persist(SoftwareStudioWorkflowData data) {
-        if (data.milestoneState == null || data.projectPath == null) return;
+        if (data.projectPath == null) return;
+        persistBehaviorCheck(data);
+        if (data.milestoneState == null) return;
         DevelopmentMilestoneState state = data.milestoneState;
         data.milestoneState = new DevelopmentMilestoneState(state.schemaVersion(), state.tasks(),
                 data.developmentModelTurnsUsed, data.developmentToolCallsUsed, state.lastFailure());
@@ -130,6 +132,27 @@ public class DevelopmentMilestoneService {
             }
         } catch (IOException e) {
             throw new IllegalStateException("Unable to persist development milestone state", e);
+        }
+    }
+
+    /** 平台保存独立检查的绑定，续接沿用同一判卷，不让候选工具改写检查标识。 */
+    private void persistBehaviorCheck(SoftwareStudioWorkflowData data) {
+        if (data.behaviorCheckId == null || data.behaviorCheckId.isBlank()) return;
+        if (!com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkBehaviorEvaluator.isBehaviorCase(data.behaviorCheckId)) {
+            throw new IllegalArgumentException("Unknown public behavior check: " + data.behaviorCheckId);
+        }
+        try {
+            Path metadata = Path.of(data.projectPath).resolve(".software-studio");
+            if (Files.isSymbolicLink(metadata)) throw new IOException("Linked metadata is not allowed");
+            Files.createDirectories(metadata);
+            Path target = metadata.resolve("behavior-check.json");
+            if (Files.isSymbolicLink(target)) throw new IOException("Linked check binding is not allowed");
+            String content = mapper.writeValueAsString(java.util.Map.of("checkId", data.behaviorCheckId));
+            if (!Files.exists(target) || !Files.readString(target).equals(content)) {
+                Files.writeString(target, content, java.nio.charset.StandardCharsets.UTF_8);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to persist public behavior check binding", e);
         }
     }
 

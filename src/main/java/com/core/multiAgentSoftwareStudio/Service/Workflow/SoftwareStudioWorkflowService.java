@@ -72,8 +72,15 @@ public class SoftwareStudioWorkflowService {
     public WorkflowExecutionResult generateProjectWithResult(
             String userRequest,
             Consumer<String> eventListener) {
+        return generateProjectWithResult(userRequest, null, eventListener);
+    }
+
+    /** 基准入口在开发前绑定平台公开检查，普通生产请求保持未覆盖状态。 */
+    public WorkflowExecutionResult generateProjectWithResult(String userRequest, String behaviorCheckId,
+                                                              Consumer<String> eventListener) {
         Consumer<String> logger = eventListener == null ? message -> { } : eventListener;
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData(userRequest);
+        data.behaviorCheckId = behaviorCheckId;
         llmUsageMetricsService.beginTask();
         try {
             data = planningNodeService.requirements(data, logger);
@@ -131,12 +138,22 @@ public class SoftwareStudioWorkflowService {
                                                                         String expectedRequest,
                                                                         BenchmarkReplayMode replayMode,
                                                                         Consumer<String> eventListener) {
+        return generateFromSavedPlanningWithResult(sourceProjectId, expectedRequest, replayMode, null, eventListener);
+    }
+
+    /** 保存规划重放使用调用方显式指定的公开检查，不推断项目名称或业务关键词。 */
+    public WorkflowExecutionResult generateFromSavedPlanningWithResult(String sourceProjectId,
+                                                                        String expectedRequest,
+                                                                        BenchmarkReplayMode replayMode,
+                                                                        String behaviorCheckId,
+                                                                        Consumer<String> eventListener) {
         Consumer<String> logger = eventListener == null ? message -> { } : eventListener;
         SoftwareStudioWorkflowData saved = resumeService.load(sourceProjectId);
         if (expectedRequest == null || !saved.userRequest.strip().equals(expectedRequest.strip())) {
             throw new IllegalArgumentException("Saved planning requirement does not match the benchmark case");
         }
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData(saved.userRequest);
+        data.behaviorCheckId = behaviorCheckId;
         data.prd = saved.prd;
         data.structure = saved.structure;
         data.contract = saved.contract;
@@ -175,6 +192,7 @@ public class SoftwareStudioWorkflowService {
                                                        Consumer<String> logger) {
         // 旧外层修复预算已退出主链，运行摘要不能继续显示未使用的三加一额度。
         data.repairBudget = null;
+        milestoneService.persist(data);
         WorkspaceAgentRunResult development = batchGenerationService.generateProject(data, logger);
         if (!development.completed()) {
             milestoneService.recordFailure(data, "Development stopped: " + development.stopReason()

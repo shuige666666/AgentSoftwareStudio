@@ -461,7 +461,8 @@ public class DockerSandboxService {
                 .withWorkingDir("/app")
                 .withHostConfig(hostConfig)
                 .withExposedPorts(ExposedPort.tcp(8080))
-                .withCmd("sh", "-c", "mvn spring-boot:run")
+                // 行为检查只启动生产代码；生成测试仍由独立的 Maven test 门禁执行。
+                .withCmd("sh", "-c", "mvn -Dmaven.test.skip=true spring-boot:run")
                 .exec();
         try {
             dockerClient.startContainerCmd(container.getId()).exec();

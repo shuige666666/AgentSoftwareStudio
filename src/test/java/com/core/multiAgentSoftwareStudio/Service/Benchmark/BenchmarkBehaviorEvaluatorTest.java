@@ -99,6 +99,27 @@ class BenchmarkBehaviorEvaluatorTest {
         return server;
     }
 
+    /** 创建响应不符合契约时，依赖该资源的检查标为阻塞并交付可操作预期。 */
+    @Test
+    void marksDependentChecksBlockedWhenCreateFails() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> respond(exchange,
+                exchange.getRequestMethod().equals("POST") ? 200 : 404, "{}"));
+        server.start();
+        try {
+            var result = evaluator.evaluateAt("url-shortener-behavior-v1", base(server));
+            assertEquals("FAIL", result.status());
+            assertEquals(2, result.findings().stream().filter(f -> "BLOCKED".equals(f.status())).count());
+            var created = result.findings().getFirst();
+            assertTrue(created.request().contains("POST /api/links"));
+            assertTrue(created.expected().contains("201"));
+            assertTrue(created.expected().contains("https://example.org/docs"));
+            assertTrue(created.evidence().contains("HTTP 200"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private HttpServer pollFixture(boolean allowDuplicate) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         Map<String, Integer> counts = new HashMap<>(Map.of("A", 0, "B", 0));

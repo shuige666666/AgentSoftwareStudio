@@ -101,6 +101,12 @@ public class WorkspaceAgentRuntime {
         try {
             for (int turn = session.modelTurns() + 1; maxModelTurns <= 0 || turn <= maxModelTurns; turn++) {
                 logger.accept("   Tool model turn " + turn + "/" + limitLabel(maxModelTurns) + ".");
+                boolean closing = maxModelTurns > 0 && turn == Math.max(1,
+                        maxModelTurns - Math.min(8, Math.max(3, maxModelTurns / 6)));
+                if (mode == WorkspaceAgentMode.DEVELOPMENT
+                        && session.validationDue(limitsConfig.getValidation(), closing)) {
+                    validateCandidate(session, auditSession);
+                }
                 // 在预算约三分之二处先验证一次，给真实错误留下足够修复轮次。
                 if (mode == WorkspaceAgentMode.DEVELOPMENT && maxModelTurns >= 12
                         && turn == Math.max(1, maxModelTurns * 2 / 3)) {
@@ -149,6 +155,10 @@ public class WorkspaceAgentRuntime {
                 }
                 session.messages().add(response.message());
                 if (!response.hasToolCalls()) {
+                    if (mode == WorkspaceAgentMode.DEVELOPMENT
+                            && session.validationDue(limitsConfig.getValidation(), true)) {
+                        validateCandidate(session, auditSession);
+                    }
                     session.messages().add(ToolChatMessage.user(mode == WorkspaceAgentMode.DEVELOPMENT
                             ? developmentContinuationPrompt(session)
                             : "Do not claim completion in text. Use tools to inspect and verify the workspace, then call complete_stage."));
@@ -232,6 +242,19 @@ public class WorkspaceAgentRuntime {
                 + (maxModelTurns > 0 ? " within " + maxModelTurns + " model turns." : "."));
         return finishFailure(session, auditSession, WorkspaceAgentStopReason.MODEL_TURN_LIMIT,
                 lastToolName, lastToolResult, "Model-turn limit reached");
+    }
+
+    /** 工具响应配对后或收到结束声明时，将真实平台验证交回当前会话，不伪造工具调用。 */
+    private void validateCandidate(WorkspaceAgentSession session, ToolCallAuditSession auditSession) {
+        session.logger().accept("   Platform progress validation before the next model request.");
+        long started = System.nanoTime();
+        String feedback = toolRegistry.validateProgress(session);
+        if (feedback != null && !feedback.isBlank()) {
+            session.messages().add(ToolChatMessage.user(feedback));
+            auditService.recordRuntimeGuidance(auditSession, session,
+                    "Automatic validation durationMillis=" + (System.nanoTime() - started) / 1_000_000L
+                            + "; " + feedback);
+        }
     }
 
     /** 记录实际请求前的体积变化；必要目标超出预算时明确报告，不截断需求来制造达标。 */

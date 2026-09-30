@@ -11,7 +11,7 @@ public record BenchmarkBehaviorResult(String status, List<BenchmarkBehaviorFindi
     }
 
     public static BenchmarkBehaviorResult notApplicable() {
-        return new BenchmarkBehaviorResult("NOT_APPLICABLE", List.of(), null);
+        return new BenchmarkBehaviorResult("NOT_APPLICABLE", List.of(), "未注册独立行为检查；不代表业务通过");
     }
 
     public static BenchmarkBehaviorResult notRun(String reason) {

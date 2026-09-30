@@ -471,6 +471,97 @@ class WorkspaceAgentRuntimeTest {
                 "tool_calls");
     }
 
+    /** 中途验证在完整工具轮次后返回真实反馈，模型无需先主动提交 checkpoint。 */
+    @Test
+    void platformValidationReachesSameSessionBeforeFurtherEdits() throws Exception {
+        var model = new RecordingToolModel(List.of(response("edit", "apply_patch", "{}"),
+                response("read", "read_files", "{}"), response("fix", "apply_patch", "{}"),
+                response("final", "submit_checkpoint", "{\"scope\":\"final\"}")));
+        var registry = mock(WorkspaceToolRegistry.class);
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
+            WorkspaceAgentSession session = invocation.getArgument(2);
+            if ("apply_patch".equals(invocation.getArgument(0))) session.recordWrite("App.java");
+            if ("submit_checkpoint".equals(invocation.getArgument(0))) session.complete("verified");
+            return "{}";
+        });
+        when(registry.validateProgress(any())).thenAnswer(invocation -> {
+            WorkspaceAgentSession session = invocation.getArgument(0);
+            session.recordCheckpoint("frozen-hash", true, false);
+            session.recordAutomaticCheck();
+            session.recordBehaviorFeedback("Public behavior link.create: expected 201 but was 200; sourceHash=frozen-hash");
+            return session.unresolvedVerificationFailure();
+        });
+        var limits = new WorkspaceAgentLimitsConfig();
+        limits.getValidation().setIntervalTurns(2);
+        limits.getValidation().setQuietTurns(1);
+        var auditConfig = new WorkspaceAgentAuditConfig();
+        auditConfig.setEnabled(false);
+        var runtime = new WorkspaceAgentRuntime(model, registry, new WorkspaceService(new SourceCodePathService()),
+                new LlmUsageMetricsService(), limits, new ToolCallAuditService(new ObjectMapper(), auditConfig),
+                new com.core.multiAgentSoftwareStudio.Service.Workflow.DevelopmentMilestoneService(new ObjectMapper()));
+        var data = new SoftwareStudioWorkflowData("public requirements");
+        data.projectPath = projectRoot.toString();
+        assertTrue(runtime.runDetailed(data, WorkspaceAgentMode.DEVELOPMENT, Set.of(), "repair", ignored -> {}).completed());
+        var history = model.histories.get(2);
+        assertEquals("tool", history.get(history.size() - 2).role());
+        assertEquals("read", history.get(history.size() - 2).toolCallId());
+        assertEquals("user", history.getLast().role());
+        assertTrue(history.getLast().content().contains("expected 201 but was 200"));
+        verify(registry, times(1)).validateProgress(any());
+    }
+
+    /** 普通自测不能抹掉独立业务失败；未修改版本不重复触发自动验证。 */
+    @Test
+    void automaticValidationPreservesBusinessFailureAndSkipsUnchangedSource() {
+        var data = new SoftwareStudioWorkflowData("public requirements");
+        var session = new WorkspaceAgentSession(projectRoot, WorkspaceAgentMode.DEVELOPMENT,
+                data, ignored -> {}, java.util.Map.of(), Set.of());
+        var policy = new WorkspaceAgentLimitsConfig.ValidationPolicy();
+        policy.setIntervalTurns(2);
+        policy.setQuietTurns(1);
+        session.incrementModelTurns();
+        session.recordWrite("App.java");
+        assertEquals(false, session.validationDue(policy, false));
+        session.incrementModelTurns();
+        assertTrue(session.validationDue(policy, false));
+        session.recordCheckpoint("version1", true, false);
+        session.recordBehaviorFeedback("independent: expected 404 but was 200");
+        session.recordTestsPassed();
+        assertTrue(session.unresolvedVerificationFailure().contains("expected 404 but was 200"));
+        assertEquals(false, session.validationDue(policy, true));
+        session.recordWrite("App.java");
+        assertTrue(session.validationDue(policy, true));
+    }
+
+    /** 无工具的结束声明不能绕过反馈，会话继续接收真实失败而不是被文本宣布成功。 */
+    @Test
+    void textCompletionTriggersBoundedValidationBeforeContinuation() throws Exception {
+        var model = new RecordingToolModel(List.of(new ToolModelResponse(
+                ToolChatMessage.assistant("Done", List.of()), "stop"),
+                response("final", "submit_checkpoint", "{\"scope\":\"final\"}")));
+        var registry = mock(WorkspaceToolRegistry.class);
+        when(registry.snapshotWorkspace(any())).thenReturn(new LinkedHashMap<>());
+        when(registry.validateProgress(any())).thenAnswer(invocation -> {
+            WorkspaceAgentSession session = invocation.getArgument(0);
+            session.recordCheckpoint("current-source", false, false);
+            session.recordAutomaticCheck();
+            return "Public behavior expected 404 but was 200; sourceHash=current-source";
+        });
+        when(registry.execute(anyString(), anyString(), any())).thenAnswer(invocation -> {
+            ((WorkspaceAgentSession) invocation.getArgument(2)).block("repair still needed");
+            return "{}";
+        });
+        var data = new SoftwareStudioWorkflowData("public requirements");
+        data.projectPath = projectRoot.toString();
+        var result = runtime(model, registry).runDetailed(data, WorkspaceAgentMode.DEVELOPMENT,
+                Set.of(), "repair", ignored -> {});
+        assertEquals(false, result.completed());
+        assertTrue(model.histories.get(1).stream().anyMatch(message -> "user".equals(message.role())
+                && message.content().contains("expected 404 but was 200")));
+        verify(registry, times(1)).validateProgress(any());
+    }
+
     private WorkspaceAgentRuntime runtime(ToolCallingModel model, WorkspaceToolRegistry registry) {
         WorkspaceAgentAuditConfig auditConfig = new WorkspaceAgentAuditConfig();
         auditConfig.setEnabled(false);

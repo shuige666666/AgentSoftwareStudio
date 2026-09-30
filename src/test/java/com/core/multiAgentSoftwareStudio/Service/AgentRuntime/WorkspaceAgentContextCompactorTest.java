@@ -148,7 +148,7 @@ class WorkspaceAgentContextCompactorTest {
                 .put("content", "old-accurate-source");
         addRound(session, "read", "read_files", "{}", read.toString());
         addRound(session, "patch", "apply_patch", "{}",
-                "{\"changedFiles\":[\"App.java\"],\"ok\":true}");
+                "{\"ok\":true,\"applied\":[\"App.java\"],\"failedPath\":\"\",\"error\":\"\"}");
         session.recordWrite("App.java");
         var policy = new WorkspaceAgentLimitsConfig().getContext();
         policy.setCompactAtPercent(1);

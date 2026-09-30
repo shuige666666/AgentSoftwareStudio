@@ -54,6 +54,7 @@ class DevelopmentResumeServiceTest {
         milestones.initialize(data);
         data.developmentModelTurnsUsed = 12;
         data.developmentToolCallsUsed = 23;
+        data.behaviorCheckId = "poll-system-behavior-v1";
         milestones.persist(data);
         Path code = root.resolve("src/main/java/demo/App.java");
         Files.createDirectories(code.getParent());
@@ -69,6 +70,7 @@ class DevelopmentResumeServiceTest {
         assertEquals("Build a demo", resumed.userRequest);
         assertEquals(12, resumed.developmentModelTurnsUsed);
         assertEquals(23, resumed.developmentToolCallsUsed);
+        assertEquals("poll-system-behavior-v1", resumed.behaviorCheckId);
         assertEquals("create", resumed.milestoneState.current().id());
         assertTrue(resumed.codes.stream().anyMatch(source -> source.filename().endsWith("App.java")));
         assertThrows(IllegalArgumentException.class, () -> service.load("../outside"));

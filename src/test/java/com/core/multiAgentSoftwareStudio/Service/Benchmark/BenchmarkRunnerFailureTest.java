@@ -39,7 +39,7 @@ class BenchmarkRunnerFailureTest {
      */
     @Test
     void keepsDiagnosticReportWhenFailureBehaviorJudgeAlsoThrows() {
-        when(workflow.generateProjectWithResult(any(), any())).thenThrow(
+        when(workflow.generateProjectWithResult(any(), org.mockito.ArgumentMatchers.eq(benchmarkCase.id()), any())).thenThrow(
                 new WorkflowExecutionFailure("candidate", new IllegalStateException("checkpoint failed")));
         when(behavior.evaluate(any(), any())).thenThrow(new IllegalStateException("judge failed"));
 
@@ -52,7 +52,7 @@ class BenchmarkRunnerFailureTest {
 
     @Test
     void preservesProjectPathAfterWorkflowException() {
-        when(workflow.generateProjectWithResult(any(), any())).thenThrow(
+        when(workflow.generateProjectWithResult(any(), org.mockito.ArgumentMatchers.eq(benchmarkCase.id()), any())).thenThrow(
                 new WorkflowExecutionFailure("candidate", new UnsupportedOperationException("immutable")));
         when(behavior.evaluate(any(), any())).thenReturn(BenchmarkBehaviorResult.notRun("startup failed"));
 
@@ -65,7 +65,7 @@ class BenchmarkRunnerFailureTest {
     /** 固定规划样本仍进入普通判卷路径，开发入口复用已保存规划。 */
     @Test
     void routesFrozenPlanningCaseToReplayWorkflow() {
-        when(workflow.generateFromSavedPlanningWithResult(any(), any(), any())).thenThrow(
+        when(workflow.generateFromSavedPlanningWithResult(any(), any(), any(), any(), any())).thenThrow(
                 new WorkflowExecutionFailure("replay-candidate", new IllegalStateException("replay stopped")));
 
         var result = runner.runCase(benchmarkCase, 1, 1, 1, 1, "source-project");
@@ -73,14 +73,16 @@ class BenchmarkRunnerFailureTest {
         assertEquals("replay-candidate", result.projectPath());
         verify(workflow).generateFromSavedPlanningWithResult(
                 org.mockito.ArgumentMatchers.eq("source-project"),
-                org.mockito.ArgumentMatchers.eq("prompt"), any());
+                org.mockito.ArgumentMatchers.eq("prompt"),
+                org.mockito.ArgumentMatchers.eq(BenchmarkReplayMode.SAVED_MILESTONES),
+                org.mockito.ArgumentMatchers.eq(benchmarkCase.id()), any());
         verify(workflow, never()).generateProjectWithResult(any(), any());
     }
 
     /** 对照模式明确传给工作流，且仍沿用同一独立判卷入口。 */
     @Test
     void routesContinuousComparisonToReplayWorkflow() {
-        when(workflow.generateFromSavedPlanningWithResult(any(), any(), any(), any())).thenThrow(
+        when(workflow.generateFromSavedPlanningWithResult(any(), any(), any(), any(), any())).thenThrow(
                 new WorkflowExecutionFailure("continuous-candidate", new IllegalStateException("stopped")));
 
         var result = runner.runCase(benchmarkCase, 1, 1, 1, 1,
@@ -90,7 +92,8 @@ class BenchmarkRunnerFailureTest {
         verify(workflow).generateFromSavedPlanningWithResult(
                 org.mockito.ArgumentMatchers.eq("source-project"),
                 org.mockito.ArgumentMatchers.eq("prompt"),
-                org.mockito.ArgumentMatchers.eq(BenchmarkReplayMode.CONTINUOUS), any());
+                org.mockito.ArgumentMatchers.eq(BenchmarkReplayMode.CONTINUOUS),
+                org.mockito.ArgumentMatchers.eq(benchmarkCase.id()), any());
     }
 
     /**
@@ -101,7 +104,7 @@ class BenchmarkRunnerFailureTest {
         LlmUsageSnapshot usage = new LlmUsageSnapshot(1, 1, 0, 10, 0, 5, 3, 8, false);
         WorkflowExecutionResult execution = new WorkflowExecutionResult(
                 List.of(), true, "candidate", "", "", List.of(), "", 1, usage);
-        when(workflow.generateProjectWithResult(any(), any())).thenReturn(execution);
+        when(workflow.generateProjectWithResult(any(), org.mockito.ArgumentMatchers.eq(benchmarkCase.id()), any())).thenReturn(execution);
         when(quality.evaluate(any(), any())).thenReturn(new BenchmarkQualityResult(true, List.of()));
         when(behavior.evaluate(any(), any())).thenThrow(new UnsupportedOperationException("judge failed"));
 

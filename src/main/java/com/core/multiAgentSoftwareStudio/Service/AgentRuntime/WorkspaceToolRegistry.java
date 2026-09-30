@@ -145,7 +145,7 @@ public class WorkspaceToolRegistry {
         register("bash", "在断网非 root 持久容器中运行编译、测试和诊断命令；预装 Java 17 和 Maven，可直接运行 java、jar、mvn。Maven 只读依赖仓库为 /usr/share/maven/ref/repository，不是 ~/.m2；不预装 Python 或 unzip。使用 ./mvnw 前须确认项目中有该脚本。常规源码修改使用 apply_patch。cwd 可用 . 或 /workspace 表示项目根目录，超时毫秒数可选。",
                 objectSchema("command", "string", "true", "cwd", "string", "false",
                         "timeoutMillis", "integer", "false"), this::bash);
-        register("submit_checkpoint", "冻结当前源码，在独立副本执行完整编译和全量已有测试；final 另做契约验收。",
+        register("submit_checkpoint", "冻结当前源码，在独立副本执行完整编译和全量已有测试；编译通过时返回已绑定的公开行为检查。progress 的业务失败作为修复反馈；final 必须通过完整契约及已绑定业务检查。未覆盖项不代表业务通过。",
                 objectSchema("summary", "string", "true", "scope", "string", "true",
                         "milestoneId", "string", "false"), this::submitCheckpoint);
         register("restore_checkpoint", "恢复最近接受的业务里程碑源码版本，保留当前候选备份。",
@@ -528,11 +528,25 @@ public class WorkspaceToolRegistry {
     /** 正式快照的失败或通过同样更新压缩摘要，避免只记住最后一次文件读取。 */
     private void recordCheckpointFeedback(WorkspaceAgentSession session,
                                           WorkspaceCheckpointService.CheckpointResult result) {
+        if ("PASS".equals(result.behavior().status()) || "FAIL".equals(result.behavior().status())) {
+            session.recordBehaviorFeedback(result.behavior().passed() ? "" : "Public behavior checks sourceHash="
+                    + result.sourceHash() + ": " + objectMapper.valueToTree(result.behavior()));
+        }
         if ("PASSED".equals(result.status())) {
             session.clearVerificationFailure();
-        } else if (!result.failureOutput().isBlank()) {
+        } else if (!"BLOCKED".equals(result.status()) && !result.failureOutput().isBlank()) {
             session.recordVerificationFailure("checkpoint " + result.scope() + ": " + result.failureOutput());
         }
+    }
+
+    /** 平台主动验证只交付版本化证据，不自动接受任务或宣布交付。 */
+    public String validateProgress(WorkspaceAgentSession session) {
+        var result = checkpointService.verify(session, "progress", "Platform periodic validation");
+        recordCheckpointFeedback(session, result);
+        session.recordAutomaticCheck();
+        return "Platform validation of current candidate; this does not accept a milestone or complete delivery. "
+                + "Inspect failures and fix production code or incorrect tests according to the public contract; "
+                + "preserve valid assertions. " + objectMapper.valueToTree(result);
     }
 
     /** 回滚只针对最近通过的能力快照，当前候选先备份以便人工检查。 */

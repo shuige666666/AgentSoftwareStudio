@@ -39,6 +39,97 @@ import static org.mockito.Mockito.when;
 class WorkspaceCheckpointServiceTest {
     @TempDir Path root;
 
+    /** 自测绿色不能掩盖 HTTP 失败；progress 提供反馈，final 必须通过独立检查。 */
+    @Test
+    void publicBehaviorFailureBlocksFinalAndRechecksAfterRepair() throws Exception {
+        Files.writeString(root.resolve("pom.xml"), "<project/>");
+        var sandbox = mock(DockerSandboxService.class);
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp -DskipTests compile")))
+                .thenReturn(new SandboxExecutionResult("compile", 0, "BUILD SUCCESS", 1, false, null));
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp test")))
+                .thenReturn(new SandboxExecutionResult("test", 0, "Tests run: 1, Failures: 0, Errors: 0, Skipped: 0", 1, false, null));
+        var profiles = mock(ProjectProfileService.class);
+        when(profiles.evaluate(any(), any(), any(), any())).thenReturn(ProjectQualityPolicyResult.empty());
+        var behavior = mock(com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkBehaviorEvaluator.class);
+        var failed = com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult.fromFindings(List.of(
+                new com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorFinding("link.create", false,
+                        "HTTP 200", "FAIL", "POST /api/links {url:https://example.org/docs}", "201; code 非空")));
+        var passed = com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult.fromFindings(List.of(
+                new com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorFinding("link.create", true, "HTTP 201")));
+        when(behavior.evaluate(eq("url-shortener-behavior-v1"), any())).thenAnswer(invocation -> {
+            Path work = Path.of(invocation.getArgument(1, String.class));
+            assertTrue(work.endsWith("behavior-work"));
+            assertFalse(work.equals(root));
+            // 检查过程也不能改写候选或冻结的 source。
+            Files.writeString(work.resolve("pom.xml"), "verification-only mutation");
+            return failed;
+        });
+        var data = new SoftwareStudioWorkflowData("public contract");
+        data.projectPath = root.toString();
+        data.projectProfile = ProjectProfile.java17SpringBoot();
+        data.behaviorCheckId = "url-shortener-behavior-v1";
+        data.contract = new ProjectContract(List.of(), List.of(), List.of(), List.of());
+        var session = new WorkspaceAgentSession(root, WorkspaceAgentMode.DEVELOPMENT, data, ignored -> {}, Map.of(), Set.of());
+        var service = new WorkspaceCheckpointService(sandbox, new VerificationResultService(), profiles,
+                new WorkspaceService(new SourceCodePathService()), new RunJournalService(), new ObjectMapper(), behavior);
+        var progress = service.verify(session, "progress", "mid-development");
+        assertEquals("PASSED", progress.status());
+        assertEquals("FAIL", progress.behavior().status());
+        assertFalse(progress.allowCompletion());
+        assertTrue(progress.failureOutput().contains("sourceHash=" + progress.sourceHash()));
+        var finalFailed = service.verify(session, "final", "complete");
+        assertEquals("FAILED", finalFailed.status());
+        assertTrue(finalFailed.reusedVerification());
+        assertFalse(finalFailed.allowCompletion());
+        assertEquals("<project/>", Files.readString(root.resolve("pom.xml")));
+        assertEquals("<project/>", Files.readString(Path.of(finalFailed.snapshotPath()).resolve("pom.xml")));
+        when(behavior.evaluate(eq("url-shortener-behavior-v1"), any())).thenReturn(passed);
+        Files.writeString(root.resolve("pom.xml"), "<project><!-- repaired --></project>");
+        session.recordWrite("pom.xml");
+        var fixed = service.verify(session, "final", "repaired");
+        assertTrue(fixed.allowCompletion());
+        assertNotEquals(finalFailed.sourceHash(), fixed.sourceHash());
+        when(behavior.evaluate(eq("url-shortener-behavior-v1"), any())).thenReturn(
+                com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult.environmentError("Docker unavailable"));
+        var unavailable = service.verify(session, "final", "recheck");
+        assertEquals("BLOCKED", unavailable.status());
+        assertFalse(unavailable.allowCompletion());
+        verify(behavior, times(4)).evaluate(eq("url-shortener-behavior-v1"), any());
+    }
+
+    /** 生成测试红色时独立业务仍可判卷，但业务通过不能放行失败测试。 */
+    @Test
+    void evaluatesBehaviorDespiteFailedGeneratedTests() throws Exception {
+        Files.writeString(root.resolve("pom.xml"), "<project/>");
+        var sandbox = mock(DockerSandboxService.class);
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp -DskipTests compile")))
+                .thenReturn(new SandboxExecutionResult("compile", 0, "BUILD SUCCESS", 1, false, null));
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp test")))
+                .thenReturn(new SandboxExecutionResult("test", 1, "Assertion failure", 1, false, null));
+        var behavior = mock(com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkBehaviorEvaluator.class);
+        when(behavior.evaluate(any(), any())).thenReturn(
+                com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult.fromFindings(List.of(
+                        new com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorFinding("poll.create", true, "HTTP 201"))));
+        var data = new SoftwareStudioWorkflowData("public contract");
+        data.projectPath = root.toString();
+        data.projectProfile = ProjectProfile.java17SpringBoot();
+        data.behaviorCheckId = "poll-system-behavior-v1";
+        var session = new WorkspaceAgentSession(root, WorkspaceAgentMode.DEVELOPMENT, data, ignored -> {}, Map.of(), Set.of());
+        var service = new WorkspaceCheckpointService(sandbox, new VerificationResultService(), mock(ProjectProfileService.class),
+                new WorkspaceService(new SourceCodePathService()), new RunJournalService(), new ObjectMapper(), behavior);
+        var result = service.verify(session, "final", "ready");
+        assertEquals("PASS", result.behavior().status());
+        assertEquals("FAILED", result.status());
+        assertFalse(result.allowCompletion());
+        assertTrue(result.failureOutput().contains("Assertion failure"));
+        when(behavior.evaluate(any(), any())).thenReturn(
+                com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult.environmentError("Docker unavailable"));
+        var testAndEnvironmentFailure = service.verify(session, "final", "retry");
+        assertEquals("FAILED", testAndEnvironmentFailure.status());
+        assertFalse(testAndEnvironmentFailure.allowCompletion());
+        assertTrue(testAndEnvironmentFailure.failureOutput().contains("Assertion failure"));
+    }
+
     /** 正式冻结验证将新报告的失败方法和源码位置交还会话，不改写原日志或放行失败。 */
     @Test
     void includesFreshSurefireEvidenceInFailedCheckpoint() throws Exception {
@@ -115,6 +206,7 @@ class WorkspaceCheckpointServiceTest {
 
         var progress = service.verify(session, "progress", "first implementation");
         assertEquals("PASSED", progress.status());
+        assertEquals("NOT_APPLICABLE", progress.behavior().status());
         assertFalse(progress.allowCompletion());
         assertFalse(data.success);
         assertFalse(Files.exists(Path.of(progress.snapshotPath()).resolve("target/old.class")));

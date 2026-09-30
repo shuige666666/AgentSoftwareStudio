@@ -1,6 +1,8 @@
 package com.core.multiAgentSoftwareStudio.Service.AgentRuntime;
 
 import com.core.multiAgentSoftwareStudio.Model.Generation.ProjectQualityPolicyResult;
+import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult;
+import com.core.multiAgentSoftwareStudio.Service.Benchmark.BenchmarkBehaviorEvaluator;
 import com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ProjectContract;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.FailureKind;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.SandboxExecutionResult;
@@ -15,6 +17,7 @@ import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -44,7 +47,21 @@ public class WorkspaceCheckpointService {
                                    String reportPath, VerificationStepResult build,
                                    VerificationStepResult test, boolean contractPassed,
                                    List<String> contractBlockers, String failureOutput,
-                                   boolean allowCompletion, boolean reusedVerification) { }
+                                   boolean allowCompletion, boolean reusedVerification,
+                                   BenchmarkBehaviorResult behavior) {
+        public CheckpointResult {
+            // 兼容此前保存的 checkpoint；没有行为字段不能被解释为业务通过。
+            behavior = behavior == null ? BenchmarkBehaviorResult.notApplicable() : behavior;
+        }
+        public CheckpointResult(String scope, String status, String sourceHash, String snapshotPath,
+                                String reportPath, VerificationStepResult build, VerificationStepResult test,
+                                boolean contractPassed, List<String> contractBlockers, String failureOutput,
+                                boolean allowCompletion, boolean reusedVerification) {
+            this(scope, status, sourceHash, snapshotPath, reportPath, build, test, contractPassed,
+                    contractBlockers, failureOutput, allowCompletion, reusedVerification,
+                    BenchmarkBehaviorResult.notApplicable());
+        }
+    }
 
     public record RestoreResult(String milestoneId, String restoredHash, String backupPath,
                                 List<String> changedFiles) { }
@@ -55,16 +72,27 @@ public class WorkspaceCheckpointService {
     private final WorkspaceService workspace;
     private final RunJournalService journal;
     private final ObjectMapper mapper;
+    private final BenchmarkBehaviorEvaluator behaviorEvaluator;
 
     public WorkspaceCheckpointService(DockerSandboxService sandbox, VerificationResultService verification,
                                       ProjectProfileService profiles, WorkspaceService workspace,
                                       RunJournalService journal, ObjectMapper mapper) {
+        this(sandbox, verification, profiles, workspace, journal, mapper,
+                new BenchmarkBehaviorEvaluator(sandbox, mapper));
+    }
+
+    @Autowired
+    public WorkspaceCheckpointService(DockerSandboxService sandbox, VerificationResultService verification,
+                                      ProjectProfileService profiles, WorkspaceService workspace,
+                                      RunJournalService journal, ObjectMapper mapper,
+                                      BenchmarkBehaviorEvaluator behaviorEvaluator) {
         this.sandbox = sandbox;
         this.verification = verification;
         this.profiles = profiles;
         this.workspace = workspace;
         this.journal = journal;
         this.mapper = mapper;
+        this.behaviorEvaluator = behaviorEvaluator;
     }
 
     /** 会话异常或达到轮次上限时，仍对保留的候选执行一次最终独立验收。 */
@@ -156,15 +184,43 @@ public class WorkspaceCheckpointService {
                         .map(finding -> finding.gate() + ": " + finding.evidence()).toList();
                 contractPassed = blockers.isEmpty();
             }
+            // 即使生成测试失败，生产代码能编译时仍给出独立业务证据；测试失败仍阻断交付。
+            String checkId = session.workflowData().behaviorCheckId;
+            BenchmarkBehaviorResult behavior = BenchmarkBehaviorResult.notApplicable();
+            if (checkId != null && !checkId.isBlank()) {
+                if (!BenchmarkBehaviorEvaluator.isBehaviorCase(checkId)) {
+                    throw new IllegalArgumentException("Unknown public behavior check: " + checkId);
+                }
+                behavior = BenchmarkBehaviorResult.notRun("生产构建未通过，行为检查未执行");
+                if (build.passed()) {
+                    Path behaviorWork = reportDirectory.resolve("behavior-work");
+                    Files.createDirectories(behaviorWork);
+                    copyCandidate(source, behaviorWork);
+                    behavior = behaviorEvaluator.evaluate(checkId, behaviorWork.toString());
+                }
+                mapper.writerWithDefaultPrettyPrinter().writeValue(reportDirectory.resolve("behavior.json").toFile(), behavior);
+            }
+            boolean behaviorRequired = finalScope && checkId != null && !checkId.isBlank();
             boolean sameSource = hash.equals(fingerprint(root));
             if (!sameSource) blockers = concat(blockers, "Candidate changed during isolated verification");
-            boolean passed = build.passed() && test.passed() && contractPassed && sameSource;
+            boolean passed = build.passed() && test.passed() && contractPassed && sameSource
+                    && (!behaviorRequired || behavior.passed());
             boolean allowCompletion = finalScope && passed;
+            if (behaviorRequired) {
+                // 修复后重新验收只展示当前版本的业务结论，避免保留旧版本的失败警告。
+                session.workflowData().validationWarnings.removeIf(warning -> warning.startsWith("Public behavior check " + checkId + ": "));
+            }
+            if (behaviorRequired && !behavior.passed()) {
+                session.workflowData().validationWarnings.add("Public behavior check " + checkId + ": "
+                        + behavior.status() + "; sourceHash=" + hash + "; see " + reportDirectory.resolve("behavior.json"));
+            }
             session.recordCheckpoint(hash, passed, finalScope);
             session.workflowData().success = allowCompletion;
             if (finalScope) session.workflowData().finalVerificationStarted = true;
             String status = passed ? "PASSED"
                     : build.failureKind() == FailureKind.ENVIRONMENT || test.failureKind() == FailureKind.ENVIRONMENT
+                    || behaviorRequired && build.passed() && test.passed() && contractPassed && sameSource
+                        && "ENVIRONMENT_ERROR".equals(behavior.status())
                     ? "BLOCKED" : "FAILED";
             String failureOutput = passed ? "" : shortOutput(!build.passed()
                     ? buildExecution.output() : !test.passed() && testExecution != null
@@ -174,9 +230,13 @@ public class WorkspaceCheckpointService {
                 String evidence = SurefireFailureFeedback.read(verificationWork, Map.of());
                 if (!evidence.isBlank()) failureOutput = evidence + "\n" + failureOutput;
             }
+            if (!behavior.passed() && !"NOT_APPLICABLE".equals(behavior.status())) {
+                failureOutput += "\nPublic behavior checks (sourceHash=" + hash + "): "
+                        + mapper.writeValueAsString(behavior);
+            }
             CheckpointResult result = new CheckpointResult(scope, status, hash, source.toString(),
                     reportDirectory.resolve("checkpoint.json").toString(), build, test, contractPassed,
-                    blockers.stream().limit(12).toList(), failureOutput, allowCompletion, reuse);
+                    blockers.stream().limit(12).toList(), failureOutput, allowCompletion, reuse, behavior);
             session.workflowData().lastCheckpointHash = hash;
             session.workflowData().lastCheckpointSnapshotPath = result.snapshotPath();
             session.workflowData().lastCheckpointReportPath = result.reportPath();

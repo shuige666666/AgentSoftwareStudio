@@ -40,6 +40,12 @@ public final class WorkspaceAgentSession {
     private boolean finalCheckpointPassed;
     private String unresolvedVerificationFailure = "";
     private int unresolvedFailureVersion = -1;
+    private String unresolvedBehaviorFailure = "";
+    private int behaviorFailureVersion = -1;
+    private int lastWriteTurn;
+    private int lastValidationTurn;
+    private int lastValidatedVersion = -1;
+    private int automaticChecks;
 
     public WorkspaceAgentSession(
             Path projectRoot,
@@ -59,6 +65,7 @@ public final class WorkspaceAgentSession {
             this.modelTurns = workflowData.developmentModelTurnsUsed;
             this.toolCalls = workflowData.developmentToolCallsUsed;
         }
+        this.lastValidationTurn = modelTurns;
     }
 
     public Path projectRoot() { return projectRoot; }
@@ -100,6 +107,7 @@ public final class WorkspaceAgentSession {
     public void recordWrite(String path) {
         changedFiles.add(path);
         writeVersion++;
+        lastWriteTurn = modelTurns;
         lastCheckpointPassed = false;
         finalCheckpointPassed = false;
     }
@@ -108,6 +116,8 @@ public final class WorkspaceAgentSession {
         lastCheckpointHash = hash == null ? "" : hash;
         lastCheckpointPassed = passed;
         finalCheckpointPassed = passed && finalScope;
+        lastValidationTurn = modelTurns;
+        lastValidatedVersion = writeVersion;
     }
 
     public void recordCompilePassed() { compiledVersion = writeVersion; }
@@ -131,8 +141,30 @@ public final class WorkspaceAgentSession {
         unresolvedFailureVersion = -1;
     }
 
-    public String unresolvedVerificationFailure() { return unresolvedVerificationFailure; }
-    public int unresolvedFailureVersion() { return unresolvedFailureVersion; }
+    public String unresolvedVerificationFailure() {
+        return unresolvedVerificationFailure + (unresolvedBehaviorFailure.isBlank() ? "" : "\n" + unresolvedBehaviorFailure);
+    }
+    public int unresolvedFailureVersion() {
+        return unresolvedVerificationFailure.isBlank() ? behaviorFailureVersion : unresolvedFailureVersion;
+    }
+
+    /** 业务失败只能由下一次独立行为检查更新，生成测试绿色不能清除它。 */
+    public void recordBehaviorFeedback(String failure) {
+        unresolvedBehaviorFailure = failure == null ? "" : failure;
+        behaviorFailureVersion = unresolvedBehaviorFailure.isBlank() ? -1 : writeVersion;
+    }
+
+    /** 在合法消息边界判断是否需要平台验证，同一未修改版本只验证一次。 */
+    public boolean validationDue(com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentLimitsConfig.ValidationPolicy policy,
+                                 boolean closing) {
+        return policy.isEnabled() && automaticChecks < policy.getMaxAutomaticChecks()
+                && writeVersion != lastValidatedVersion
+                && (closing || modelTurns - lastValidationTurn >= policy.getIntervalTurns()
+                    && (modelTurns - lastWriteTurn >= policy.getQuietTurns()
+                        || modelTurns - lastValidationTurn >= policy.getIntervalTurns() * 2));
+    }
+
+    public void recordAutomaticCheck() { automaticChecks++; }
 
     public void complete(String summary) {
         completed = true;

@@ -20,6 +20,7 @@ public class WorkspaceAgentLimitsConfig {
     private SessionLimit repairContract = new SessionLimit(16, 48);
     private StagnationPolicy stagnation = new StagnationPolicy();
     private ContextPolicy context = new ContextPolicy();
+    private ValidationPolicy validation = new ValidationPolicy();
 
     public SessionLimit forMode(WorkspaceAgentMode mode) {
         return switch (mode) {
@@ -50,6 +51,8 @@ public class WorkspaceAgentLimitsConfig {
     public StagnationPolicy getStagnation() { return stagnation; }
     public void setStagnation(StagnationPolicy stagnation) { if (stagnation != null) this.stagnation = stagnation; }
     public ContextPolicy getContext() { return context; }
+    public ValidationPolicy getValidation() { return validation; }
+    public void setValidation(ValidationPolicy value) { if (value != null) validation = value; }
     public void setContext(ContextPolicy context) { if (context != null) this.context = context; }
 
     public static class SessionLimit {
@@ -119,6 +122,22 @@ public class WorkspaceAgentLimitsConfig {
             if (value < 1 || value > 100) throw new IllegalArgumentException("Context percentage must be 1-100");
             this.compactAtPercent = value;
         }
+    }
+
+    /** 按轮次和编辑间隔验证候选，限制平台自动验证次数，避免每改一文件就全量测试。 */
+    public static class ValidationPolicy {
+        private boolean enabled = true;
+        private int intervalTurns = 8;
+        private int quietTurns = 2;
+        private int maxAutomaticChecks = 3;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean value) { enabled = value; }
+        public int getIntervalTurns() { return intervalTurns; }
+        public void setIntervalTurns(int value) { intervalTurns = requirePositive(value); }
+        public int getQuietTurns() { return quietTurns; }
+        public void setQuietTurns(int value) { quietTurns = requirePositive(value); }
+        public int getMaxAutomaticChecks() { return maxAutomaticChecks; }
+        public void setMaxAutomaticChecks(int value) { maxAutomaticChecks = requirePositive(value); }
     }
 
     private static int requirePositive(int value) {

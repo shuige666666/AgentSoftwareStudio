@@ -38,7 +38,7 @@ public class BenchmarkBehaviorEvaluator {
     }
 
     /**
-     * 仅新版两个案例需要行为判卷；启动失败与 Docker 异常分别记录。
+     * 仅显式注册的版本化规格执行行为判卷；启动失败与 Docker 异常分别记录。
      */
     public BenchmarkBehaviorResult evaluate(String caseId, String projectPath) {
         if (!isBehaviorCase(caseId)) {
@@ -78,8 +78,9 @@ public class BenchmarkBehaviorEvaluator {
         }
     }
 
-    static boolean isBehaviorCase(String caseId) {
-        return "url-shortener-behavior-v1".equals(caseId) || "poll-system-behavior-v1".equals(caseId);
+    public static boolean isBehaviorCase(String caseId) {
+        return "url-shortener-behavior-v1".equals(caseId) || "poll-system-behavior-v1".equals(caseId)
+                || "blog-form-behavior-v1".equals(caseId);
     }
 
     /**
@@ -89,6 +90,7 @@ public class BenchmarkBehaviorEvaluator {
         if (!isBehaviorCase(caseId)) {
             return BenchmarkBehaviorResult.notApplicable();
         }
+        if ("blog-form-behavior-v1".equals(caseId)) return new BlogBehaviorChecks(baseUri).evaluate();
         List<BenchmarkBehaviorFinding> findings = new ArrayList<>();
         if ("url-shortener-behavior-v1".equals(caseId)) {
             evaluateShortLinks(baseUri, findings);
@@ -117,6 +119,8 @@ public class BenchmarkBehaviorEvaluator {
                 "link.missing.visit", findings);
         findings.add(finding("link.missing.visit", missingVisit != null && missingVisit.statusCode() == 404, missingVisit));
         if (!createPassed) {
+            findings.add(blocked("link.query", "link.create"));
+            findings.add(blocked("link.visit", "link.create"));
             return;
         }
 
@@ -141,6 +145,10 @@ public class BenchmarkBehaviorEvaluator {
         boolean createPassed = created != null && created.statusCode() == 201 && !id.isBlank();
         findings.add(finding("poll.create", createPassed, created));
         if (!createPassed) {
+            for (String check : List.of("poll.initial", "poll.vote.first", "poll.result.first",
+                    "poll.vote.duplicate", "poll.result.afterDuplicate", "poll.vote.second", "poll.result.final")) {
+                findings.add(blocked(check, "poll.create"));
+            }
             return;
         }
 
@@ -207,9 +215,37 @@ public class BenchmarkBehaviorEvaluator {
     }
 
     private BenchmarkBehaviorFinding finding(String behavior, boolean passed, HttpResponse<String> response) {
+        String request = response == null ? "请求未取得响应" : response.request().method() + " "
+                + response.request().uri().getPath() + response.request().bodyPublisher()
+                .map(ignored -> "; 输入见公开检查约定").orElse("");
         return new BenchmarkBehaviorFinding(behavior, passed,
                 response == null ? "没有 HTTP 响应" : "HTTP " + response.statusCode()
-                        + ", body=" + concise(response.body()));
+                        + ", Location=" + response.headers().firstValue("location").orElse("")
+                        + ", body=" + concise(response.body()), passed ? "PASS" : "FAIL", request, expected(behavior));
+    }
+
+    /** 前置创建失败时保留未运行的检查，避免把缺失覆盖误写成已执行失败。 */
+    private BenchmarkBehaviorFinding blocked(String behavior, String prerequisite) {
+        return new BenchmarkBehaviorFinding(behavior, false, "Blocked by " + prerequisite,
+                "BLOCKED", "未执行", expected(behavior));
+    }
+
+    /** 预期来自平台公开契约，候选只能修复实现，不能改动判卷。 */
+    private String expected(String behavior) {
+        return switch (behavior) {
+            case "link.create" -> "POST /api/links {url:https://example.org/docs}: 201; code 非空; originalUrl 等于 url";
+            case "link.query" -> "GET /api/links/{code}: 200; code、originalUrl 与创建结果一致";
+            case "link.visit" -> "GET /{code}: 302; Location=https://example.org/docs";
+            case "link.missing.query", "link.missing.visit" -> "不存在的 code: 404";
+            case "poll.create" -> "POST /api/polls {question:选项测试,options:[A,B]}: 201; id 非空";
+            case "poll.initial" -> "GET /api/polls/{id}/results: 200; counts={A:0,B:0}";
+            case "poll.vote.first" -> "POST /api/polls/{id}/votes {voterId:alice,option:A}: 200 或 201";
+            case "poll.result.first", "poll.result.afterDuplicate" -> "GET results: 200; counts={A:1,B:0}";
+            case "poll.vote.duplicate" -> "POST votes {voterId:alice,option:B}: 409; 不增加票数";
+            case "poll.vote.second" -> "POST votes {voterId:bob,option:B}: 200 或 201";
+            case "poll.result.final" -> "GET results: 200; counts={A:1,B:1}";
+            default -> "见版本化公开契约";
+        };
     }
 
     private int availablePort() throws IOException {

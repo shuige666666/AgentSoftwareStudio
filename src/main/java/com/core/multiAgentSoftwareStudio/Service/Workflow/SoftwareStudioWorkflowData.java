@@ -65,6 +65,8 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public String lastCheckpointHash;
     public String lastCheckpointSnapshotPath;
     public String lastCheckpointReportPath;
+    // 仅由平台入口绑定公开行为规格，候选工具不能修改此标识。
+    public String behaviorCheckId;
     public boolean success;
     public boolean shouldFix;
     public boolean repairStopRequested;
