@@ -25,9 +25,9 @@ import static org.mockito.Mockito.when;
 
 class BatchGenerationServiceTest {
 
-    /** 多任务提示只展开当前契约，避免 Agent 在首个 checkpoint 前实现未来能力。 */
+    /** 顺序模式也提供完整未来契约，信息量不再成为策略对照中的额外变量。 */
     @Test
-    void includesOnlyCurrentMilestoneContract() {
+    void includesFullProjectAndEveryMilestoneContract() {
         WorkspaceAgentRuntime runtime = mock(WorkspaceAgentRuntime.class);
         when(runtime.runDetailed(any(), any(), any(), anyString(), any()))
                 .thenReturn(new WorkspaceAgentRunResult(true, null, 1, 0, List.of(), "", "", ""));
@@ -40,15 +40,35 @@ class BatchGenerationServiceTest {
         data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of(
                 slice("create-query", "/articles"), slice("comments", "/articles/{id}/comments")),
                 List.of(), "test");
+        data.contract = new ProjectContract(data.sliceDeliveryPlan.slices().stream()
+                .flatMap(slice -> slice.contract().endpoints().stream()).toList(), List.of(), List.of(), List.of());
 
         new BatchGenerationService(runtime).generateProject(data, message -> { });
 
         ArgumentCaptor<String> objective = ArgumentCaptor.forClass(String.class);
         verify(runtime).runDetailed(eq(data), any(), any(), objective.capture(), any());
         assertTrue(objective.getValue().contains("path=/articles"));
-        assertFalse(objective.getValue().contains("/articles/{id}/comments"));
+        assertTrue(objective.getValue().contains("/articles/{id}/comments"));
+        assertTrue(objective.getValue().startsWith(DevelopmentMilestoneObjective.projectContext(data)));
         assertFalse(objective.getValue().contains("FutureVoteTest.java"));
         assertTrue(objective.getValue().contains("Defer later endpoints"));
+    }
+
+    /** 建议式保留同一完整目标，压缩重建也不能恢复顺序门禁。 */
+    @Test
+    void advisoryUsesSameGoalAndAllowsMergedTasksAndDirectFinal() {
+        var data = new SoftwareStudioWorkflowData("complete project");
+        var tasks = List.of(new DevelopmentMilestoneState.Task("first", "first", List.of(), false, "", "", ""),
+                new DevelopmentMilestoneState.Task("second", "second", List.of(), false, "", "", ""));
+        data.milestoneState = new DevelopmentMilestoneState(2, tasks, 0, 0, "",
+                com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY, "");
+        String objective = DevelopmentMilestoneObjective.render(data);
+        assertTrue(objective.startsWith(DevelopmentMilestoneObjective.projectContext(data)));
+        assertTrue(objective.contains("combine tasks"));
+        assertTrue(objective.contains("milestoneIds"));
+        assertTrue(objective.contains("even if individual"));
+        assertFalse(objective.contains("Defer later endpoints"));
+        assertFalse(objective.contains("Current milestone:"));
     }
 
     private DeliverySlice slice(String id, String path) {

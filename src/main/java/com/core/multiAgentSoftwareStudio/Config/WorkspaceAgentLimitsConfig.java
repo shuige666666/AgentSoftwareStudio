@@ -99,10 +99,11 @@ public class WorkspaceAgentLimitsConfig {
     }
 
     /**
-     * 按估算 token 占用压缩历史，保留原始目标和最近完整的工具调用轮次。
+     * 按估算 token 占用压缩历史，完整工具轮次由工作预算决定保留范围。
      */
     public static class ContextPolicy {
         private int retainedModelTurns = 3;
+        // 最近轮数用于优先保留正文，不是提前移出全部更早源码的硬上限。
         private int maxLatestToolResultChars = 6_000;
         private int maxContextTokens = 64_000;
         // 工作预算与模型窗口分开，避免合法但冗长的历史拖慢开发和超时重试。

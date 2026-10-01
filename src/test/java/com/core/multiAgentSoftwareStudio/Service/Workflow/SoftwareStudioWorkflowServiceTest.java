@@ -114,6 +114,7 @@ class SoftwareStudioWorkflowServiceTest {
     @Test
     void comparisonReplaysSameDesignWithSelectableDevelopmentProtocol() {
         for (BenchmarkReplayMode mode : List.of(BenchmarkReplayMode.CURRENT_MILESTONES,
+                BenchmarkReplayMode.ADVISORY_MILESTONES,
                 BenchmarkReplayMode.CONTINUOUS)) {
             Fixture fixture = fixture();
             when(fixture.resume.load("source-project"))
@@ -129,7 +130,12 @@ class SoftwareStudioWorkflowServiceTest {
             if (mode == BenchmarkReplayMode.CONTINUOUS) {
                 verify(fixture.milestones, never()).initialize(any());
             } else {
-                verify(fixture.milestones).initialize(any());
+                ArgumentCaptor<SoftwareStudioWorkflowData> captured = ArgumentCaptor.forClass(SoftwareStudioWorkflowData.class);
+                verify(fixture.milestones).initialize(captured.capture());
+                assertEquals(mode == BenchmarkReplayMode.ADVISORY_MILESTONES
+                        ? com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY
+                        : com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED,
+                        captured.getValue().milestonePolicy);
             }
         }
     }
@@ -138,6 +144,32 @@ class SoftwareStudioWorkflowServiceTest {
         return new WorkspaceAgentRunResult(completed,
                 completed ? WorkspaceAgentStopReason.COMPLETED : WorkspaceAgentStopReason.MODEL_TURN_LIMIT,
                 2, 4, List.of(), "submit_checkpoint", "{}", "done");
+    }
+
+    /** 外层最终门禁通过时，只有顺序策略仍要求逐项接受；建议式不能因此假失败。 */
+    @Test
+    void finalPassingCandidateMayHavePendingAdvisoryTasks() {
+        for (var policy : com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.values()) {
+            var fixture = fixture();
+            when(fixture.generation.generateProject(any(), any())).thenAnswer(invocation -> {
+                SoftwareStudioWorkflowData data = invocation.getArgument(0);
+                var tasks = List.of(new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.Task(
+                        "a", "a", List.of(), false, "", "", ""),
+                        new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.Task(
+                        "b", "b", List.of(), false, "", "", ""));
+                data.milestoneState = new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState(
+                        2, tasks, 0, 0, "", policy, "");
+                return run(false);
+            });
+            when(fixture.checkpoint.verifyCandidate(any(), any())).thenAnswer(invocation -> {
+                SoftwareStudioWorkflowData data = invocation.getArgument(0);
+                data.success = true;
+                return null;
+            });
+            var result = fixture.service.generateProjectWithResult("same requirement", message -> { });
+            assertEquals(policy == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY,
+                    result.platformSuccess());
+        }
     }
 
     private Fixture fixture() {

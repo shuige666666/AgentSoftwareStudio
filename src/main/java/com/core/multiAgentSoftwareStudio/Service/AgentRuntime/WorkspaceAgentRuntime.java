@@ -86,6 +86,14 @@ public class WorkspaceAgentRuntime {
         String systemPrompt = systemPrompt(mode);
         session.messages().add(ToolChatMessage.system(systemPrompt));
         session.messages().add(ToolChatMessage.user(objective));
+        if (mode == WorkspaceAgentMode.DEVELOPMENT && session.modelTurns() > 0) {
+            try {
+                int restored = WorkspaceDevelopmentContext.restore(session);
+                logger.accept("   Restored development context messages: " + restored + "; cumulative budget retained.");
+            } catch (Exception e) {
+                logger.accept("   Development context unavailable; current goal and disk source retained: " + e.getMessage());
+            }
+        }
         int maxModelTurns = maxModelTurns(mode);
         int maxToolCalls = maxToolCalls(mode);
         ToolCallAuditSession auditSession = auditService.startSession(
@@ -236,6 +244,15 @@ public class WorkspaceAgentRuntime {
                     lastToolName, lastToolResult, e.getClass().getSimpleName() + ": " + e.getMessage());
         } finally {
             toolRegistry.closeSession(session);
+            if (mode == WorkspaceAgentMode.DEVELOPMENT) {
+                try {
+                    contextCompactor.compact(session, lastToolName, lastToolResult,
+                            Math.max(0, maxModelTurns - session.modelTurns()));
+                    WorkspaceDevelopmentContext.save(session, toolRegistry.snapshotWorkspace(root));
+                } catch (Exception e) {
+                    logger.accept("   Unable to save development context: " + e.getMessage());
+                }
+            }
         }
 
         logger.accept("   Tool Agent stopped without completing the stage"
@@ -335,7 +352,8 @@ public class WorkspaceAgentRuntime {
     /** 无工具回复后重申当前交付门禁，防止多任务会话直接跳到 final。 */
     private String developmentContinuationPrompt(WorkspaceAgentSession session) {
         var state = session.workflowData().milestoneState;
-        if (state != null && state.active() && state.current() != null) {
+        if (state != null && state.active() && state.current() != null
+                && state.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED) {
             return "Continue implementing and testing the current milestone " + state.current().id()
                     + ". Submit scope=progress with that milestoneId before working on later milestones.";
         }
@@ -346,6 +364,7 @@ public class WorkspaceAgentRuntime {
     private String developmentClosingPrompt(WorkspaceAgentSession session, int remainingTurns) {
         var state = session.workflowData().milestoneState;
         String current = state != null && state.active() && state.current() != null
+                && state.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED
                 ? "current milestone " + state.current().id() + " with submit_checkpoint(scope=progress, milestoneId="
                         + state.current().id() + ")"
                 : "project with submit_checkpoint(scope=final)";

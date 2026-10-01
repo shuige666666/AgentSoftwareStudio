@@ -18,6 +18,30 @@ class WorkspacePatchServiceTest {
     @TempDir Path root;
     private final WorkspacePatchService service = new WorkspacePatchService();
 
+    /** 提前结束多文件补丁必须全量拒绝，并告知下一次应如何组织包络。 */
+    @Test
+    void explainsPrematureEndWithoutWritingFirstFile() throws Exception {
+        Path source = root.resolve("src/A.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "before\n", StandardCharsets.UTF_8);
+        var result = service.apply("""
+                *** Begin Patch
+                *** Update File: src/A.java
+                @@
+                -before
+                +after
+                *** End Patch
+                *** Add File: src/B.java
+                +second
+                *** End Patch
+                """, session());
+        assertEquals("PATCH_FORMAT", result.error());
+        assertTrue(result.message().contains("No files were written"));
+        assertTrue(result.message().contains("Do not end each file separately"));
+        assertEquals("before\n", Files.readString(source));
+        assertFalse(Files.exists(root.resolve("src/B.java")));
+    }
+
     /**
      * 一个补丁可以同时更新业务类、创建测试，并按磁盘实际写入记录版本。
      */

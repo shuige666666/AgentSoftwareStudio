@@ -4,5 +4,6 @@ package com.core.multiAgentSoftwareStudio.Model.Benchmark;
 public enum BenchmarkReplayMode {
     SAVED_MILESTONES,
     CURRENT_MILESTONES,
+    ADVISORY_MILESTONES,
     CONTINUOUS
 }

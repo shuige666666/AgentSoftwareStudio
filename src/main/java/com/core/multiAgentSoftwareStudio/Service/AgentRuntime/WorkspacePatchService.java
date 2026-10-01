@@ -38,7 +38,10 @@ public class WorkspacePatchService {
         try {
             changes = prepare(patch, session, warnings);
         } catch (PatchException e) {
-            return new PatchResult(false, List.of(), e.path, e.code, e.getMessage());
+            String guidance = "PATCH_FORMAT".equals(e.code)
+                    ? " No files were written. Use one *** Begin Patch, all file operations, then one *** End Patch."
+                    + " Do not end each file separately or append quotes; resend the complete patch." : "";
+            return new PatchResult(false, List.of(), e.path, e.code, e.getMessage() + guidance);
         }
         List<String> applied = new ArrayList<>();
         for (Change change : changes) {

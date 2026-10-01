@@ -177,6 +177,9 @@ public class SoftwareStudioWorkflowService {
             data = persistenceNodeService.persistPlanningArtifacts(data, SLICE_PLAN, logger);
             data = persistenceNodeService.persistPlanningArtifacts(data, GENERATION_PLAN, logger);
             if (replayMode != BenchmarkReplayMode.CONTINUOUS) {
+                data.milestonePolicy = replayMode == BenchmarkReplayMode.ADVISORY_MILESTONES
+                        ? com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY
+                        : com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED;
                 milestoneService.initialize(data);
             }
             return executeDevelopment(data, logger);
@@ -202,6 +205,7 @@ public class SoftwareStudioWorkflowService {
             checkpointService.verifyCandidate(data, logger);
         }
         if (data.milestoneState != null && data.milestoneState.active()
+                && data.milestoneState.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED
                 && !data.milestoneState.allAccepted()) {
             // 最终项目门禁通过也不能替代缺失的逐能力验证记录。
             data.success = false;

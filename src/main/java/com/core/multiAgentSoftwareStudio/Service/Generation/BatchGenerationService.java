@@ -27,20 +27,8 @@ public class BatchGenerationService {
     public WorkspaceAgentRunResult generateProject(SoftwareStudioWorkflowData data, Consumer<String> logger) {
         logger.accept("4. DevelopmentAgent is implementing and verifying the complete project.");
         String objective = data.milestoneState != null && data.milestoneState.active()
-                ? DevelopmentMilestoneObjective.render(data) : """
+                ? DevelopmentMilestoneObjective.render(data) : DevelopmentMilestoneObjective.projectContext(data) + """
                 Implement and verify the complete requested project in the current workspace.
-
-                Original user request:
-                %s
-
-                Product requirements:
-                %s
-
-                Architecture and file responsibilities:
-                %s
-
-                Required cross-layer contract:
-                %s
 
                 Inspect the real workspace and its already compiling scaffold before editing. Keep the existing
                 build configuration and application bootstrap unless a concrete business need requires a change.
@@ -48,7 +36,7 @@ public class BatchGenerationService {
                 Keep controller, service, persistence, DTO, template, JavaScript and CSS contracts consistent.
                 Use bash for focused diagnosis; submit_checkpoint(scope=progress) for full build and all existing tests.
                 Resolve failures in this session, then submit_checkpoint(scope=final) for completion.
-                """.formatted(data.userRequest, data.prd, data.structure, data.contract);
+                """;
 
         WorkspaceAgentRunResult result = workspaceAgentRuntime.runDetailed(
                 data,

@@ -41,6 +41,7 @@ import java.util.stream.Stream;
 @Component
 public class WorkspaceToolRegistry {
     private static final int MAX_FILE_CHARS = 40_000;
+    private static final int DEFAULT_SOURCE_READ_LINES = 160;
     private static final int MAX_SEARCH_RESULTS = 80;
     private static final Set<String> PLANNING_DOCUMENTS = Set.of(
             "user-request.md", "prd.json", "architecture.json", "contract.json", "overall-design.json",
@@ -111,7 +112,10 @@ public class WorkspaceToolRegistry {
         } catch (JsonProcessingException e) {
             // 模型一次提交过长参数时可能截断 JSON；提示缩小补丁而不是重试同一大请求。
             return jsonError("TOOL_ARGUMENTS_INVALID_JSON",
-                    "Tool arguments are incomplete or invalid JSON. Resend valid JSON; split large patches into smaller related-file groups.");
+                    "Tool arguments are incomplete or invalid JSON at line " + e.getLocation().getLineNr()
+                            + ", column " + e.getLocation().getColumnNr() + ": " + e.getOriginalMessage()
+                            + ". No tool operation was executed. Resend a complete JSON object with escaped string contents; "
+                            + "split large patches into smaller related-file groups if necessary.");
         } catch (Exception e) {
             return jsonError("TOOL_EXECUTION_FAILED", e.getMessage());
         }
@@ -121,7 +125,7 @@ public class WorkspaceToolRegistry {
         register("list_files", "列出候选项目中的源码、测试和配置文件。", objectSchema(), this::listFiles);
         register("search_code", "在候选项目中搜索文本或符号，返回文件和行号。",
                 objectSchema("query", "string", "true", "glob", "string", "false"), this::searchCode);
-        register("read_files", "读取项目文件并返回完整文件 SHA-256。诊断先用 search_code 定位，再用可选 startLine/endLine 读取相关范围（从1开始，含结束行，对所有 paths 生效）；省略范围仍读整文件。片段内容不是完整文件，不可用它覆盖整文件。",
+        register("read_files", "读取项目文件并返回完整文件 SHA-256。诊断先用 search_code 定位，再用可选 startLine/endLine 读取相关范围（从1开始，含结束行，对所有 paths 生效）；默认从起始行最多读取160行。需要更多内容时明确指定范围。返回 startLine/endLine/totalLines/partial，片段不是完整文件，不可用它覆盖整文件。",
                 readFilesSchema(), this::readFiles);
         register("read_planning", "只读获取完整需求、设计、公开契约和规划。document 使用列出的元数据文件名；可按 startLine/endLine 定位，读取不会改变规划或验收约定。",
                 readPlanningSchema(), this::readPlanning);
@@ -134,7 +138,12 @@ public class WorkspaceToolRegistry {
                 @@
                 -旧内容
                 +新内容
+                *** Update File: src/main/java/demo/Other.java
+                @@
+                -另一文件的旧内容
+                +另一文件的新内容
                 *** End Patch
+                整个多文件补丁只使用一对 Begin Patch / End Patch；End Patch 后不得再追加文件或引号。
                 Update 的上下文行以空格开头，删除行以 - 开头，新增行以 + 开头；不需要填写行号。
                 替换必须写出被删除的旧行；只有 + 的块表示插入，不会自动覆盖已有类或方法。
                 Add 使用 *** Add File: 路径，正文每行以 + 开头；Delete 使用 *** Delete File: 路径。
@@ -147,7 +156,7 @@ public class WorkspaceToolRegistry {
                         "timeoutMillis", "integer", "false"), this::bash);
         register("submit_checkpoint", "冻结当前源码，在独立副本执行完整编译和全量已有测试；编译通过时返回已绑定的公开行为检查。progress 的业务失败作为修复反馈；final 必须通过完整契约及已绑定业务检查。未覆盖项不代表业务通过。",
                 objectSchema("summary", "string", "true", "scope", "string", "true",
-                        "milestoneId", "string", "false"), this::submitCheckpoint);
+                        "milestoneId", "string", "false", "milestoneIds", "array", "false"), this::submitCheckpoint);
         register("restore_checkpoint", "恢复最近接受的业务里程碑源码版本，保留当前候选备份。",
                 objectSchema(), this::restoreCheckpoint);
         register("get_current_diff", "查看本会话相对开始快照发生变化的文件摘要。",
@@ -251,9 +260,12 @@ public class WorkspaceToolRegistry {
 
     /** 源码和规划读取共用行范围与哈希规则；元数据通道由固定白名单控制。 */
     private String readFiles(JsonNode arguments, WorkspaceAgentSession session, boolean planning) {
-        boolean ranged = arguments.has("startLine") || arguments.has("endLine");
+        boolean ranged = !planning || arguments.has("startLine") || arguments.has("endLine");
         int startLine = arguments.path("startLine").asInt(1);
-        int endLine = arguments.path("endLine").asInt(Integer.MAX_VALUE);
+        // 默认只读有限行，避免一次整文件测试读取挤出正在编辑的源码；显式范围仍按请求返回。
+        int endLine = arguments.path("endLine").asInt(!planning
+                ? (int) Math.min(Integer.MAX_VALUE, (long) startLine + DEFAULT_SOURCE_READ_LINES - 1)
+                : Integer.MAX_VALUE);
         if (ranged && (startLine < 1 || endLine < startLine)) {
             return jsonError("INVALID_LINE_RANGE", "Use 1-based startLine <= endLine");
         }
@@ -484,24 +496,36 @@ public class WorkspaceToolRegistry {
         String summary = arguments.path("summary").asText("");
         var state = session.workflowData().milestoneState;
         if (state != null && state.active()) {
-            if ("final".equals(scope) && !state.allAccepted()) {
+            boolean advisory = state.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
+            if ("final".equals(scope) && !advisory && !state.allAccepted()) {
                 return jsonError("MILESTONES_PENDING", "Accept every business milestone before final checkpoint");
             }
-            if ("progress".equals(scope)) {
+            if ("progress".equals(scope) && (!advisory || arguments.has("milestoneId") || arguments.has("milestoneIds"))) {
                 String id = arguments.path("milestoneId").asText("");
-                if (state.current() == null || !state.current().id().equals(id)) {
-                    return jsonError("MILESTONE_OUT_OF_ORDER", "Current milestone is "
-                            + (state.current() == null ? "none" : state.current().id()));
+                List<String> ids = new ArrayList<>();
+                if (arguments.has("milestoneIds")) {
+                    if (!arguments.path("milestoneIds").isArray() || !id.isBlank()) {
+                        return jsonError("INVALID_MILESTONE_SELECTION", "Use milestoneId or an array milestoneIds");
+                    }
+                    arguments.path("milestoneIds").forEach(value -> ids.add(value.asText()));
+                } else {
+                    ids.add(id);
+                }
+                try {
+                    milestoneService.validateSelection(session.workflowData(), ids);
+                } catch (IllegalArgumentException invalid) {
+                    return jsonError(advisory ? "INVALID_MILESTONE_SELECTION" : "MILESTONE_OUT_OF_ORDER", invalid.getMessage());
                 }
                 WorkspaceCheckpointService.CheckpointResult result = checkpointService.verify(
                         session, scope, summary,
-                        milestoneService.contractThroughCurrent(session.workflowData()));
+                        milestoneService.contractForSelection(session.workflowData(), ids));
                 recordCheckpointFeedback(session, result);
                 ObjectNode feedback = objectMapper.valueToTree(result);
                 if ("PASSED".equals(result.status())) {
-                    milestoneService.accept(session.workflowData(), id, result);
+                    milestoneService.acceptSelected(session.workflowData(), ids, result);
                     var next = session.workflowData().milestoneState.current();
                     feedback.put("acceptedMilestone", id);
+                    feedback.set("acceptedMilestones", objectMapper.valueToTree(ids));
                     feedback.put("nextMilestone", next == null ? "" : next.id());
                     feedback.put("allMilestonesAccepted", next == null);
                     // 同一会话切换任务时交付下一项的具体边界，避免模型沿用上一项契约。
@@ -529,8 +553,8 @@ public class WorkspaceToolRegistry {
     private void recordCheckpointFeedback(WorkspaceAgentSession session,
                                           WorkspaceCheckpointService.CheckpointResult result) {
         if ("PASS".equals(result.behavior().status()) || "FAIL".equals(result.behavior().status())) {
-            session.recordBehaviorFeedback(result.behavior().passed() ? "" : "Public behavior checks sourceHash="
-                    + result.sourceHash() + ": " + objectMapper.valueToTree(result.behavior()));
+            session.recordBehaviorFeedback(result.behavior().passed() ? "" :
+                    WorkspaceCheckpointFeedback.behaviorFailures(result.behavior(), result.sourceHash(), result.reportPath()));
         }
         if ("PASSED".equals(result.status())) {
             session.clearVerificationFailure();
@@ -801,7 +825,8 @@ public class WorkspaceToolRegistry {
         ArrayNode required = schema.putArray("required");
         for (int index = 0; index + 2 < definitions.length; index += 3) {
             String name = definitions[index];
-            properties.putObject(name).put("type", definitions[index + 1]);
+            ObjectNode property = properties.putObject(name).put("type", definitions[index + 1]);
+            if ("array".equals(definitions[index + 1])) property.putObject("items").put("type", "string");
             if (Boolean.parseBoolean(definitions[index + 2])) {
                 required.add(name);
             }

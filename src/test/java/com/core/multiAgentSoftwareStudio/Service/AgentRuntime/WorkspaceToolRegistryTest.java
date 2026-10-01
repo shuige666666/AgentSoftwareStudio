@@ -41,6 +41,19 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class WorkspaceToolRegistryTest {
+    /** 不完整的小补丁也要报告 JSON 的真实失败位置，不能统一暗示补丁太长。 */
+    @Test
+    void reportsTruncatedJsonLocationWithoutExecutingThePatch() throws Exception {
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, Map.of());
+        String feedback = registry.execute("apply_patch", "{\"patch\":\"*** Begin Patch\\n", session);
+        var result = new ObjectMapper().readTree(feedback);
+        assertEquals("TOOL_ARGUMENTS_INVALID_JSON", result.path("error").asText());
+        assertTrue(result.path("message").asText().contains("line 1, column"));
+        assertTrue(result.path("message").asText().contains("end-of-input"));
+        assertTrue(result.path("message").asText().contains("No tool operation was executed"));
+        assertEquals(0, session.writeVersion());
+    }
+
     /** 环境故障不能覆盖之前尚未修好的业务或编译失败。 */
     @Test
     void keepsSourceFailureAcrossAnInfrastructureFailure() {
@@ -98,6 +111,28 @@ class WorkspaceToolRegistryTest {
 
     @TempDir
     Path projectRoot;
+
+    /** 大文件默认按行返回准确片段，续读范围、完整哈希及 CRLF 均保持一致。 */
+    @Test
+    void defaultSourceReadIsBoundedAndExplicitRangeCanReadRemainingLines() throws Exception {
+        Path source = projectRoot.resolve("src/main/java/demo/Large.java");
+        Files.createDirectories(source.getParent());
+        String body = java.util.stream.IntStream.rangeClosed(1, 320)
+                .mapToObj(index -> "line-" + index + "\r\n").collect(java.util.stream.Collectors.joining());
+        Files.writeString(source, body, StandardCharsets.UTF_8);
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, Map.of());
+        var first = objectMapper.readTree(registry.execute("read_files",
+                "{\"paths\":[\"src/main/java/demo/Large.java\"]}", session)).at("/files/0");
+        var rest = objectMapper.readTree(registry.execute("read_files",
+                "{\"paths\":[\"src/main/java/demo/Large.java\"],\"startLine\":161,\"endLine\":320}", session)).at("/files/0");
+        assertTrue(first.path("partial").asBoolean());
+        assertEquals(160, first.path("endLine").asInt());
+        assertEquals(320, first.path("totalLines").asInt());
+        assertEquals(first.path("sha256").asText(), rest.path("sha256").asText());
+        assertEquals(body, first.path("content").asText() + rest.path("content").asText());
+        assertFalse(first.path("truncated").asBoolean());
+        assertTrue(session.changedFiles().isEmpty());
+    }
 
     /** Maven 原生库提示不能淹没实际 testCompile 错误。 */
     @Test
@@ -271,6 +306,43 @@ class WorkspaceToolRegistryTest {
                 .contains("\"allMilestonesAccepted\":true"));
         registry.execute("submit_checkpoint", "{\"scope\":\"final\",\"summary\":\"done\"}", session);
         assertTrue(session.completed());
+    }
+
+    /** 建议式可合并接受；没有记录也能申请 final，但失败的最终验证仍不能结束会话。 */
+    @Test
+    void advisoryAllowsMergedProgressAndFinalWithoutAcceptanceRecords() throws Exception {
+        var data = new SoftwareStudioWorkflowData("three tasks");
+        data.projectPath = projectRoot.toString();
+        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
+        var empty = new ProjectContract(List.of(), List.of(), List.of(), List.of());
+        data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of(
+                new DeliverySlice("a", "a", List.of(), List.of(), empty, List.of(), List.of()),
+                new DeliverySlice("b", "b", List.of(), List.of(), empty, List.of(), List.of()),
+                new DeliverySlice("c", "c", List.of(), List.of(), empty, List.of(), List.of())), List.of(), "test");
+        new DevelopmentMilestoneService(objectMapper).initialize(data);
+        var session = new WorkspaceAgentSession(projectRoot, WorkspaceAgentMode.DEVELOPMENT, data,
+                message -> { }, Map.of(), Set.of());
+        var passing = new WorkspaceCheckpointService.CheckpointResult("progress", "PASSED", "hash", "snapshot",
+                "report", null, null, true, List.of(), "", false, false);
+        when(checkpointService.verify(any(), eq("progress"), anyString(), any())).thenReturn(passing);
+        when(checkpointService.verify(any(), eq("progress"), anyString())).thenReturn(passing);
+        registry.execute("submit_checkpoint", "{\"scope\":\"progress\",\"summary\":\"diagnose\"}", session);
+        assertTrue(data.acceptedSliceIds.isEmpty());
+        String response = registry.execute("submit_checkpoint",
+                "{\"scope\":\"progress\",\"summary\":\"merged\",\"milestoneIds\":[\"b\",\"c\"]}", session);
+        assertTrue(objectMapper.readTree(response).path("acceptedMilestones").isArray(), response);
+        assertEquals(List.of("b", "c"), data.acceptedSliceIds);
+        when(checkpointService.verify(any(), eq("final"), anyString())).thenReturn(
+                new WorkspaceCheckpointService.CheckpointResult("final", "FAILED", "hash", "snapshot", "report",
+                        null, null, false, List.of("missing endpoint"), "missing endpoint", false, false));
+        registry.execute("submit_checkpoint", "{\"scope\":\"final\",\"summary\":\"done\"}", session);
+        assertFalse(session.completed());
+        when(checkpointService.verify(any(), eq("final"), anyString())).thenReturn(
+                new WorkspaceCheckpointService.CheckpointResult("final", "PASSED", "hash", "snapshot", "report",
+                        null, null, true, List.of(), "", true, false));
+        registry.execute("submit_checkpoint", "{\"scope\":\"final\",\"summary\":\"done\"}", session);
+        assertTrue(session.completed());
+        assertFalse(data.milestoneState.allAccepted());
     }
 
     /** 真实工具链依次保存快照、回滚候选、回归旧能力，并由 final 完成项目。 */

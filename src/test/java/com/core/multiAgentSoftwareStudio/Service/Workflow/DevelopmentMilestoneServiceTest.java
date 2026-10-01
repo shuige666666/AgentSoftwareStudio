@@ -88,6 +88,60 @@ class DevelopmentMilestoneServiceTest {
         return new DeliverySlice(id, id, List.of("required behavior"), List.of(), contract, List.of(), List.of());
     }
 
+    /** 乱序与合并接受后，失败记录及预算保存不能把恢复版本退回清单末尾。 */
+    @Test
+    void advisoryPreservesLatestVerifiedVersionAcrossPersistence() {
+        var service = new DevelopmentMilestoneService(new ObjectMapper());
+        var data = new SoftwareStudioWorkflowData("three capabilities");
+        data.projectPath = root.toString();
+        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
+        data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of(slice("a", empty()), slice("b", empty()),
+                slice("c", empty())), List.of(), "test");
+        service.initialize(data);
+        service.accept(data, "c", checkpoint("PASSED"));
+        service.acceptSelected(data, List.of("a", "b"), checkpoint("PASSED"));
+        data.developmentModelTurnsUsed = 9;
+        service.recordFailure(data, "timeout");
+        var loaded = service.load(root);
+        assertTrue(loaded.allAccepted());
+        assertEquals("b", loaded.lastAccepted().id());
+        assertEquals(9, loaded.modelTurnsUsed());
+        assertEquals(data.milestonePolicy, loaded.policy());
+        assertEquals(List.of("a", "b", "c"), loaded.tasks().stream().map(task -> task.id()).toList());
+    }
+
+    /** 乱序选择仍复查已接受接口，不能因为自由排序而遗漏旧能力回归。 */
+    @Test
+    void selectedContractIncludesAcceptedCapabilitiesButNotUnselectedFuture() {
+        var service = new DevelopmentMilestoneService(new ObjectMapper());
+        var data = new SoftwareStudioWorkflowData("three endpoints");
+        data.projectPath = root.toString();
+        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
+        data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of("a", "b", "c").stream().map(id ->
+                slice(id, new ProjectContract(List.of(new ApiEndpointContract("GET", "/" + id, "", "", "", "")),
+                        List.of(), List.of(), List.of()))).toList(), List.of(), "test");
+        service.initialize(data);
+        assertEquals(List.of("/b"), service.contractForSelection(data, List.of("b")).endpoints().stream()
+                .map(ApiEndpointContract::path).toList());
+        service.accept(data, "b", checkpoint("PASSED"));
+        assertEquals(List.of("/a", "/b"), service.contractForSelection(data, List.of("a")).endpoints().stream()
+                .map(ApiEndpointContract::path).toList());
+    }
+
+    /** 旧 JSON 缺少新增字段时沿用原门禁和最近顺序接受版本。 */
+    @Test
+    void loadsLegacyStateWithoutRelaxingItsPolicy() throws Exception {
+        var metadata = root.resolve(".software-studio");
+        java.nio.file.Files.createDirectories(metadata);
+        java.nio.file.Files.writeString(metadata.resolve(DevelopmentMilestoneService.STATE_FILE), """
+                {"schemaVersion":1,"tasks":[{"id":"a","goal":"a","accepted":true,"sourceHash":"old"}],
+                "modelTurnsUsed":3,"toolCallsUsed":4,"lastFailure":""}
+                """);
+        var loaded = new DevelopmentMilestoneService(new ObjectMapper()).load(root);
+        assertEquals(com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED, loaded.policy());
+        assertEquals("old", loaded.lastAccepted().sourceHash());
+    }
+
     private ProjectContract empty() { return new ProjectContract(List.of(), List.of(), List.of(), List.of()); }
 
     private WorkspaceCheckpointService.CheckpointResult checkpoint(String status) {

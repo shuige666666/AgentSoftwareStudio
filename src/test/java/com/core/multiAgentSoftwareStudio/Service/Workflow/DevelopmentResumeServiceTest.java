@@ -76,6 +76,33 @@ class DevelopmentResumeServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.load("../outside"));
     }
 
+    /** 建议式与顺序式共享续接入口，策略从平台状态读取而非恢复为默认顺序门禁。 */
+    @Test
+    void resumesAdvisoryPolicyFromProtectedState() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        var milestones = new DevelopmentMilestoneService(mapper);
+        Path metadata = root.resolve(".software-studio");
+        Files.createDirectories(metadata);
+        Files.writeString(metadata.resolve("user-request.md"), "# User Request\n\nDemo\n");
+        var contract = new ProjectContract(List.of(), List.of(), List.of(), List.of());
+        var plan = new SliceDeliveryPlan(List.of(slice("a", contract), slice("b", contract)), List.of(), "test");
+        mapper.writeValue(metadata.resolve("prd.json").toFile(), new PrdDocument("demo", "demo", List.of(), List.of()));
+        mapper.writeValue(metadata.resolve("architecture.json").toFile(), new ProjectStructure("demo", "SPRING_BOOT", "demo.App", List.of()));
+        mapper.writeValue(metadata.resolve("contract.json").toFile(), contract);
+        mapper.writeValue(metadata.resolve("slice-plan.json").toFile(), plan);
+        mapper.writeValue(metadata.resolve("generation-plan.json").toFile(), new GenerationPlan(List.of()));
+        var data = new SoftwareStudioWorkflowData("Demo");
+        data.projectPath = root.toString(); data.sliceDeliveryPlan = plan;
+        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
+        milestones.initialize(data);
+        var profiles = mock(ProjectProfileService.class);
+        when(profiles.resolve(any())).thenReturn(ProjectProfile.java17SpringBoot());
+        var resumed = new DevelopmentResumeService(mapper, milestones, mock(WorkspaceCheckpointService.class), profiles,
+                new WorkspaceService(new SourceCodePathService())).loadResolved(root);
+        assertEquals(data.milestonePolicy, resumed.milestonePolicy);
+        assertEquals(data.milestonePolicy, resumed.milestoneState.policy());
+    }
+
     private DeliverySlice slice(String id, ProjectContract contract) {
         return new DeliverySlice(id, id, List.of(), List.of(), contract, List.of(), List.of());
     }

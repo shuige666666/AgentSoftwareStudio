@@ -164,6 +164,32 @@ class WorkspaceAgentContextCompactorTest {
         assertPairs(session.messages());
     }
 
+    /** 压缩后仍保留完整目标和建议式策略，不能重新注入首任务顺序限制。 */
+    @Test
+    void advisoryPolicySurvivesContextCompaction() {
+        var session = contextSession();
+        var data = session.workflowData();
+        data.userRequest = "complete public requirements";
+        data.milestoneState = new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState(2,
+                List.of(new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.Task(
+                        "a", "a", List.of(), false, "", "", ""),
+                        new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.Task(
+                        "b", "b", List.of(), false, "", "", "")), 0, 0, "",
+                com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY, "");
+        addRound(session, "read", "read_files", "{}", "{}");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setCompactAtPercent(1);
+        policy.setMaxContextTokens(100);
+        var result = new WorkspaceAgentContextCompactor(policy).compact(session, "read_files", "{}", 4);
+        assertTrue(result.compacted());
+        String goal = session.messages().get(1).content();
+        assertTrue(goal.contains("complete public requirements"));
+        assertTrue(goal.contains("combine tasks"));
+        assertTrue(goal.contains("scope=final"));
+        assertFalse(goal.contains("Defer later endpoints"));
+        assertPairs(session.messages());
+    }
+
     private WorkspaceAgentSession contextSession() {
         var session = new WorkspaceAgentSession(projectRoot, WorkspaceAgentMode.DEVELOPMENT,
                 new SoftwareStudioWorkflowData("test"), message -> { }, Map.of(), Set.of());
@@ -197,7 +223,7 @@ class WorkspaceAgentContextCompactorTest {
     Path projectRoot;
 
     @Test
-    void keepsOriginalObjectiveAndThreeRecentCompleteToolRounds() {
+    void keepsOlderCompleteToolRoundsWhenTheyStillFitBudget() {
         WorkspaceAgentSession session = new WorkspaceAgentSession(
                 projectRoot, WorkspaceAgentMode.REPAIR_IMPLEMENTATION,
                 new SoftwareStudioWorkflowData("test"), message -> { }, Map.of(), Set.of());
@@ -220,9 +246,11 @@ class WorkspaceAgentContextCompactorTest {
         assertEquals("system", session.messages().get(0).content());
         assertEquals("original objective", session.messages().get(1).content());
         assertTrue(session.messages().get(2).content().contains("result-7"));
-        assertFalse(session.messages().stream().anyMatch(message -> message.content().contains("assistant-4")));
+        assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("assistant-4")));
         assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("assistant-5")));
         assertEquals("call-7", session.messages().getLast().toolCallId());
+        assertTrue(result.withinWorkingBudget());
+        assertPairs(session.messages());
     }
 
     /** 首任务通过后的交接与收尾提醒被裁掉时，压缩目标仍以当前持久化任务为准。 */
@@ -267,7 +295,7 @@ class WorkspaceAgentContextCompactorTest {
         assertTrue(objective.contains("PUT /items/{id}"));
         assertTrue(objective.contains("create item [accepted at accepted-hash]"));
         assertFalse(objective.contains("Current milestone: create"));
-        assertFalse(session.messages().stream().anyMatch(message -> message.content().contains("closing reminder")));
+        assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("closing reminder")));
         assertTrue(session.messages().get(2).content().contains("remaining model turns: 5"));
         assertEquals("call-10", session.messages().getLast().toolCallId());
     }
@@ -283,7 +311,7 @@ class WorkspaceAgentContextCompactorTest {
         for (int turn = 1; turn <= 10; turn++) {
             session.messages().add(ToolChatMessage.assistant("assistant-" + turn,
                     List.of(new ToolCall("call-" + turn, "read_files", "{}"))));
-            session.messages().add(ToolChatMessage.tool("call-" + turn, "result-" + turn));
+            session.messages().add(ToolChatMessage.tool("call-" + turn, "result-" + turn + " diagnostic".repeat(70)));
             if (turn == 5) session.recordVerificationFailure(
                     "mvn test: AppTest.java:[57,35] method attribute cannot be applied");
         }
@@ -297,8 +325,198 @@ class WorkspaceAgentContextCompactorTest {
         assertTrue(result.compacted());
         assertTrue(session.messages().get(2).content().contains("AppTest.java:[57,35]"));
         assertTrue(session.messages().get(2).content().contains("write version 1"));
-        assertFalse(session.messages().stream().anyMatch(message -> message.content().equals("result-5")));
+        assertFalse(session.messages().stream().anyMatch(message -> message.content().startsWith("result-5")));
         session.recordTestsPassed();
         assertEquals("", session.unresolvedVerificationFailure());
+    }
+
+    /** 同版本的相邻片段均可用于编辑；不同的行范围不能按文件名去重。 */
+    @Test
+    void retainsDisjointRangesOfTheSameFile() {
+        var session = contextSession();
+        addRound(session, "first", "read_files", "{}", range(1, 10, "same", "first-range"));
+        addRound(session, "second", "read_files", "{}", range(11, 20, "same", "second-range"));
+        var result = forceCompaction(session);
+        assertTrue(result.compacted());
+        assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("first-range")));
+        assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("second-range")));
+        assertPairs(session.messages());
+    }
+
+    /** 连续片段可覆盖旧范围，但新版本即使只读一部分也使旧版本正文失效。 */
+    @Test
+    void removesCoveredRangesAndInvalidatesOlderHashes() {
+        var session = contextSession();
+        addRound(session, "whole", "read_files", "{}", range(1, 20, "same", "old-whole"));
+        addRound(session, "first", "read_files", "{}", range(1, 10, "same", "first-range"));
+        addRound(session, "second", "read_files", "{}", range(11, 20, "same", "second-range"));
+        forceCompaction(session);
+        assertFalse(session.messages().stream().anyMatch(message -> message.content().contains("old-whole")));
+        addRound(session, "changed", "read_files", "{}", range(5, 6, "new-hash", "new-version"));
+        forceCompaction(session);
+        assertFalse(session.messages().stream().anyMatch(message -> message.content().contains("first-range")));
+        assertFalse(session.messages().stream().anyMatch(message -> message.content().contains("second-range")));
+        assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("new-version")));
+        assertPairs(session.messages());
+    }
+
+    /** 一个超大读取不能把同轮的小文件一起丢掉，正文移出后仍保留配对和文件元信息。 */
+    @Test
+    void evictsLargeFileBodyWithoutDroppingSmallFileInSameResponse() {
+        var session = contextSession();
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var result = mapper.createObjectNode();
+        var files = result.putArray("files");
+        files.addObject().put("path", "LargeTest.java").put("sha256", "large")
+                .put("content", "large-body".repeat(3_000));
+        files.addObject().put("path", "Small.java").put("sha256", "small").put("content", "small-exact-source");
+        addRound(session, "read", "read_files", "{}", result.toString());
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(2_000);
+        var compacted = new WorkspaceAgentContextCompactor(policy).compact(session, "read_files", result.toString(), 6);
+        assertTrue(compacted.withinWorkingBudget());
+        assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("small-exact-source")));
+        assertFalse(session.messages().stream().anyMatch(message -> message.content().contains("large-body")));
+        assertPairs(session.messages());
+    }
+
+    /** 旧片段与新片段合计超预算时，先回收旧片段，保证刚读取的正文有一次被模型使用的机会。 */
+    @Test
+    void retainsFreshLargerRangeBeforeOlderSmallerRangeUnderPressure() throws Exception {
+        var session = contextSession();
+        String older = "a".repeat(3_000);
+        String fresh = "b".repeat(5_000);
+        addRound(session, "older", "read_files", "{}", range(1, 160, "same", older));
+        addRound(session, "fresh", "read_files", "{}", range(161, 410, "same", fresh));
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(3_700);
+
+        var result = new WorkspaceAgentContextCompactor(policy).compact(session, "read_files",
+                session.messages().getLast().content(), 12);
+
+        assertTrue(result.withinWorkingBudget());
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var newest = mapper.readTree(session.messages().getLast().content()).at("/files/0");
+        assertEquals(fresh, newest.path("content").asText());
+        assertEquals(161, newest.path("startLine").asInt());
+        assertEquals("same", newest.path("sha256").asText());
+        assertFalse(session.messages().stream().anyMatch(message -> message.content().contains(older)));
+        assertPairs(session.messages());
+    }
+
+    /** 当前 checkpoint 已提供新诊断时，不再将历史失败重复注入任务目标。 */
+    @Test
+    void replacesHistoricGoalFailureAfterACurrentCheckpoint() {
+        var session = contextSession();
+        var data = session.workflowData();
+        data.sliceDeliveryPlan = SliceDeliveryPlan.empty();
+        data.milestoneState = new DevelopmentMilestoneState(2, List.of(new DevelopmentMilestoneState.Task(
+                "current-task", "current-goal", List.of("current-criterion"), false, "", "", ""),
+                new DevelopmentMilestoneState.Task("later-task", "later-goal", List.of(), false, "", "", "")),
+                0, 0, "historic-failure");
+        session.recordCheckpoint("current-hash", false, false);
+        session.recordVerificationFailure("current-source-failure");
+        addRound(session, "read", "read_files", "{}", "{\"files\":[]}");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxContextTokens(2_000);
+        policy.setCompactAtPercent(1);
+
+        new WorkspaceAgentContextCompactor(policy).compact(session, "read_files", "{\"files\":[]}", 5);
+
+        assertFalse(session.messages().get(1).content().contains("historic-failure"));
+        assertTrue(session.messages().get(1).content().contains("current-goal"));
+        assertTrue(session.messages().get(2).content().contains("current-source-failure"));
+        assertPairs(session.messages());
+    }
+
+    /** 两类长诊断分别保留首尾，防止合并截断后丢掉独立业务的第一项失败。 */
+    @Test
+    void preservesBothFailureChannelsWhenOneLongReportWouldHideTheOther() {
+        var session = contextSession();
+        session.recordVerificationFailure("first source failure " + "s".repeat(8_000) + " last source failure");
+        session.recordBehaviorFeedback("first public failure request=POST /items expected=400 "
+                + "b".repeat(8_000) + " last public failure sourceHash=bound");
+        addRound(session, "read", "read_files", "{}", range(1, 10, "hash", "evidence".repeat(100)));
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxContextTokens(16_000);
+        policy.setCompactAtPercent(1);
+
+        var result = new WorkspaceAgentContextCompactor(policy).compact(session, "read_files",
+                session.messages().getLast().content(), 4);
+
+        String summary = session.messages().get(2).content();
+        assertTrue(result.withinWorkingBudget());
+        assertTrue(summary.contains("first source failure"));
+        assertTrue(summary.contains("last source failure"));
+        assertTrue(summary.contains("first public failure request=POST /items expected=400"));
+        assertTrue(summary.contains("last public failure sourceHash=bound"));
+        assertPairs(session.messages());
+    }
+
+    /** 独立业务失败跨越后续读取和普通自测仍留在压缩摘要中。 */
+    @Test
+    void preservesIndependentBehaviorFailureAfterSelfTestsPass() {
+        var session = contextSession();
+        session.recordBehaviorFeedback("GET /missing expected 404 but was 200 sourceHash=verified");
+        session.recordTestsPassed();
+        for (int index = 0; index < 5; index++) addRound(session, "read-" + index, "read_files", "{}", "{}");
+        forceCompaction(session);
+        assertTrue(session.messages().get(2).content().contains("expected 404 but was 200"));
+        session.recordBehaviorFeedback("");
+        forceCompaction(session);
+        assertFalse(session.messages().get(2).content().contains("expected 404 but was 200"));
+    }
+
+    private WorkspaceAgentContextCompactor.Result forceCompaction(WorkspaceAgentSession session) {
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setCompactAtPercent(1);
+        policy.setMaxContextTokens(2_000);
+        return new WorkspaceAgentContextCompactor(policy).compact(session, "read_files", session.messages().getLast().content(), 6);
+    }
+
+    /** 验证大报告已登记失败后应优先移出，当前源码与真实检查版本仍可见。 */
+    @Test
+    void archivesOversizedCheckpointWithoutEvictingUsefulSource() throws Exception {
+        var session = contextSession();
+        session.recordVerificationFailure("AppTest expected 404 but was 200");
+        session.recordCheckpoint("verified-hash", false, true);
+        addRound(session, "source", "read_files", "{}", range(1, 10, "source", "accurate-controller"));
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        String report = mapper.createObjectNode().put("scope", "final").put("status", "FAILED")
+                .put("sourceHash", "verified-hash").put("reportPath", "checkpoint.json")
+                .put("failureOutput", "long-diagnostic".repeat(3_000)).toString();
+        addRound(session, "verify", "submit_checkpoint", "{}", report);
+        session.messages().add(ToolChatMessage.user("Platform validation of current candidate; " + report));
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(2_000);
+        policy.setMaxLatestToolResultChars(1_000);
+        var compacted = new WorkspaceAgentContextCompactor(policy).compact(session, "submit_checkpoint", report, 5);
+        assertTrue(compacted.withinWorkingBudget());
+        assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("accurate-controller")));
+        assertTrue(session.messages().get(2).content().contains("AppTest expected 404 but was 200"));
+        assertTrue(session.messages().get(2).content().contains("verified-hash"));
+        assertFalse(session.messages().stream().anyMatch(message -> message.content().contains("long-diagnostic")));
+        assertFalse(session.completed());
+        assertPairs(session.messages());
+    }
+
+    /** 环境阻塞未登记成源码失败，历史精简不能隐藏其具体原因。 */
+    @Test
+    void keepsBlockedCheckpointDiagnosis() {
+        var session = contextSession();
+        String report = "{\"scope\":\"progress\",\"status\":\"BLOCKED\",\"sourceHash\":\"hash\","
+                + "\"failureOutput\":\"Docker preview failed to start\"}";
+        addRound(session, "verify", "submit_checkpoint", "{}", report);
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setCompactAtPercent(1);
+        policy.setMaxContextTokens(2_000);
+        new WorkspaceAgentContextCompactor(policy).compact(session, "submit_checkpoint", report, 6);
+        assertTrue(session.messages().get(2).content().contains("Docker preview failed to start"));
+        assertPairs(session.messages());
+    }
+
+    private String range(int start, int end, String hash, String body) {
+        return "{\"files\":[{\"path\":\"App.java\",\"sha256\":\"" + hash + "\",\"startLine\":" + start
+                + ",\"endLine\":" + end + ",\"partial\":true,\"content\":\"" + body + "\"}]}";
     }
 }

@@ -47,6 +47,8 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public GenerationPlan generationPlan = new GenerationPlan(List.of());
     public SliceDeliveryPlan sliceDeliveryPlan = SliceDeliveryPlan.empty();
     public DevelopmentMilestoneState milestoneState;
+    public com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy milestonePolicy =
+            com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED;
     public int developmentModelTurnsUsed;
     public int developmentToolCallsUsed;
     public int currentSliceIndex;

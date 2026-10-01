@@ -144,6 +144,11 @@ public final class WorkspaceAgentSession {
     public String unresolvedVerificationFailure() {
         return unresolvedVerificationFailure + (unresolvedBehaviorFailure.isBlank() ? "" : "\n" + unresolvedBehaviorFailure);
     }
+    /** 单独提供源码验证失败，压缩时不能与业务失败共用一个首尾截断窗口。 */
+    public String sourceVerificationFailure() { return unresolvedVerificationFailure; }
+
+    /** 单独提供独立业务失败，普通自测通过不会清除这份诊断。 */
+    public String behaviorVerificationFailure() { return unresolvedBehaviorFailure; }
     public int unresolvedFailureVersion() {
         return unresolvedVerificationFailure.isBlank() ? behaviorFailureVersion : unresolvedFailureVersion;
     }

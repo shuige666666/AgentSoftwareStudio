@@ -34,32 +34,72 @@ public class DevelopmentMilestoneService {
                         slice.acceptanceCriteria(), false, "", "", ""))
                 .toList();
         data.milestoneState = new DevelopmentMilestoneState(
-                DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION, tasks, 0, 0, "");
+                DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION, tasks, 0, 0, "", data.milestonePolicy, "");
         persist(data);
     }
 
-    /** 仅接受当前能力的完整验证快照，保存其源码哈希和报告入口。 */
+    /** 按持久化推进策略接受单个能力，保存通过快照的源码哈希和报告入口。 */
     public DevelopmentMilestoneState.Task accept(SoftwareStudioWorkflowData data, String id,
+                                                  WorkspaceCheckpointService.CheckpointResult checkpoint) {
+        return acceptSelected(data, List.of(id), checkpoint).getFirst();
+    }
+
+    /** 建议式可合并或调整任务顺序，但接受记录仍必须来自对应契约的通过快照。 */
+    public List<DevelopmentMilestoneState.Task> acceptSelected(SoftwareStudioWorkflowData data, List<String> ids,
                                                   WorkspaceCheckpointService.CheckpointResult checkpoint) {
         DevelopmentMilestoneState state = data.milestoneState;
         DevelopmentMilestoneState.Task current = state == null ? null : state.current();
-        if (current == null || !current.id().equals(id) || checkpoint == null
+        validateSelection(data, ids);
+        if (current == null || checkpoint == null
                 || !"PASSED".equals(checkpoint.status()) || !"progress".equals(checkpoint.scope())) {
-            throw new IllegalArgumentException("Only the current passing progress checkpoint can accept a milestone");
+            throw new IllegalArgumentException("Only a passing progress checkpoint can accept milestones");
         }
         List<DevelopmentMilestoneState.Task> updated = new ArrayList<>(state.tasks());
-        int index = updated.indexOf(current);
-        DevelopmentMilestoneState.Task accepted = new DevelopmentMilestoneState.Task(
-                current.id(), current.goal(), current.acceptanceCriteria(), true,
-                checkpoint.sourceHash(), checkpoint.snapshotPath(), checkpoint.reportPath());
-        updated.set(index, accepted);
-        data.currentSliceIndex = index + 1;
-        data.milestoneState = new DevelopmentMilestoneState(state.schemaVersion(), updated,
-                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, "");
+        List<DevelopmentMilestoneState.Task> accepted = new ArrayList<>();
+        for (String id : ids) {
+            for (int index = 0; index < updated.size(); index++) {
+                var task = updated.get(index);
+                if (!task.id().equals(id)) continue;
+                var verified = new DevelopmentMilestoneState.Task(task.id(), task.goal(), task.acceptanceCriteria(),
+                        true, checkpoint.sourceHash(), checkpoint.snapshotPath(), checkpoint.reportPath());
+                updated.set(index, verified);
+                accepted.add(verified);
+            }
+        }
+        data.currentSliceIndex = (int) updated.stream().filter(DevelopmentMilestoneState.Task::accepted).count();
+        data.milestoneState = new DevelopmentMilestoneState(DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION, updated,
+                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, "", state.policy(), ids.getLast());
         data.acceptedSliceIds = updated.stream().filter(DevelopmentMilestoneState.Task::accepted)
                 .map(DevelopmentMilestoneState.Task::id).toList();
         persist(data);
         return accepted;
+    }
+
+    /** 在验证前检查选择，避免未知任务或顺序模式跳过门禁。 */
+    public void validateSelection(SoftwareStudioWorkflowData data, List<String> ids) {
+        var state = data.milestoneState;
+        if (state == null || ids.isEmpty() || ids.stream().distinct().count() != ids.size()
+                || ids.stream().anyMatch(id -> state.tasks().stream().noneMatch(task -> task.id().equals(id) && !task.accepted()))) {
+            throw new IllegalArgumentException("Select known pending milestone IDs");
+        }
+        if (state.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED
+                && (ids.size() != 1 || state.current() == null || !state.current().id().equals(ids.getFirst()))) {
+            throw new IllegalArgumentException("Current milestone is " + (state.current() == null ? "none" : state.current().id()));
+        }
+    }
+
+    /** 选择的任务连同已接受能力一起回归；未选择的未来能力不阻断 progress。 */
+    public ProjectContract contractForSelection(SoftwareStudioWorkflowData data, List<String> ids) {
+        validateSelection(data, ids);
+        var selected = new java.util.HashSet<>(ids);
+        data.milestoneState.tasks().stream().filter(DevelopmentMilestoneState.Task::accepted)
+                .forEach(task -> selected.add(task.id()));
+        var contracts = data.sliceDeliveryPlan.slices().stream().filter(slice -> selected.contains(slice.id()))
+                .map(DeliverySlice::contract).toList();
+        return new ProjectContract(contracts.stream().flatMap(contract -> contract.endpoints().stream()).distinct().toList(),
+                contracts.stream().flatMap(contract -> contract.views().stream()).distinct().toList(),
+                contracts.stream().flatMap(contract -> contract.frontendCalls().stream()).distinct().toList(),
+                contracts.stream().flatMap(contract -> contract.additionalFiles().stream()).distinct().toList());
     }
 
     /** 单任务项目直接由通过的 final checkpoint 记录交付版本，不增加 progress 门禁。 */
@@ -73,7 +113,7 @@ public class DevelopmentMilestoneService {
                 original.id(), original.goal(), original.acceptanceCriteria(), true,
                 data.lastCheckpointHash, data.lastCheckpointSnapshotPath, data.lastCheckpointReportPath);
         data.milestoneState = new DevelopmentMilestoneState(state.schemaVersion(), List.of(accepted),
-                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, "");
+                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, "", state.policy(), accepted.id());
         data.acceptedSliceIds = List.of(accepted.id());
         data.currentSliceIndex = 1;
         persist(data);
@@ -111,8 +151,8 @@ public class DevelopmentMilestoneService {
         persistBehaviorCheck(data);
         if (data.milestoneState == null) return;
         DevelopmentMilestoneState state = data.milestoneState;
-        data.milestoneState = new DevelopmentMilestoneState(state.schemaVersion(), state.tasks(),
-                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, state.lastFailure());
+        data.milestoneState = new DevelopmentMilestoneState(DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION, state.tasks(),
+                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, state.lastFailure(), state.policy(), state.latestAcceptedId());
         Path root = Path.of(data.projectPath).toAbsolutePath().normalize()
                 .resolve(".software-studio");
         try {
@@ -162,7 +202,7 @@ public class DevelopmentMilestoneService {
         DevelopmentMilestoneState state = data.milestoneState;
         data.milestoneState = new DevelopmentMilestoneState(state.schemaVersion(), state.tasks(),
                 data.developmentModelTurnsUsed, data.developmentToolCallsUsed,
-                reason == null ? "" : reason);
+                reason == null ? "" : reason, state.policy(), state.latestAcceptedId());
         persist(data);
     }
 
@@ -171,7 +211,7 @@ public class DevelopmentMilestoneService {
         Path path = projectRoot.resolve(".software-studio").resolve(STATE_FILE);
         try {
             DevelopmentMilestoneState state = mapper.readValue(path.toFile(), DevelopmentMilestoneState.class);
-            if (state.schemaVersion() != DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION) {
+            if (state.schemaVersion() != 1 && state.schemaVersion() != DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION) {
                 throw new IllegalStateException("Unsupported development state version");
             }
             return state;
