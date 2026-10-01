@@ -14,6 +14,25 @@ public final class DevelopmentMilestoneObjective {
                 + "\n\nRequired cross-layer contract:\n" + data.contract + "\n\n";
     }
 
+    /** 单任务也交付保存的失败证据；新验证完成后可移出旧诊断，避免续接只看到原始需求。 */
+    public static String renderSingle(SoftwareStudioWorkflowData data, boolean includePreviousFailure) {
+        String objective = projectContext(data) + """
+                Implement and verify the complete requested project in the current workspace.
+
+                Inspect the real workspace and its already compiling scaffold before editing. Keep the existing
+                build configuration and application bootstrap unless a concrete business need requires a change.
+                Create or update business code, frontend, meaningful behavior tests and README in this same session.
+                Keep controller, service, persistence, DTO, template, JavaScript and CSS contracts consistent.
+                Use bash for focused diagnosis; submit_checkpoint(scope=progress) for full build and all existing tests.
+                Resolve failures in this session, then submit_checkpoint(scope=final) for completion.
+                """;
+        if (includePreviousFailure && data.milestoneState != null && !data.milestoneState.lastFailure().isBlank()) {
+            objective += "\nPrevious interruption evidence; revalidate against current source:\n"
+                    + data.milestoneState.lastFailure() + "\n";
+        }
+        return objective;
+    }
+
     /** 根据持久化任务状态重建当前目标，避免压缩后沿用已经完成的任务。 */
     public static String render(SoftwareStudioWorkflowData data) {
         return render(data, true);

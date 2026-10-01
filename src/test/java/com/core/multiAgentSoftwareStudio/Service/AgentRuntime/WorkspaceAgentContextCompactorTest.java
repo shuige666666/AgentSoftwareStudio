@@ -22,6 +22,26 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorkspaceAgentContextCompactorTest {
+    /** 单任务压缩同样保留初始失败，收到新验证后用当前失败替代旧中断证据。 */
+    @Test
+    void singleTaskCompactionReplacesSavedFailureWithCurrentEvidence() {
+        var session = contextSession();
+        session.workflowData().milestoneState = new DevelopmentMilestoneState(2, List.of(
+                new DevelopmentMilestoneState.Task("single", "single", List.of(), false, "", "", "")),
+                36, 36, "old-missing-bean-evidence");
+        addRound(session, "inspect", "list_files", "{}", "{\"files\":[\"App.java\"]}");
+        var compactor = new WorkspaceAgentContextCompactor(new WorkspaceAgentLimitsConfig().getContext());
+        compactor.compactForRetry(session, "list_files", "{\"files\":[\"App.java\"]}", 10);
+        assertTrue(session.messages().get(1).content().contains("old-missing-bean-evidence"));
+        session.recordCheckpoint("new-source-hash", false, false);
+        session.recordBehaviorFeedback("current-status-mismatch-evidence");
+        compactor.compactForRetry(session, "list_files", "{\"files\":[\"App.java\"]}", 9);
+        assertFalse(session.messages().get(1).content().contains("old-missing-bean-evidence"));
+        assertTrue(session.messages().get(2).content().contains("current-status-mismatch-evidence"));
+        assertTrue(session.messages().get(1).content().contains("submit_checkpoint(scope=final)"));
+        assertPairs(session.messages());
+    }
+
     /** 重复读取只保留最新准确正文；旧哈希仍明确属于历史，全部工具 ID 保持配对。 */
     @Test
     void boundsRepeatedFileReadsAndPreservesNewestText() throws Exception {

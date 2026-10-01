@@ -2,6 +2,8 @@ package com.core.multiAgentSoftwareStudio.Service.Workflow;
 
 import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkReplayMode;
 import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult;
+import com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStage;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRunResult;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentStopReason;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceCheckpointService;
@@ -67,6 +69,16 @@ class SoftwareStudioWorkflowServiceTest {
         var result = fixture.service.generateProjectWithResult("test", message -> { });
         assertFalse(result.platformSuccess());
         verify(fixture.checkpoint).verifyCandidate(any(), any());
+    }
+
+    /** 外层失败复核必须保存根因及源码版本，后续开发不能只收到 MODEL_TURN_LIMIT。 */
+    @Test
+    void preservesFinalFailureEvidenceAfterBudgetStop() {
+        var fixture = fixture();
+        when(fixture.generation.generateProject(any(), any())).thenReturn(run(false));
+        fixture.service.generateProjectWithResult("test", ignored -> { });
+        verify(fixture.milestones).recordFailure(any(), org.mockito.ArgumentMatchers.contains("Final verification sourceHash=saved-hash"));
+        verify(fixture.milestones).recordFailure(any(), org.mockito.ArgumentMatchers.contains("NoSuchBeanDefinitionException: demo.Store"));
     }
 
     @Test
@@ -182,7 +194,9 @@ class SoftwareStudioWorkflowServiceTest {
             when(fixture.checkpoint.verifyCandidate(any(), any())).thenAnswer(invocation -> {
                 SoftwareStudioWorkflowData data = invocation.getArgument(0);
                 data.success = true;
-                return null;
+                var passed = mock(WorkspaceCheckpointService.CheckpointResult.class);
+                when(passed.allowCompletion()).thenReturn(true);
+                return passed;
             });
             var result = fixture.service.generateProjectWithResult("same requirement", message -> { });
             assertEquals(policy == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY,
@@ -199,6 +213,11 @@ class SoftwareStudioWorkflowServiceTest {
         BatchGenerationService generation = mock(BatchGenerationService.class);
         PersistenceNodeService persistence = mock(PersistenceNodeService.class);
         WorkspaceCheckpointService checkpoint = mock(WorkspaceCheckpointService.class);
+        var failed = new WorkspaceCheckpointService.CheckpointResult("final", "FAILED", "saved-hash", "snapshot", "report.json",
+                VerificationStepResult.notRun(VerificationStage.BUILD),
+                VerificationStepResult.notRun(VerificationStage.TEST),
+                false, List.of(), "NoSuchBeanDefinitionException: demo.Store", false, false);
+        when(checkpoint.verifyCandidate(any(), any())).thenReturn(failed);
         LlmUsageMetricsService metrics = mock(LlmUsageMetricsService.class);
         RunJournalService journal = new RunJournalService();
         when(persistence.initializeWorkspace(any(), any())).thenAnswer(invocation -> {

@@ -416,6 +416,8 @@ public class WorkspaceAgentRuntime {
                     Do not assume generated database IDs start at a fixed value; use the ID returned by persistence or HTTP.
                     Tests sharing an application context must isolate mutable state with controlled fixtures or a fresh context.
                     Do not assume an initially empty store or exact record count unless each test establishes that state.
+                    For rejected mutating requests, verify both the unchanged stored state and a subsequent operation;
+                    a correct error response alone does not prove that hidden state remained valid.
                     """;
         }
         return """

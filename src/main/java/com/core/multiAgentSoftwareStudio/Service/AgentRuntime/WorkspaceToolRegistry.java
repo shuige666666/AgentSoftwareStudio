@@ -110,12 +110,17 @@ public class WorkspaceToolRegistry {
                     rawArguments == null || rawArguments.isBlank() ? "{}" : rawArguments);
             return tool.execute(arguments, session);
         } catch (JsonProcessingException e) {
-            // 模型一次提交过长参数时可能截断 JSON；提示缩小补丁而不是重试同一大请求。
+            // 参数封装失败不代表补丁过大；明确未执行，要求模型重新提交完整参数。
             return jsonError("TOOL_ARGUMENTS_INVALID_JSON",
                     "Tool arguments are incomplete or invalid JSON at line " + e.getLocation().getLineNr()
                             + ", column " + e.getLocation().getColumnNr() + ": " + e.getOriginalMessage()
                             + ". No tool operation was executed. Resend a complete JSON object with escaped string contents; "
-                            + "split large patches into smaller related-file groups if necessary.");
+                            + "split large patches into smaller related-file groups if necessary."
+                            + ("apply_patch".equals(name)
+                                ? " The patch body and the outer JSON are different boundaries. Example envelope: "
+                                    + "{\"patch\":\"*** Begin Patch\\n...\\n*** End Patch\"}. "
+                                    + "Do not append a guessed suffix to the previous call; resend the intended complete patch."
+                                : ""));
         } catch (Exception e) {
             return jsonError("TOOL_EXECUTION_FAILED", e.getMessage());
         }
@@ -151,6 +156,7 @@ public class WorkspaceToolRegistry {
                 右花括号等未修改行也需要上下文前缀；不能直接写无前缀的 }。
                 替换必须写出被删除的旧行；只有 + 的块表示插入，不会自动覆盖已有类或方法。
                 Add 使用 *** Add File: 路径，正文每行以 + 开头；Delete 使用 *** Delete File: 路径。
+                Add 不需要 @@；兼容文件头后单个空 @@，但正文仍须逐行使用 +，不能填写旧上下文或行号。
                 也兼容标准 unified diff，但不得混用两种格式。上下文不匹配时先读取当前文件再重做补丁。
                 返回实际落盘文件及提示；ok 只表示写入成功，仍须编译和测试。
                 """,

@@ -11,6 +11,28 @@ import static org.junit.jupiter.api.Assertions.*;
 class SurefireFailureFeedbackTest {
     @TempDir Path root;
 
+    /** 长上下文包装异常不能挤掉真正的缺失 Bean，多个阈值错误也不能重复占满摘要。 */
+    @Test
+    void preservesDeepCausesBeforeLongSpringContextWrapperMessages() throws Exception {
+        String wrapper = "Failed to load ApplicationContext " + "WebMergedContextConfiguration ".repeat(70);
+        Files.writeString(reportPath(), """
+                <testsuite>
+                  <testcase classname="demo.AppTest" name="create"><error message="%s">%s
+                at org.springframework.test.context.Loader.load(Loader.java:10)
+                Caused by: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean service
+                Caused by: org.springframework.beans.factory.NoSuchBeanDefinitionException: No qualifying bean of type 'demo.Store'
+                </error></testcase>
+                  <testcase classname="demo.AppTest" name="query"><error message="ApplicationContext failure threshold exceeded"/></testcase>
+                </testsuite>
+                """.formatted(wrapper, wrapper));
+        String feedback = SurefireFailureFeedback.read(root, Map.of());
+        assertTrue(feedback.contains("No qualifying bean of type 'demo.Store'"));
+        assertTrue(feedback.indexOf("No qualifying bean") < feedback.indexOf("actual assertion/exception"));
+        assertTrue(feedback.contains("Failed/error test cases: 2"));
+        assertTrue(feedback.contains("ApplicationContext failure threshold exceeded"));
+        assertTrue(feedback.length() < 6_100);
+    }
+
     /** 多个测试在公共准备步骤失败时，保留实际断言与共同源码位置。 */
     @Test
     void reportsAssertionsAndSharedFirstProjectFrame() throws Exception {

@@ -25,6 +25,24 @@ import static org.mockito.Mockito.when;
 
 class BatchGenerationServiceTest {
 
+    /** 真实单任务续接曾漏掉失败摘要，必须从开发入口送入模型目标，不能只更新共享状态。 */
+    @Test
+    void includesSavedFailureForSingleTaskResume() {
+        var runtime = mock(WorkspaceAgentRuntime.class);
+        when(runtime.runDetailed(any(), any(), any(), anyString(), any()))
+                .thenReturn(new WorkspaceAgentRunResult(true, null, 37, 37, List.of(), "", "", ""));
+        var data = new SoftwareStudioWorkflowData("preserve current public behavior");
+        data.milestoneState = new DevelopmentMilestoneState(2, List.of(
+                new DevelopmentMilestoneState.Task("single", "single", List.of(), false, "", "", "")),
+                36, 36, "Observed cause: NoSuchBeanDefinitionException: demo.Store");
+        new BatchGenerationService(runtime).generateProject(data, ignored -> { });
+        var objective = ArgumentCaptor.forClass(String.class);
+        verify(runtime).runDetailed(eq(data), any(), any(), objective.capture(), any());
+        assertTrue(objective.getValue().contains("NoSuchBeanDefinitionException: demo.Store"));
+        assertTrue(objective.getValue().contains("submit_checkpoint(scope=final)"));
+        assertFalse(objective.getValue().contains("ordered business milestones"));
+    }
+
     /** 顺序模式也提供完整未来契约，信息量不再成为策略对照中的额外变量。 */
     @Test
     void includesFullProjectAndEveryMilestoneContract() {

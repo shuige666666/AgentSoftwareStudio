@@ -10,6 +10,17 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DevelopmentMilestoneObjectiveTest {
+    /** 单任务的旧中断证据与当前验证分开，移出旧诊断后完整交付要求仍保留。 */
+    @Test
+    void singleTaskFailureCanBeSupersededByCurrentVerification() {
+        var empty = new ProjectContract(List.of(), List.of(), List.of(), List.of());
+        var data = data(empty, empty);
+        assertTrue(DevelopmentMilestoneObjective.renderSingle(data, true).contains("old-stop-diagnostic"));
+        String current = DevelopmentMilestoneObjective.renderSingle(data, false);
+        assertFalse(current.contains("old-stop-diagnostic"));
+        assertTrue(current.contains("requested-capability"));
+        assertTrue(current.contains("meaningful behavior tests and README"));
+    }
     /** 同一约定只展开一次，公开错误响应、未来能力和当前任务独有规则仍完整可见。 */
     @Test
     void deduplicatesOnlyEqualContractEntriesAndKeepsUniqueSliceRules() {

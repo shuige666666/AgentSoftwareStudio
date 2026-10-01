@@ -70,6 +70,11 @@ public class WorkspacePatchService {
 
     /** 按实际格式错误给出修正方法，避免用包络提示误导正文前缀错误。 */
     private String formatGuidance(String message) {
+        if (message.startsWith("Added file lines must start with +")) {
+            return " No files were written. In an Add File block every source line needs a '+' prefix, "
+                    + "including blank lines. Only a single optional bare @@ immediately after the file header is allowed. "
+                    + "Keep one Begin Patch / End Patch around all file operations; resend the complete patch.";
+        }
         if (message.startsWith("Unknown hunk prefix:") || message.equals("Invalid unified diff hunk line")) {
             return " No files were written. Every hunk line, including closing braces, needs one marker:"
                     + " space for context, '-' for deletion, '+' for addition. Preserve source indentation AFTER the marker."
@@ -120,9 +125,13 @@ public class WorkspacePatchService {
                 String after = null;
                 if ("add".equals(operation)) {
                     List<String> added = new ArrayList<>();
+                    // 新增文件没有旧上下文，开头单个空 @@ 不影响 + 正文含义；不推测缺失的源码前缀。
+                    if (index < lines.length && "@@".equals(lines[index])) index++;
                     while (index < lines.length && !lines[index].startsWith("*** ")) {
                         String line = lines[index++];
-                        if (!line.startsWith("+")) throw failure(relative, "PATCH_FORMAT", "Added file lines must start with +");
+                        if (!line.startsWith("+")) throw failure(relative, "PATCH_FORMAT",
+                                "Added file lines must start with +; unexpected line " + index + ": "
+                                        + line.substring(0, Math.min(100, line.length())));
                         added.add(line.substring(1));
                     }
                     if (added.isEmpty()) throw failure(relative, "EMPTY_FILE", "New file needs content");

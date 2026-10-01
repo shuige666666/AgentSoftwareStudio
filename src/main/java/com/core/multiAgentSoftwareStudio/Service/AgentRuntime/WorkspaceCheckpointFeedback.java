@@ -4,10 +4,24 @@ import com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult
 import java.util.regex.Pattern;
 
 /** 为后续修复整理独立行为失败，完整判卷仍保留在原 checkpoint 和审计中。 */
-final class WorkspaceCheckpointFeedback {
+public final class WorkspaceCheckpointFeedback {
     private static final Pattern HTTP_STATUS = Pattern.compile("^HTTP (\\d{3})\\b");
     private static final Pattern EXPECTED_STATUS = Pattern.compile("^\\s*(\\d{3})\\b");
     private WorkspaceCheckpointFeedback() { }
+
+    /** 保存最终失败的真实验证证据，避免续接状态只剩额度停止；完整报告仍由路径定位。 */
+    public static String failureSummary(WorkspaceCheckpointService.CheckpointResult result) {
+        String source = result.failureOutput();
+        int behaviorStart = source.indexOf("\nPublic behavior checks (sourceHash=");
+        if (behaviorStart >= 0) source = source.substring(0, behaviorStart);
+        // 状态只保存有界的源代码诊断；成功响应正文不再重复写入下一次开发目标。
+        if (source.length() > 4_000) source = source.substring(0, 4_000) + "\n[diagnostic omitted; full report retained]";
+        String behavior = behaviorFailures(result.behavior(), result.sourceHash(), result.reportPath());
+        if (behavior.length() > 4_000) behavior = behavior.substring(0, 4_000) + "\n[remaining findings retained in report]";
+        return "Final verification sourceHash=" + result.sourceHash() + " build=" + result.build().status()
+                + " tests=" + result.test().status() + " contractPassed=" + result.contractPassed()
+                + " report=" + result.reportPath() + "\n" + source + "\n" + behavior;
+    }
 
     /** 摘要只展开失败和阻塞项，避免成功响应的 HTML 挤掉真正需要修复的请求。 */
     static String behaviorFailures(BenchmarkBehaviorResult result, String sourceHash, String reportPath) {

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -15,6 +16,40 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorkspacePatchServiceTest {
+    /** 真实轨迹中的 Add+空 @@ 是无歧义新增，保留正文全部空行并继续预检后续文件。 */
+    @Test
+    void acceptsABareHunkMarkerOnlyAtTheStartOfAnAddedFile() throws Exception {
+        var result = service.apply("""
+                *** Begin Patch
+                *** Add File: src/main/java/demo/Value.java
+                @@
+                +package demo;
+                +
+                +class Value {}
+                *** Add File: README.md
+                +Ready
+                *** End Patch
+                """, session());
+        assertTrue(result.ok(), result.message());
+        assertEquals("package demo;\n\nclass Value {}\n",
+                Files.readString(root.resolve("src/main/java/demo/Value.java")));
+        assertEquals(2, result.applied().size());
+    }
+
+    /** 不把有旧范围的 hunk 或无前缀正文当成新增内容，后续错误仍阻止前面的文件落盘。 */
+    @Test
+    void rejectsAmbiguousAddedFileBodiesBeforeWritingAnyFiles() {
+        for (String invalid : List.of("@@ -1,2 +1,2 @@\n+class Bad {}", "@@\npackage demo;", "@@\n@@\n+class Bad {}")) {
+            var session = session();
+            var result = service.apply("*** Begin Patch\n*** Add File: README.md\n+Ready\n"
+                    + "*** Add File: src/main/java/demo/Bad.java\n" + invalid + "\n*** End Patch", session);
+            assertFalse(result.ok());
+            assertTrue(result.message().contains("Add File block every source line"));
+            assertFalse(Files.exists(root.resolve("README.md")));
+            assertEquals(0, session.writeVersion());
+        }
+    }
+
     @TempDir Path root;
     private final WorkspacePatchService service = new WorkspacePatchService();
 

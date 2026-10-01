@@ -9,6 +9,30 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class WorkspaceCheckpointFeedbackTest {
+    /** 保存状态时保留底层原因和失败请求，去掉重复的完整业务正文并控制体积。 */
+    @Test
+    void finalFailureSummaryRetainsActionableEvidenceWithoutDuplicatingRawBehavior() {
+        var behavior = new BenchmarkBehaviorResult("FAIL", List.of(
+                new BenchmarkBehaviorFinding("reject", false, "HTTP 500; Location=; body=" + "large-html".repeat(500),
+                        "FAIL", "POST /items; invalid form", "400; reject invalid input")), null);
+        String errors = "Observed cause: NoSuchBeanDefinitionException: demo.Store\n" + "wrapper".repeat(900)
+                + "\nPublic behavior checks (sourceHash=saved-hash): raw-business-json";
+        var checkpoint = new WorkspaceCheckpointService.CheckpointResult("final", "FAILED", "saved-hash", "snapshot", "report.json",
+                com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult.notRun(
+                        com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStage.BUILD),
+                com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult.notRun(
+                        com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStage.TEST),
+                false, List.of(), errors, false, false, behavior);
+        String summary = WorkspaceCheckpointFeedback.failureSummary(checkpoint);
+        assertTrue(summary.contains("NoSuchBeanDefinitionException: demo.Store"));
+        assertTrue(summary.contains("sourceHash=saved-hash"));
+        assertTrue(summary.contains("request=POST /items; invalid form expected=400"));
+        assertTrue(summary.contains("actual=HTTP 500"));
+        assertFalse(summary.contains("raw-business-json"));
+        assertFalse(summary.contains("large-html"));
+        assertTrue(summary.length() < 8_500);
+    }
+
     /** 状态码已不匹配时省去 HTML，使一组失败请求同时进入业务诊断预算。 */
     @Test
     void keepsAllStatusFailuresWithinTheBehaviorSummaryBudget() {

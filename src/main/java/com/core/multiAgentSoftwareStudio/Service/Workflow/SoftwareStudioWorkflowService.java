@@ -7,6 +7,7 @@ import com.core.multiAgentSoftwareStudio.Model.Workflow.WorkflowExecutionFailure
 import com.core.multiAgentSoftwareStudio.Service.Generation.BatchGenerationService;
 import com.core.multiAgentSoftwareStudio.Service.Generation.ProjectScaffoldService;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceAgentRunResult;
+import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceCheckpointFeedback;
 import com.core.multiAgentSoftwareStudio.Service.AgentRuntime.WorkspaceCheckpointService;
 import com.core.multiAgentSoftwareStudio.Service.Metric.LlmUsageMetricsService;
 import com.core.multiAgentSoftwareStudio.Service.Workflow.Node.PersistenceNodeService;
@@ -210,7 +211,12 @@ public class SoftwareStudioWorkflowService {
                     + "; " + development.message());
             logger.accept("   Development stopped: " + development.stopReason()
                     + "; independently verifying preserved candidate.");
-            checkpointService.verifyCandidate(data, logger);
+            var finalVerification = checkpointService.verifyCandidate(data, logger);
+            // 额度停止说明过程原因，不能覆盖随后独立验收发现的真实缺陷。
+            if (!finalVerification.allowCompletion()) {
+                milestoneService.recordFailure(data, "Development stopped: " + development.stopReason() + "\n"
+                        + WorkspaceCheckpointFeedback.failureSummary(finalVerification));
+            }
         }
         if (data.milestoneState != null && data.milestoneState.active()
                 && data.milestoneState.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED

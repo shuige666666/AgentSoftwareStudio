@@ -61,10 +61,11 @@ final class WorkspaceAgentContextCompactor {
         pinned.add(messages.getFirst());
         // 当前任务由持久化状态重建，首任务通过后不能重新注入旧目标。
         if (session.mode() == WorkspaceAgentMode.DEVELOPMENT
-                && session.workflowData().milestoneState != null
-                && session.workflowData().milestoneState.active()) {
-            pinned.add(ToolChatMessage.user(DevelopmentMilestoneObjective.render(session.workflowData(),
-                    session.lastCheckpointHash().isBlank())));
+                && session.workflowData().milestoneState != null) {
+            boolean includePreviousFailure = session.lastCheckpointHash().isBlank();
+            pinned.add(ToolChatMessage.user(session.workflowData().milestoneState.active()
+                    ? DevelopmentMilestoneObjective.render(session.workflowData(), includePreviousFailure)
+                    : DevelopmentMilestoneObjective.renderSingle(session.workflowData(), includePreviousFailure)));
         } else {
             pinned.add(messages.get(1));
         }

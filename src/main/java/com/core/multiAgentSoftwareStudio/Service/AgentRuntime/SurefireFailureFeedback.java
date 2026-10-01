@@ -64,7 +64,8 @@ final class SurefireFailureFeedback {
                     String trace = problem.getTextContent();
                     String location = firstProjectFrame(root, trace);
                     failures.add(new Failure(test.getAttribute("classname") + "." + test.getAttribute("name"),
-                            problem.getTagName(), bounded(problem.getAttribute("message"), 700), location));
+                            problem.getTagName(), bounded(problem.getAttribute("message"), 700), location,
+                            traceCauses(trace)));
                 }
             } catch (Exception ignored) {
                 // 非法或未写完的 XML 只失去结构化诊断，不改变真实验证结论。
@@ -73,6 +74,9 @@ final class SurefireFailureFeedback {
         if (failures.isEmpty()) return "";
         StringBuilder result = new StringBuilder("Surefire failure evidence (fresh reports; compare with the public contract):\n");
         result.append("Failed/error test cases: ").append(failures.size()).append('\n');
+        // 上下文失败的长包装消息会淹没实际缺失 Bean 等原因，先交付原始异常链末端的证据。
+        failures.stream().flatMap(f -> f.causes().stream()).distinct().limit(3).forEach(cause ->
+                result.append("Observed cause from exception trace: ").append(cause).append('\n'));
         Map<String, Integer> shared = new LinkedHashMap<>();
         failures.stream().filter(f -> !f.location().isBlank())
                 .forEach(f -> shared.merge(f.location(), 1, Integer::sum));
@@ -134,5 +138,16 @@ final class SurefireFailureFeedback {
         return text.length() <= max ? text : text.substring(0, max) + "\n[diagnostic truncated; full report retained]";
     }
 
-    private record Failure(String test, String kind, String message, String location) { }
+    /** 读取真实异常链，优先保留最内层原因；不根据业务名或失败数量推断根因。 */
+    private static List<String> traceCauses(String trace) {
+        List<String> causes = trace.lines().map(String::strip)
+                .filter(line -> line.startsWith("Caused by:")).distinct().toList();
+        List<String> result = new ArrayList<>();
+        for (int index = causes.size() - 1; index >= Math.max(0, causes.size() - 3); index--) {
+            result.add(bounded(causes.get(index), 900));
+        }
+        return result;
+    }
+
+    private record Failure(String test, String kind, String message, String location, List<String> causes) { }
 }

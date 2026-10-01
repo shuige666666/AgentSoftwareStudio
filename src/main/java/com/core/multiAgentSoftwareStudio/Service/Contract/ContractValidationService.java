@@ -778,12 +778,75 @@ public class ContractValidationService {
                 boolean writesResponse = header.contains("HttpServletResponse")
                         && (body.contains("sendRedirect(")
                                 || body.contains("setStatus(") && body.toLowerCase(Locale.ROOT).contains("location"));
-                if (redirectIntent && !writesResponse) {
+                if (redirectIntent && !writesResponse
+                        && !hasDelegatedRedirectResponse(file, body, mainJavaFiles)) {
                     warnings.add("Redirect endpoint `GET " + endpoint + "` in " + file.filename()
                             + " returns void without writing an explicit 3xx response and Location header.");
                 }
             }
         }
+    }
+
+    /** 识别末尾显式抛出异常、由本控制器或全局处理器返回跳转的标准 Spring 写法。 */
+    private boolean hasDelegatedRedirectResponse(SourceCode controller, String body, List<SourceCode> files) {
+        // 无花括号的条件 throw 不能代表入口必然跳转；仅接受独立的末尾语句。
+        Matcher thrown = Pattern.compile("(?:^|[;}])\\s*throw\\s+new\\s+([\\w.$]+)\\s*\\([^;]*\\);\\s*$")
+                .matcher(body);
+        if (!thrown.find()) return false;
+        String exceptionType = qualifiedSourceType(controller.code(), thrown.group(1));
+        Pattern handlerAnnotation = Pattern.compile(
+                "@ExceptionHandler\\s*\\(\\s*(?:value\\s*=\\s*)?([\\w.$]+)\\s*\\.class\\s*\\)");
+        for (SourceCode file : files) {
+            String code = file.code() == null ? "" : file.code();
+            // 其他 Controller 的局部处理器不能替代当前入口；有作用域参数的 Advice 留给实际验证。
+            if (!file.filename().equals(controller.filename())
+                    && !Pattern.compile("@(?:RestControllerAdvice|ControllerAdvice)\\b(?!\\s*\\()")
+                        .matcher(code).find()) continue;
+            Matcher handler = handlerAnnotation.matcher(code);
+            while (handler.find()) {
+                if (!exceptionType.equals(qualifiedSourceType(code, handler.group(1)))) continue;
+                int start = code.indexOf('{', handler.end());
+                if (start < 0 || start - handler.end() > 1_000) continue;
+                int end = findMatchingBrace(code, start);
+                if (end < 0) continue;
+                String handlerBody = code.substring(start + 1, end);
+                Matcher response = Pattern.compile(
+                        "\\breturn\\s+((?:org\\.springframework\\.http\\.)?ResponseEntity\\s*\\.[^;]+);\\s*$")
+                        .matcher(handlerBody);
+                if (!response.find()) continue;
+                String returned = response.group(1);
+                boolean explicitRedirect = Pattern.compile(
+                        "\\bstatus\\s*\\(\\s*(?:30[12378]|(?:HttpStatus\\s*\\.\\s*)?"
+                                + "(?:MOVED_PERMANENTLY|FOUND|SEE_OTHER|TEMPORARY_REDIRECT|PERMANENT_REDIRECT))\\s*\\)")
+                        .matcher(returned).find()
+                        && Pattern.compile("\\b(?:header\\s*\\(\\s*\"Location\"\\s*,|location\\s*\\()", Pattern.CASE_INSENSITIVE)
+                            .matcher(returned).find();
+                if (explicitRedirect) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 按显式包名、import 和本文件声明解析异常类型，防止同名异常的处理器误匹配。 */
+    private String qualifiedSourceType(String code, String type) {
+        type = type.replace('$', '.');
+        if (type.contains(".") && Character.isLowerCase(type.charAt(0))) return type;
+        Matcher imports = IMPORT_PATTERN.matcher(code);
+        while (imports.find()) {
+            String imported = imports.group(1);
+            String simple = simpleTypeName(imported);
+            if (type.equals(simple) || type.startsWith(simple + ".")) {
+                return imported + type.substring(simple.length());
+            }
+        }
+        Matcher packageName = PACKAGE_PATTERN.matcher(code);
+        String prefix = packageName.find() ? packageName.group(1) + "." : "";
+        Matcher outer = PUBLIC_TYPE_PATTERN.matcher(code);
+        if (outer.find() && !outer.group(2).equals(type) && !type.contains(".")
+                && Pattern.compile("\\bclass\\s+" + Pattern.quote(type) + "\\b").matcher(code).find()) {
+            return prefix + outer.group(2) + "." + type;
+        }
+        return prefix + type;
     }
 
     private boolean hasRedirectContract(ProjectContract contract, String endpoint) {

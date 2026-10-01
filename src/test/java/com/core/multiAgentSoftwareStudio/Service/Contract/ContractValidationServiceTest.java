@@ -16,6 +16,82 @@ class ContractValidationServiceTest {
 
     private final ContractValidationService service = new ContractValidationService(new SourceCodePathService());
 
+    /** 真实失败产物通过异常交给全局处理器返回302，静态检查不能仅凭入口返回void误拦。 */
+    @Test
+    void acceptsRedirectDelegatedToTheMatchingGlobalExceptionHandler() {
+        String controller = """
+                package demo;
+                import org.springframework.web.bind.annotation.*;
+                @RestController
+                public class NavigationController {
+                    @GetMapping("/{code}")
+                    public void redirect(String code) { throw new Move(code); }
+                    public static class Move extends RuntimeException {
+                        public Move(String location) { super(location); }
+                    }
+                }
+                """;
+        String handler = """
+                package demo;
+                import org.springframework.web.bind.annotation.*;
+                import org.springframework.http.*;
+                @RestControllerAdvice
+                public class HttpAdvice {
+                    @ExceptionHandler(demo.NavigationController.Move.class)
+                    public ResponseEntity<Void> handle(demo.NavigationController.Move ex) {
+                        return ResponseEntity.status(HttpStatus.FOUND).header("Location", ex.getMessage()).build();
+                    }
+                }
+                """;
+        for (String valid : List.of(handler, handler.replace(
+                "ResponseEntity.status(HttpStatus.FOUND).header(\"Location\", ex.getMessage())",
+                "ResponseEntity.status(302).location(java.net.URI.create(ex.getMessage()))"))) {
+            assertFalse(redirectWarning(controller, valid));
+        }
+    }
+
+    /** 错类型、错误状态、缺Location、局部或受限Advice、非必然抛出均不能代替合法跳转。 */
+    @Test
+    void doesNotCreditUnrelatedOrNonRedirectExceptionHandlers() {
+        String controller = """
+                package demo;
+                import org.springframework.web.bind.annotation.*;
+                @RestController
+                public class NavigationController {
+                    @GetMapping("/{code}") public void redirect(String code) { throw new Move(code); }
+                    public static class Move extends RuntimeException { public Move(String value) { super(value); } }
+                }
+                """;
+        String handler = """
+                package demo;
+                @RestControllerAdvice
+                public class HttpAdvice {
+                    @ExceptionHandler(demo.NavigationController.Move.class)
+                    public ResponseEntity<Void> handle(demo.NavigationController.Move ex) {
+                        return ResponseEntity.status(HttpStatus.FOUND).header("Location", ex.getMessage()).build();
+                    }
+                }
+                """;
+        for (String invalid : List.of("", handler.replace("demo.NavigationController.Move.class", "other.NavigationController.Move.class"),
+                handler.replace("HttpStatus.FOUND", "HttpStatus.OK"), handler.replace("\"Location\"", "\"X-Target\""),
+                handler.replace("ResponseEntity.status(HttpStatus.FOUND).header(\"Location\", ex.getMessage())",
+                        "ResponseEntity.temporaryRedirect(java.net.URI.create(ex.getMessage()))"),
+                handler.replace("@RestControllerAdvice", "@RestController"),
+                handler.replace("@RestControllerAdvice", "@RestControllerAdvice(basePackages=\"other\")"))) {
+            assertTrue(redirectWarning(controller, invalid));
+        }
+        assertTrue(redirectWarning(controller.replace("throw new Move(code);", "if (code.isBlank()) { throw new Move(code); }"), handler));
+        assertTrue(redirectWarning(controller.replace("throw new Move(code);", "if (code.isBlank()) throw new Move(code);"), handler));
+    }
+
+    /** 两份源码只验证跳转相关告警，其余编译或契约事实仍由原门禁独立负责。 */
+    private boolean redirectWarning(String controller, String handler) {
+        return service.validateProject(List.of(
+                new SourceCode("src/main/java/demo/NavigationController.java", "java", controller),
+                new SourceCode("src/main/java/demo/HttpAdvice.java", "java", handler)), null)
+                .stream().anyMatch(value -> value.startsWith("Redirect endpoint"));
+    }
+
     /**
      * 投票案例暴露出的字段错位、未使用路径变量和静态首页冲突必须在 Docker 前形成确定性告警。
      */

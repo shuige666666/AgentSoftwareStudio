@@ -41,6 +41,50 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class WorkspaceToolRegistryTest {
+    /** 回放真实的短参数失败：修好 JSON 仍须检查补丁边界，只有显式重提完整补丁才落盘。 */
+    @Test
+    void replaysSavedMalformedArgumentsAndRequiresAnExplicitValidResubmission() throws Exception {
+        String raw;
+        try (var input = getClass().getResourceAsStream("/agent-runtime/note-ordered-incomplete-arguments.txt")) {
+            raw = new String(java.util.Objects.requireNonNull(input).readAllBytes(), StandardCharsets.UTF_8);
+        }
+        Path fixtureRoot = Path.of("src/test/resources/benchmark/note-form-v1");
+        try (var files = Files.walk(fixtureRoot)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                Path target = projectRoot.resolve(fixtureRoot.relativize(file));
+                Files.createDirectories(target.getParent());
+                Files.copy(file, target);
+            }
+        }
+        var baseline = registry.snapshotWorkspace(projectRoot);
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, baseline);
+
+        var jsonFailure = objectMapper.readTree(registry.execute("apply_patch", raw, session));
+        assertEquals("TOOL_ARGUMENTS_INVALID_JSON", jsonFailure.path("error").asText());
+        assertTrue(jsonFailure.path("message").asText().contains("outer JSON"));
+        assertEquals(baseline, registry.snapshotWorkspace(projectRoot));
+        assertEquals(0, session.writeVersion());
+
+        // 离线补尾仅用于揭示第二层错误；平台没有自动修复或执行不完整调用。
+        String patch = objectMapper.readTree(raw + "\"}").path("patch").asText();
+        String completeArguments = objectMapper.writeValueAsString(Map.of("patch", patch));
+        var patchFailure = objectMapper.readTree(registry.execute("apply_patch", completeArguments, session));
+        assertFalse(patchFailure.path("ok").asBoolean());
+        assertEquals("PATCH_FORMAT", patchFailure.path("error").asText());
+        assertEquals(baseline, registry.snapshotWorkspace(projectRoot));
+        assertEquals(0, session.writeVersion());
+
+        String resubmittedPatch = patch.replace("*** End Patch\n*** Update File:", "*** Update File:");
+        var result = objectMapper.readTree(registry.execute("apply_patch",
+                objectMapper.writeValueAsString(Map.of("patch", resubmittedPatch)), session));
+        assertTrue(result.path("ok").asBoolean(), result.toString());
+        assertEquals(2, result.path("applied").size());
+        assertTrue(Files.readString(projectRoot.resolve("src/main/java/com/example/notes/NoteController.java"))
+                .contains("@PostMapping(\"/notes\")"));
+        assertTrue(Files.readString(projectRoot.resolve("src/main/resources/templates/notes/form.html"))
+                .contains("th:value"));
+    }
+
     /** 不完整的小补丁也要报告 JSON 的真实失败位置，不能统一暗示补丁太长。 */
     @Test
     void reportsTruncatedJsonLocationWithoutExecutingThePatch() throws Exception {

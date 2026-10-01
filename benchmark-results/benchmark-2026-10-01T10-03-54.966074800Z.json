@@ -1,0 +1,242 @@
+{
+  "startedAt" : "2026-10-01T10:03:54.966074800Z",
+  "finishedAt" : "2026-10-01T10:21:14.689618800Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.8-max-0902",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "PlanningAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "url-shortener-behavior-v1" ],
+    "repetitions" : 1,
+    "repairBudget" : null,
+    "gitCommit" : "0f810259acc11922476adc1f3f95fedd56cbe7a2",
+    "gitDirty" : true,
+    "workingTreeFingerprint" : "9af360a934327818ce266c996fbaf8306a9fa0e55d10468aa798b5caac49ee29",
+    "requirementSha256" : {
+      "url-shortener-behavior-v1" : "d8271e7110f3f287b5b1ce1ba8f2eecacee43b75357a5e58e58019e799bf9f11"
+    },
+    "development" : {
+      "maxModelTurns" : 36,
+      "maxToolCalls" : 108,
+      "verificationProtocol" : "snapshot-build-all-tests-contract-final-v1"
+    },
+    "planningSourceProjectId" : null,
+    "replayMode" : "SAVED_MILESTONES"
+  },
+  "cases" : [ {
+    "caseId" : "url-shortener-behavior-v1",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Java_17_Spring_Boot_短链接服务_20261001_180612",
+    "elapsedMillis" : 1039465,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "CONTRACT_GATES_PASSED",
+        "passed" : false,
+        "evidence" : "Final semantic contract gates contain 1 blocker(s): [REDIRECT_RESPONSE]"
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      } ]
+    },
+    "usage" : {
+      "calls" : 38,
+      "successfulCalls" : 38,
+      "failedCalls" : 0,
+      "durationMillis" : 723559,
+      "inputCacheHitTokens" : 170752,
+      "inputCacheMissTokens" : 247465,
+      "outputTokens" : 48623,
+      "totalTokens" : 466840,
+      "cacheMetricsAvailable" : true,
+      "finishReasonCounts" : {
+        "stop" : 2,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 36,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      },
+      "modelUsage" : {
+        "qwen3.8-max-0902" : {
+          "calls" : 2,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 0,
+          "inputCacheMissTokens" : 2021,
+          "outputTokens" : 18296,
+          "totalTokens" : 20317
+        },
+        "qwen3.7-flash" : {
+          "calls" : 36,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 170752,
+          "inputCacheMissTokens" : 245444,
+          "outputTokens" : 30327,
+          "totalTokens" : 446523
+        }
+      }
+    },
+    "attemptsUsed" : 1,
+    "finalFailureKind" : "UNKNOWN",
+    "validationWarningCount" : 1,
+    "verificationSummary" : {
+      "buildExitCode" : 0,
+      "testExitCode" : 0,
+      "buildPassed" : true,
+      "testPassed" : true,
+      "testsRun" : 13,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 6282,
+      "testDurationMillis" : 19439,
+      "primaryFailureKind" : "NONE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 8,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : {
+        "SPRING_CONTEXT" : 1
+      },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 1,
+        "acceptedSlices" : 0,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 0,
+        "sliceRepairSafetyLimit" : 0,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 0,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "",
+        "slicePolicyVersion" : "vertical-slice-v7",
+        "declaredProjectType" : "SPRING_BOOT",
+        "effectiveProjectType" : "SPRING_BOOT",
+        "projectProfileId" : "java17-spring-boot-3.2"
+      }
+    },
+    "workflowError" : null,
+    "behavior" : {
+      "status" : "PASS",
+      "findings" : [ {
+        "behavior" : "link.create",
+        "passed" : true,
+        "evidence" : "HTTP 201, Location=, body={\"code\":\"RbqFSzdF\",\"originalUrl\":\"https://example.org/docs\"}",
+        "status" : "PASS",
+        "request" : "POST /api/links; 输入见公开检查约定",
+        "expected" : "POST /api/links {url:https://example.org/docs}: 201; code 非空; originalUrl 等于 url"
+      }, {
+        "behavior" : "link.missing.query",
+        "passed" : true,
+        "evidence" : "HTTP 404, Location=, body={\"error\":\"Not Found\",\"message\":\"Short link not found for code: __missing_baseline_code__\"}",
+        "status" : "PASS",
+        "request" : "GET /api/links/__missing_baseline_code__",
+        "expected" : "不存在的 code: 404"
+      }, {
+        "behavior" : "link.missing.visit",
+        "passed" : true,
+        "evidence" : "HTTP 404, Location=, body={\"error\":\"Not Found\",\"message\":\"Short link not found for code: __missing_baseline_code__\"}",
+        "status" : "PASS",
+        "request" : "GET /__missing_baseline_code__",
+        "expected" : "不存在的 code: 404"
+      }, {
+        "behavior" : "link.query",
+        "passed" : true,
+        "evidence" : "HTTP 200, Location=, body={\"code\":\"RbqFSzdF\",\"originalUrl\":\"https://example.org/docs\"}",
+        "status" : "PASS",
+        "request" : "GET /api/links/RbqFSzdF",
+        "expected" : "GET /api/links/{code}: 200; code、originalUrl 与创建结果一致"
+      }, {
+        "behavior" : "link.visit",
+        "passed" : true,
+        "evidence" : "HTTP 302, Location=https://example.org/docs, body=",
+        "status" : "PASS",
+        "request" : "GET /RbqFSzdF",
+        "expected" : "GET /{code}: 302; Location=https://example.org/docs"
+      } ],
+      "reason" : null
+    }
+  } ],
+  "platformSuccessCount" : 0,
+  "independentQualityPassCount" : 0,
+  "falseSuccessCount" : 0,
+  "falseSuccessRate" : null,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-10-01T10-03-54.966074800Z.json",
+  "fullWorkflowSuccessRate" : 0.0
+}
