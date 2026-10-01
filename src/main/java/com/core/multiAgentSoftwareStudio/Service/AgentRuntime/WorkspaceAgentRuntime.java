@@ -123,7 +123,7 @@ public class WorkspaceAgentRuntime {
                 // 全局预算将尽时提醒先验证当前改动，避免最后几轮留下未编译的新文件。
                 if (mode == WorkspaceAgentMode.DEVELOPMENT && maxModelTurns > 0
                         && turn == Math.max(1, maxModelTurns - Math.min(8, Math.max(3, maxModelTurns / 6)))) {
-                    session.messages().add(ToolChatMessage.user(developmentClosingPrompt(session,
+                    session.messages().add(ToolChatMessage.user(developmentClosingPrompt(
                             maxModelTurns - turn + 1)));
                 }
                 // 包括无工具回复后的续跑，统一在下一次请求前按合法工具边界整理历史。
@@ -168,7 +168,7 @@ public class WorkspaceAgentRuntime {
                         validateCandidate(session, auditSession);
                     }
                     session.messages().add(ToolChatMessage.user(mode == WorkspaceAgentMode.DEVELOPMENT
-                            ? developmentContinuationPrompt(session)
+                            ? developmentContinuationPrompt()
                             : "Do not claim completion in text. Use tools to inspect and verify the workspace, then call complete_stage."));
                     continue;
                 }
@@ -349,27 +349,15 @@ public class WorkspaceAgentRuntime {
         return limit <= 0 ? "unlimited" : Integer.toString(limit);
     }
 
-    /** 无工具回复后重申当前交付门禁，防止多任务会话直接跳到 final。 */
-    private String developmentContinuationPrompt(WorkspaceAgentSession session) {
-        var state = session.workflowData().milestoneState;
-        if (state != null && state.active() && state.current() != null
-                && state.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED) {
-            return "Continue implementing and testing the current milestone " + state.current().id()
-                    + ". Submit scope=progress with that milestoneId before working on later milestones.";
-        }
+    /** 无工具回复后重申完整项目验收入口，不强制逐任务推进。 */
+    private String developmentContinuationPrompt() {
         return "Continue editing and verifying. To request completion, call submit_checkpoint with scope=final.";
     }
 
-    /** 在剩余轮次有限时重申当前任务的验证和提交顺序。 */
-    private String developmentClosingPrompt(WorkspaceAgentSession session, int remainingTurns) {
-        var state = session.workflowData().milestoneState;
-        String current = state != null && state.active() && state.current() != null
-                && state.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED
-                ? "current milestone " + state.current().id() + " with submit_checkpoint(scope=progress, milestoneId="
-                        + state.current().id() + ")"
-                : "project with submit_checkpoint(scope=final)";
+    /** 在剩余轮次有限时提醒验证已有改动并请求全项目验收。 */
+    private String developmentClosingPrompt(int remainingTurns) {
         return "About " + remainingTurns + " model turns remain in the global budget. Prioritize compiling "
-                + "and running all existing tests, fixing their failures, then verifying the " + current
+                + "and running all existing tests, fixing their failures, then verifying the project with submit_checkpoint(scope=final)"
                 + ". Do not add unrelated future files or tests that cannot be verified before the budget ends.";
     }
 

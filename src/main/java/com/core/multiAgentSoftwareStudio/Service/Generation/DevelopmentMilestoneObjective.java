@@ -7,7 +7,7 @@ public final class DevelopmentMilestoneObjective {
 
     private DevelopmentMilestoneObjective() { }
 
-    /** 所有推进策略共享完整目标信息，对照时只改变控制方式。 */
+    /** 提供完整目标信息，任务建议不能隐藏后续能力的契约。 */
     public static String projectContext(SoftwareStudioWorkflowData data) {
         return "Original user request:\n" + data.userRequest + "\n\nProduct requirements:\n" + data.prd
                 + "\n\nArchitecture and file responsibilities:\n" + data.structure
@@ -40,9 +40,7 @@ public final class DevelopmentMilestoneObjective {
 
     /** 已收到本会话验证时，历史中断诊断由当前权威反馈替代，完整目标仍保留。 */
     public static String render(SoftwareStudioWorkflowData data, boolean includePreviousFailure) {
-        boolean advisory = data.milestoneState.policy() ==
-                com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
-        StringBuilder objective = new StringBuilder(projectContext(data)).append(advisory ? """
+        StringBuilder objective = new StringBuilder(projectContext(data)).append("""
                 Implement and verify the complete project. Business milestones are advisory planning aids.
                 Use one continuous development session and one global model/tool budget.
                 You may combine tasks, change their implementation order, and implement shared code.
@@ -53,21 +51,6 @@ public final class DevelopmentMilestoneObjective {
                 Request submit_checkpoint(scope=final) whenever the whole project is ready, even if individual
                 milestone acceptance records are missing. Final still requires the full contract, all tests,
                 and bound independent public behavior checks. Never infer completion from a build alone.
-                """ : """
-                Implement the requested project through the ordered business milestones below.
-                Work in one continuous development session with one global model/tool budget.
-                Inspect relevant source files before editing. The current milestone context is included below.
-                Each milestone may change multiple layers and must keep all earlier required behavior.
-                Implement and test the current milestone first. Defer later endpoints, pages and tests until
-                its progress checkpoint passes; create only shared types needed to keep the current code building.
-                Group related source changes into multi-file patches where practical, then run focused tests.
-                Do not spend the remaining turns writing unrelated future files or polishing the whole project
-                before requesting the current milestone checkpoint.
-                After implementing and testing the current milestone, call submit_checkpoint with
-                scope=progress and its milestoneId. A passing response gives the next milestone.
-                After every milestone is accepted, call submit_checkpoint with scope=final.
-                Do not claim a capability is complete from a build alone; add meaningful behavior tests.
-
                 """).append("\n\nBusiness milestones:\n");
         data.milestoneState.tasks().forEach(task -> objective.append("- ").append(task.id())
                 .append(": ").append(task.goal())
@@ -77,7 +60,7 @@ public final class DevelopmentMilestoneObjective {
         objective.append("Use read_planning(slice-plan.json) for each task's contract mapping; the full project contract is above.\n");
         var current = data.milestoneState.current();
         if (current != null) {
-            objective.append(advisory ? "\nSuggested next milestone: " : "\nCurrent milestone: ").append(current.id()).append('\n');
+            objective.append("\nSuggested next milestone: ").append(current.id()).append('\n');
             objective.append("Current acceptance criteria: ").append(current.acceptanceCriteria()).append('\n');
             data.sliceDeliveryPlan.slices().stream().filter(slice -> slice.id().equals(current.id()))
                     .findFirst().ifPresent(slice -> appendCurrentContract(objective, slice.contract(), data.contract));

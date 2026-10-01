@@ -195,7 +195,7 @@ class WorkspaceAgentContextCompactorTest {
                         "a", "a", List.of(), false, "", "", ""),
                         new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.Task(
                         "b", "b", List.of(), false, "", "", "")), 0, 0, "",
-                com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY, "");
+                "");
         addRound(session, "read", "read_files", "{}", "{}");
         var policy = new WorkspaceAgentLimitsConfig().getContext();
         policy.setCompactAtPercent(1);
@@ -311,7 +311,7 @@ class WorkspaceAgentContextCompactorTest {
 
         assertTrue(result.compacted());
         String objective = session.messages().get(1).content();
-        assertTrue(objective.contains("Current milestone: edit"));
+        assertTrue(objective.contains("Suggested next milestone: edit"));
         assertTrue(objective.contains("PUT /items/{id}"));
         assertTrue(objective.contains("create item [accepted at accepted-hash]"));
         assertFalse(objective.contains("Current milestone: create"));

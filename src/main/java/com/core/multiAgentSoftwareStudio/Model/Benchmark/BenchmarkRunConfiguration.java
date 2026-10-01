@@ -26,7 +26,7 @@ public record BenchmarkRunConfiguration(
                                      BenchmarkRepairBudgetConfiguration repairBudget,
                                      String gitCommit, boolean gitDirty, String workingTreeFingerprint) {
         this(caseIds, repetitions, repairBudget, gitCommit, gitDirty, workingTreeFingerprint, Map.of(), null,
-                null, BenchmarkReplayMode.SAVED_MILESTONES);
+                null, BenchmarkReplayMode.SAVED_PLAN);
     }
 
     public BenchmarkRunConfiguration(List<String> caseIds, int repetitions,
@@ -35,7 +35,7 @@ public record BenchmarkRunConfiguration(
                                      Map<String, String> requirementSha256) {
         this(caseIds, repetitions, repairBudget, gitCommit, gitDirty,
                 workingTreeFingerprint, requirementSha256, null, null,
-                BenchmarkReplayMode.SAVED_MILESTONES);
+                BenchmarkReplayMode.SAVED_PLAN);
     }
 
     public BenchmarkRunConfiguration(List<String> caseIds, int repetitions,
@@ -45,7 +45,7 @@ public record BenchmarkRunConfiguration(
                                      BenchmarkDevelopmentConfiguration development) {
         this(caseIds, repetitions, repairBudget, gitCommit, gitDirty,
                 workingTreeFingerprint, requirementSha256, development, null,
-                BenchmarkReplayMode.SAVED_MILESTONES);
+                BenchmarkReplayMode.SAVED_PLAN);
     }
 
     public BenchmarkRunConfiguration(List<String> caseIds, int repetitions,
@@ -56,6 +56,6 @@ public record BenchmarkRunConfiguration(
                                      String planningSourceProjectId) {
         this(caseIds, repetitions, repairBudget, gitCommit, gitDirty, workingTreeFingerprint,
                 requirementSha256, development, planningSourceProjectId,
-                BenchmarkReplayMode.SAVED_MILESTONES);
+                BenchmarkReplayMode.SAVED_PLAN);
     }
 }

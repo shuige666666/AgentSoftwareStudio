@@ -506,11 +506,7 @@ public class WorkspaceToolRegistry {
         String summary = arguments.path("summary").asText("");
         var state = session.workflowData().milestoneState;
         if (state != null && state.active()) {
-            boolean advisory = state.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
-            if ("final".equals(scope) && !advisory && !state.allAccepted()) {
-                return jsonError("MILESTONES_PENDING", "Accept every business milestone before final checkpoint");
-            }
-            if ("progress".equals(scope) && (!advisory || arguments.has("milestoneId") || arguments.has("milestoneIds"))) {
+            if ("progress".equals(scope) && (arguments.has("milestoneId") || arguments.has("milestoneIds"))) {
                 String id = arguments.path("milestoneId").asText("");
                 List<String> ids = new ArrayList<>();
                 if (arguments.has("milestoneIds")) {
@@ -524,7 +520,7 @@ public class WorkspaceToolRegistry {
                 try {
                     milestoneService.validateSelection(session.workflowData(), ids);
                 } catch (IllegalArgumentException invalid) {
-                    return jsonError(advisory ? "INVALID_MILESTONE_SELECTION" : "MILESTONE_OUT_OF_ORDER", invalid.getMessage());
+                    return jsonError("INVALID_MILESTONE_SELECTION", invalid.getMessage());
                 }
                 WorkspaceCheckpointService.CheckpointResult result = checkpointService.verify(
                         session, scope, summary,

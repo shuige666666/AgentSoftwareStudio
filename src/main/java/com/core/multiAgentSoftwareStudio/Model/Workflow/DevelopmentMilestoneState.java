@@ -1,27 +1,27 @@
 package com.core.multiAgentSoftwareStudio.Model.Workflow;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.io.Serializable;
 import java.util.List;
 
 /** 保存当前 run 的业务能力进度、验证版本和跨进程续接所需的全局预算。 */
+@JsonIgnoreProperties("policy")
 public record DevelopmentMilestoneState(int schemaVersion, List<Task> tasks,
                                         int modelTurnsUsed, int toolCallsUsed,
-                                        String lastFailure, DevelopmentMilestonePolicy policy,
+                                        String lastFailure,
                                         String latestAcceptedId) implements Serializable {
     private static final long serialVersionUID = 1L;
-    public static final int CURRENT_SCHEMA_VERSION = 2;
+    public static final int CURRENT_SCHEMA_VERSION = 3;
 
-    /** 旧状态没有策略字段，继续按顺序门禁解释。 */
+    /** 旧状态缺少最近接受标识时，从已有验证记录恢复版本。 */
     public DevelopmentMilestoneState(int schemaVersion, List<Task> tasks, int modelTurnsUsed,
                                      int toolCallsUsed, String lastFailure) {
-        this(schemaVersion, tasks, modelTurnsUsed, toolCallsUsed, lastFailure,
-                DevelopmentMilestonePolicy.ORDERED, "");
+        this(schemaVersion, tasks, modelTurnsUsed, toolCallsUsed, lastFailure, "");
     }
 
     public DevelopmentMilestoneState {
         tasks = tasks == null ? List.of() : List.copyOf(tasks);
         lastFailure = lastFailure == null ? "" : lastFailure;
-        policy = policy == null ? DevelopmentMilestonePolicy.ORDERED : policy;
         latestAcceptedId = latestAcceptedId == null ? "" : latestAcceptedId;
     }
 

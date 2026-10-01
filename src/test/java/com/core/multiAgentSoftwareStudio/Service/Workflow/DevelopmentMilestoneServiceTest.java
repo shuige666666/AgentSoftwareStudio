@@ -25,7 +25,6 @@ class DevelopmentMilestoneServiceTest {
     void acceptsCurrentMilestoneAndCarriesPreviousContract() {
         var service = new DevelopmentMilestoneService(new ObjectMapper());
         var data = new SoftwareStudioWorkflowData("create and vote");
-        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED;
         data.projectPath = root.toString();
         var create = new ApiEndpointContract("POST", "/polls", "", "", "PollController", "create");
         var vote = new ApiEndpointContract("POST", "/polls/{id}/votes", "", "", "PollController", "vote");
@@ -36,31 +35,29 @@ class DevelopmentMilestoneServiceTest {
         service.initialize(data);
 
         assertTrue(data.milestoneState.active());
-        assertEquals(1, service.contractThroughCurrent(data).endpoints().size());
-        assertThrows(IllegalArgumentException.class,
-                () -> service.accept(data, "vote", checkpoint("PASSED")));
+        assertEquals(1, service.contractForSelection(data, List.of("create")).endpoints().size());
         service.accept(data, "create", checkpoint("PASSED"));
 
         assertEquals(List.of("create"), data.acceptedSliceIds);
         assertEquals("vote", data.milestoneState.current().id());
-        assertEquals(2, service.contractThroughCurrent(data).endpoints().size());
+        assertEquals(2, service.contractForSelection(data, List.of("vote")).endpoints().size());
         assertEquals("hash-1", service.load(root).lastAccepted().sourceHash());
         assertFalse(data.milestoneState.allAccepted());
         service.accept(data, "vote", checkpoint("PASSED"));
         assertTrue(data.milestoneState.allAccepted());
     }
 
-    /** 新任务默认允许合并、调整顺序，并持久化策略供后续续接使用。 */
+    /** 新任务允许合并、调整顺序，状态不再包含推进策略字段。 */
     @Test
-    void newProjectDefaultsToAdvisoryAndPersistsItsPolicy() {
+    void newProjectAllowsMergedTasksWithoutPolicyField() throws Exception {
         var service = new DevelopmentMilestoneService(new ObjectMapper());
         var data = new SoftwareStudioWorkflowData("two related capabilities");
         data.projectPath = root.toString();
         data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of(slice("a", empty()), slice("b", empty())), List.of(), "test");
         service.initialize(data);
 
-        assertEquals(com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY,
-                service.load(root).policy());
+        assertFalse(new ObjectMapper().readTree(root.resolve(".software-studio")
+                .resolve(DevelopmentMilestoneService.STATE_FILE).toFile()).has("policy"));
         service.validateSelection(data, List.of("b", "a"));
         service.acceptSelected(data, List.of("b", "a"), checkpoint("PASSED"));
         assertTrue(service.load(root).allAccepted());
@@ -111,7 +108,6 @@ class DevelopmentMilestoneServiceTest {
         var service = new DevelopmentMilestoneService(new ObjectMapper());
         var data = new SoftwareStudioWorkflowData("three capabilities");
         data.projectPath = root.toString();
-        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
         data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of(slice("a", empty()), slice("b", empty()),
                 slice("c", empty())), List.of(), "test");
         service.initialize(data);
@@ -123,7 +119,6 @@ class DevelopmentMilestoneServiceTest {
         assertTrue(loaded.allAccepted());
         assertEquals("b", loaded.lastAccepted().id());
         assertEquals(9, loaded.modelTurnsUsed());
-        assertEquals(data.milestonePolicy, loaded.policy());
         assertEquals(List.of("a", "b", "c"), loaded.tasks().stream().map(task -> task.id()).toList());
     }
 
@@ -133,7 +128,6 @@ class DevelopmentMilestoneServiceTest {
         var service = new DevelopmentMilestoneService(new ObjectMapper());
         var data = new SoftwareStudioWorkflowData("three endpoints");
         data.projectPath = root.toString();
-        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
         data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of("a", "b", "c").stream().map(id ->
                 slice(id, new ProjectContract(List.of(new ApiEndpointContract("GET", "/" + id, "", "", "", "")),
                         List.of(), List.of(), List.of()))).toList(), List.of(), "test");
@@ -145,9 +139,9 @@ class DevelopmentMilestoneServiceTest {
                 .map(ApiEndpointContract::path).toList());
     }
 
-    /** 旧 JSON 缺少新增字段时沿用原门禁和最近顺序接受版本。 */
+    /** 旧 JSON 仍能恢复最近接受版本，读取本身不改写历史证据。 */
     @Test
-    void loadsLegacyStateWithoutRelaxingItsPolicy() throws Exception {
+    void loadsLegacyStateWithoutChangingItsVerifiedVersion() throws Exception {
         var metadata = root.resolve(".software-studio");
         java.nio.file.Files.createDirectories(metadata);
         java.nio.file.Files.writeString(metadata.resolve(DevelopmentMilestoneService.STATE_FILE), """
@@ -155,11 +149,58 @@ class DevelopmentMilestoneServiceTest {
                 "modelTurnsUsed":3,"toolCallsUsed":4,"lastFailure":""}
                 """);
         var loaded = new DevelopmentMilestoneService(new ObjectMapper()).load(root);
-        assertEquals(com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED, loaded.policy());
+        assertEquals(1, loaded.schemaVersion());
         assertEquals("old", loaded.lastAccepted().sourceHash());
     }
 
     private ProjectContract empty() { return new ProjectContract(List.of(), List.of(), List.of(), List.of()); }
+
+    /** v1和两种v2状态均保留原始字节；迁移不能重置预算、丢失失败或自动接受任务。 */
+    @Test
+    void migratesLegacyStatesOnSaveAndPreservesOriginalEvidence() throws Exception {
+        var mapper = new ObjectMapper();
+        var service = new DevelopmentMilestoneService(mapper);
+        for (String legacyPolicy : List.of("missing", "ORDERED", "ADVISORY")) {
+            Path project = root.resolve(legacyPolicy);
+            Path metadata = project.resolve(".software-studio");
+            java.nio.file.Files.createDirectories(metadata);
+            String original = """
+                    {"schemaVersion":%s,%s"tasks":[
+                      {"id":"a","goal":"a","accepted":false},
+                      {"id":"b","goal":"b","accepted":true,"sourceHash":"verified-b",
+                       "snapshotPath":"saved-snapshot","checkpointReportPath":"saved-report"}],
+                     "modelTurnsUsed":17,"toolCallsUsed":28,"lastFailure":"missing route"%s}
+                    """.formatted(legacyPolicy.equals("missing") ? "1" : "2",
+                    legacyPolicy.equals("missing") ? "" : "\"policy\":\"" + legacyPolicy + "\",",
+                    legacyPolicy.equals("missing") ? "" : ",\"latestAcceptedId\":\"b\"");
+            Path target = metadata.resolve(DevelopmentMilestoneService.STATE_FILE);
+            Path backup = metadata.resolve(DevelopmentMilestoneService.LEGACY_STATE_BACKUP);
+            java.nio.file.Files.writeString(target, original, java.nio.charset.StandardCharsets.UTF_8);
+
+            var loaded = service.load(project);
+            assertEquals("verified-b", loaded.lastAccepted().sourceHash());
+            assertEquals(original, java.nio.file.Files.readString(target));
+            assertFalse(java.nio.file.Files.exists(backup));
+            var data = new SoftwareStudioWorkflowData("legacy project");
+            data.projectPath = project.toString(); data.milestoneState = loaded;
+            data.developmentModelTurnsUsed = loaded.modelTurnsUsed();
+            data.developmentToolCallsUsed = loaded.toolCallsUsed();
+            service.persist(data);
+
+            var migrated = service.load(project);
+            assertEquals(3, migrated.schemaVersion());
+            assertEquals(17, migrated.modelTurnsUsed());
+            assertEquals(28, migrated.toolCallsUsed());
+            assertEquals("missing route", migrated.lastFailure());
+            assertEquals(loaded.tasks(), migrated.tasks());
+            assertEquals(loaded.lastAccepted(), migrated.lastAccepted());
+            assertFalse(migrated.allAccepted());
+            assertFalse(mapper.readTree(target.toFile()).has("policy"));
+            assertEquals(original, java.nio.file.Files.readString(backup));
+            service.recordFailure(data, "new verified failure");
+            assertEquals(original, java.nio.file.Files.readString(backup));
+        }
+    }
 
     private WorkspaceCheckpointService.CheckpointResult checkpoint(String status) {
         return new WorkspaceCheckpointService.CheckpointResult("progress", status, "hash-1",

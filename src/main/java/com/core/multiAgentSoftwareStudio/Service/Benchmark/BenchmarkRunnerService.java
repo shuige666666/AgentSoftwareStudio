@@ -102,15 +102,15 @@ public class BenchmarkRunnerService {
         int repetitions = resolveRepetitions(request == null ? null : request.repetitions());
         String planningSourceProjectId = request == null ? null : request.planningSourceProjectId();
         BenchmarkReplayMode replayMode = request == null || request.replayMode() == null
-                ? BenchmarkReplayMode.SAVED_MILESTONES : request.replayMode();
+                ? BenchmarkReplayMode.SAVED_PLAN : request.replayMode();
         if (planningSourceProjectId != null && !planningSourceProjectId.isBlank()
                 && (selectedCases.size() != 1
                 || !planningSourceProjectId.matches("[\\p{L}\\p{N}_-]{1,120}"))) {
             throw new IllegalArgumentException("Planning replay needs one case and a generated project ID");
         }
-        if (replayMode != BenchmarkReplayMode.SAVED_MILESTONES
+        if (replayMode != BenchmarkReplayMode.SAVED_PLAN
                 && (planningSourceProjectId == null || planningSourceProjectId.isBlank())) {
-            throw new IllegalArgumentException("Development comparison needs a saved planning project ID");
+            throw new IllegalArgumentException("Current planning replay needs a saved planning project ID");
         }
         List<BenchmarkCase> cases = repeatCases(selectedCases, repetitions);
         Map<String, String> releaseLabels = request == null || request.modelReleaseLabels() == null
@@ -196,7 +196,7 @@ public class BenchmarkRunnerService {
             int currentCase,
             int totalCases) {
         return runCase(benchmarkCase, repetitionIndex, repetitionCount, currentCase, totalCases,
-                null, BenchmarkReplayMode.SAVED_MILESTONES);
+                null, BenchmarkReplayMode.SAVED_PLAN);
     }
 
     /** 固定规划样本与普通样本共用质量判卷，差异只在开发前是否重新调用规划模型。 */
@@ -208,7 +208,7 @@ public class BenchmarkRunnerService {
             int totalCases,
             String planningSourceProjectId) {
         return runCase(benchmarkCase, repetitionIndex, repetitionCount, currentCase, totalCases,
-                planningSourceProjectId, BenchmarkReplayMode.SAVED_MILESTONES);
+                planningSourceProjectId, BenchmarkReplayMode.SAVED_PLAN);
     }
 
     /** 两种开发方式复用同一保存的上游设计与最终判卷。 */
@@ -242,7 +242,7 @@ public class BenchmarkRunnerService {
                     : behaviorCheckId != null
                         ? workflowService.generateFromSavedPlanningWithResult(
                             planningSourceProjectId, benchmarkCase.prompt(), replayMode, behaviorCheckId, caseLogger)
-                        : replayMode == BenchmarkReplayMode.SAVED_MILESTONES
+                        : replayMode == BenchmarkReplayMode.SAVED_PLAN
                             ? workflowService.generateFromSavedPlanningWithResult(
                                 planningSourceProjectId, benchmarkCase.prompt(), caseLogger)
                             : workflowService.generateFromSavedPlanningWithResult(

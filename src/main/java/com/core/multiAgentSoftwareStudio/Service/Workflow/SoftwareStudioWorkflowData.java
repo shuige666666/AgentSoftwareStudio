@@ -47,9 +47,7 @@ public class SoftwareStudioWorkflowData implements Serializable {
     public GenerationPlan generationPlan = new GenerationPlan(List.of());
     public SliceDeliveryPlan sliceDeliveryPlan = SliceDeliveryPlan.empty();
     public DevelopmentMilestoneState milestoneState;
-    // 新项目默认建议式推进；续接沿用保存策略，强制顺序由入口显式选择。
-    public com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy milestonePolicy =
-            com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
+    // 模型与工具额度跨续接累计，不因任务建议或状态迁移重新分配。
     public int developmentModelTurnsUsed;
     public int developmentToolCallsUsed;
     public int currentSliceIndex;

@@ -76,9 +76,9 @@ class DevelopmentResumeServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.load("../outside"));
     }
 
-    /** 建议式与顺序式共享续接入口，策略从平台状态读取而非恢复为默认顺序门禁。 */
+    /** 旧强制状态只恢复真实进度和预算，读取时不改写原状态或规划。 */
     @Test
-    void resumesAdvisoryPolicyFromProtectedState() throws Exception {
+    void resumesLegacyStateWithoutReintroducingOrderedControl() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         var milestones = new DevelopmentMilestoneService(mapper);
         Path metadata = root.resolve(".software-studio");
@@ -93,14 +93,24 @@ class DevelopmentResumeServiceTest {
         mapper.writeValue(metadata.resolve("generation-plan.json").toFile(), new GenerationPlan(List.of()));
         var data = new SoftwareStudioWorkflowData("Demo");
         data.projectPath = root.toString(); data.sliceDeliveryPlan = plan;
-        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
         milestones.initialize(data);
+        Path statePath = metadata.resolve(DevelopmentMilestoneService.STATE_FILE);
+        var legacy = mapper.readTree(statePath.toFile());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) legacy).put("schemaVersion", 2)
+                .put("policy", "ORDERED").put("modelTurnsUsed", 17).put("toolCallsUsed", 28)
+                .put("lastFailure", "Observed failure: missing route");
+        String originalState = mapper.writeValueAsString(legacy);
+        Files.writeString(statePath, originalState, StandardCharsets.UTF_8);
         var profiles = mock(ProjectProfileService.class);
         when(profiles.resolve(any())).thenReturn(ProjectProfile.java17SpringBoot());
         var resumed = new DevelopmentResumeService(mapper, milestones, mock(WorkspaceCheckpointService.class), profiles,
                 new WorkspaceService(new SourceCodePathService())).loadResolved(root);
-        assertEquals(data.milestonePolicy, resumed.milestonePolicy);
-        assertEquals(data.milestonePolicy, resumed.milestoneState.policy());
+        assertEquals(17, resumed.developmentModelTurnsUsed);
+        assertEquals(28, resumed.developmentToolCallsUsed);
+        assertEquals("Observed failure: missing route", resumed.milestoneState.lastFailure());
+        assertTrue(resumed.acceptedSliceIds.isEmpty());
+        milestones.validateSelection(resumed, List.of("b", "a"));
+        assertEquals(originalState, Files.readString(statePath, StandardCharsets.UTF_8));
     }
 
     private DeliverySlice slice(String id, ProjectContract contract) {

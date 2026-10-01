@@ -74,25 +74,25 @@ class BenchmarkRunnerFailureTest {
         verify(workflow).generateFromSavedPlanningWithResult(
                 org.mockito.ArgumentMatchers.eq("source-project"),
                 org.mockito.ArgumentMatchers.eq("prompt"),
-                org.mockito.ArgumentMatchers.eq(BenchmarkReplayMode.SAVED_MILESTONES),
+                org.mockito.ArgumentMatchers.eq(BenchmarkReplayMode.SAVED_PLAN),
                 org.mockito.ArgumentMatchers.eq(benchmarkCase.id()), any());
         verify(workflow, never()).generateProjectWithResult(any(), any());
     }
 
-    /** 对照模式明确传给工作流，且仍沿用同一独立判卷入口。 */
+    /** 重建任务的规划重放仍沿用同一独立判卷入口。 */
     @Test
-    void routesContinuousComparisonToReplayWorkflow() {
+    void routesCurrentPlanningReplayToWorkflow() {
         when(workflow.generateFromSavedPlanningWithResult(any(), any(), any(), any(), any())).thenThrow(
                 new WorkflowExecutionFailure("continuous-candidate", new IllegalStateException("stopped")));
 
         var result = runner.runCase(benchmarkCase, 1, 1, 1, 1,
-                "source-project", BenchmarkReplayMode.CONTINUOUS);
+                "source-project", BenchmarkReplayMode.CURRENT_PLAN);
 
         assertEquals("continuous-candidate", result.projectPath());
         verify(workflow).generateFromSavedPlanningWithResult(
                 org.mockito.ArgumentMatchers.eq("source-project"),
                 org.mockito.ArgumentMatchers.eq("prompt"),
-                org.mockito.ArgumentMatchers.eq(BenchmarkReplayMode.CONTINUOUS),
+                org.mockito.ArgumentMatchers.eq(BenchmarkReplayMode.CURRENT_PLAN),
                 org.mockito.ArgumentMatchers.eq(benchmarkCase.id()), any());
     }
 

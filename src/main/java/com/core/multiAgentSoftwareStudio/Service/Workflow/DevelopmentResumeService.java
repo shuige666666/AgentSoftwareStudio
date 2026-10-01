@@ -87,7 +87,6 @@ public class DevelopmentResumeService {
                     ? read(metadata, "project-profile.json", ProjectProfile.class)
                     : profiles.resolve(data.structure);
             data.milestoneState = milestones.load(root);
-            data.milestonePolicy = data.milestoneState.policy();
             List<String> plannedIds = data.sliceDeliveryPlan.slices().stream().map(slice -> slice.id()).toList();
             List<String> stateIds = data.milestoneState.tasks().stream()
                     .map(DevelopmentMilestoneState.Task::id).toList();

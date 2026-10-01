@@ -15,10 +15,11 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 管理当前 run 的业务里程碑；只有多个独立能力时才进入逐项交付协议。 */
+/** 管理当前 run 的任务建议和已验证能力；完整项目验收不依赖逐项接受数量。 */
 @Service
 public class DevelopmentMilestoneService {
     public static final String STATE_FILE = "development-state.json";
+    public static final String LEGACY_STATE_BACKUP = "development-state.pre-advisory-retirement.json";
     private final ObjectMapper mapper;
 
     public DevelopmentMilestoneService(ObjectMapper mapper) {
@@ -34,11 +35,11 @@ public class DevelopmentMilestoneService {
                         slice.acceptanceCriteria(), false, "", "", ""))
                 .toList();
         data.milestoneState = new DevelopmentMilestoneState(
-                DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION, tasks, 0, 0, "", data.milestonePolicy, "");
+                DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION, tasks, 0, 0, "", "");
         persist(data);
     }
 
-    /** 按持久化推进策略接受单个能力，保存通过快照的源码哈希和报告入口。 */
+    /** 接受已实现的单个能力，保存通过快照的源码哈希和报告入口。 */
     public DevelopmentMilestoneState.Task accept(SoftwareStudioWorkflowData data, String id,
                                                   WorkspaceCheckpointService.CheckpointResult checkpoint) {
         return acceptSelected(data, List.of(id), checkpoint).getFirst();
@@ -68,23 +69,19 @@ public class DevelopmentMilestoneService {
         }
         data.currentSliceIndex = (int) updated.stream().filter(DevelopmentMilestoneState.Task::accepted).count();
         data.milestoneState = new DevelopmentMilestoneState(DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION, updated,
-                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, "", state.policy(), ids.getLast());
+                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, "", ids.getLast());
         data.acceptedSliceIds = updated.stream().filter(DevelopmentMilestoneState.Task::accepted)
                 .map(DevelopmentMilestoneState.Task::id).toList();
         persist(data);
         return accepted;
     }
 
-    /** 在验证前检查选择，避免未知任务或顺序模式跳过门禁。 */
+    /** 在验证前检查所选任务，拒绝未知、重复或已经接受的能力。 */
     public void validateSelection(SoftwareStudioWorkflowData data, List<String> ids) {
         var state = data.milestoneState;
         if (state == null || ids.isEmpty() || ids.stream().distinct().count() != ids.size()
                 || ids.stream().anyMatch(id -> state.tasks().stream().noneMatch(task -> task.id().equals(id) && !task.accepted()))) {
             throw new IllegalArgumentException("Select known pending milestone IDs");
-        }
-        if (state.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED
-                && (ids.size() != 1 || state.current() == null || !state.current().id().equals(ids.getFirst()))) {
-            throw new IllegalArgumentException("Current milestone is " + (state.current() == null ? "none" : state.current().id()));
         }
     }
 
@@ -113,36 +110,10 @@ public class DevelopmentMilestoneService {
                 original.id(), original.goal(), original.acceptanceCriteria(), true,
                 data.lastCheckpointHash, data.lastCheckpointSnapshotPath, data.lastCheckpointReportPath);
         data.milestoneState = new DevelopmentMilestoneState(state.schemaVersion(), List.of(accepted),
-                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, "", state.policy(), accepted.id());
+                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, "", accepted.id());
         data.acceptedSliceIds = List.of(accepted.id());
         data.currentSliceIndex = 1;
         persist(data);
-    }
-
-    /** 当前及此前接受的能力一起做契约回归，未来能力不阻断 progress。 */
-    public ProjectContract contractThroughCurrent(SoftwareStudioWorkflowData data) {
-        DevelopmentMilestoneState state = data.milestoneState;
-        if (state == null || !state.active() || state.current() == null) return data.contract;
-        List<DeliverySlice> slices = data.sliceDeliveryPlan.slices();
-        int last = -1;
-        for (int index = 0; index < slices.size(); index++) {
-            if (slices.get(index).id().equals(state.current().id())) {
-                last = index;
-                break;
-            }
-        }
-        if (last < 0) throw new IllegalStateException("Current milestone is absent from the plan");
-        var endpoints = new ArrayList<com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ApiEndpointContract>();
-        var views = new ArrayList<com.core.multiAgentSoftwareStudio.Model.Generation.Contract.ViewContract>();
-        var frontendCalls = new ArrayList<com.core.multiAgentSoftwareStudio.Model.Generation.Contract.FrontendCallContract>();
-        for (int index = 0; index <= last; index++) {
-            ProjectContract contract = slices.get(index).contract();
-            endpoints.addAll(contract.endpoints());
-            views.addAll(contract.views());
-            frontendCalls.addAll(contract.frontendCalls());
-        }
-        return new ProjectContract(endpoints.stream().distinct().toList(),
-                views.stream().distinct().toList(), frontendCalls.stream().distinct().toList(), List.of());
     }
 
     /** 模型与工具轮次使用同一全局预算，续接时按持久记录恢复已消耗值。 */
@@ -152,12 +123,14 @@ public class DevelopmentMilestoneService {
         if (data.milestoneState == null) return;
         DevelopmentMilestoneState state = data.milestoneState;
         data.milestoneState = new DevelopmentMilestoneState(DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION, state.tasks(),
-                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, state.lastFailure(), state.policy(), state.latestAcceptedId());
+                data.developmentModelTurnsUsed, data.developmentToolCallsUsed, state.lastFailure(), state.latestAcceptedId());
         Path root = Path.of(data.projectPath).toAbsolutePath().normalize()
                 .resolve(".software-studio");
         try {
+            if (Files.isSymbolicLink(root)) throw new IOException("Linked metadata is not allowed");
             Files.createDirectories(root);
             Path target = root.resolve(STATE_FILE);
+            preserveLegacyState(target);
             Path temporary = Files.createTempFile(root, "development-state-", ".tmp");
             try {
                 mapper.writerWithDefaultPrettyPrinter().writeValue(temporary.toFile(), data.milestoneState);
@@ -202,21 +175,33 @@ public class DevelopmentMilestoneService {
         DevelopmentMilestoneState state = data.milestoneState;
         data.milestoneState = new DevelopmentMilestoneState(state.schemaVersion(), state.tasks(),
                 data.developmentModelTurnsUsed, data.developmentToolCallsUsed,
-                reason == null ? "" : reason, state.policy(), state.latestAcceptedId());
+                reason == null ? "" : reason, state.latestAcceptedId());
         persist(data);
     }
 
-    /** 从项目元数据加载最近一次完整写入的任务状态。 */
+    /** 只读加载旧状态；后续保存时迁移到建议式结构，不改变预算或接受事实。 */
     public DevelopmentMilestoneState load(Path projectRoot) {
         Path path = projectRoot.resolve(".software-studio").resolve(STATE_FILE);
         try {
+            if (Files.isSymbolicLink(path)) throw new IOException("Linked development state is not allowed");
             DevelopmentMilestoneState state = mapper.readValue(path.toFile(), DevelopmentMilestoneState.class);
-            if (state.schemaVersion() != 1 && state.schemaVersion() != DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION) {
+            if (state.schemaVersion() < 1 || state.schemaVersion() > DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION) {
                 throw new IllegalStateException("Unsupported development state version");
             }
             return state;
         } catch (IOException e) {
             throw new IllegalStateException("Unable to load development milestone state", e);
         }
+    }
+
+    /** 首次覆盖旧状态前保留原始字节，旧字段只用于兼容读取，不再决定开发控制方式。 */
+    private void preserveLegacyState(Path target) throws IOException {
+        if (Files.isSymbolicLink(target)) throw new IOException("Linked development state is not allowed");
+        if (!Files.exists(target)) return;
+        var saved = mapper.readTree(target.toFile());
+        if (saved.path("schemaVersion").asInt() >= DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION) return;
+        Path backup = target.resolveSibling(LEGACY_STATE_BACKUP);
+        if (Files.isSymbolicLink(backup)) throw new IOException("Linked development state backup is not allowed");
+        if (!Files.exists(backup)) Files.copy(target, backup);
     }
 }

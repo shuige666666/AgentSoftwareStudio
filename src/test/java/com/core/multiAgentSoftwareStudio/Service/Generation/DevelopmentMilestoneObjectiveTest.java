@@ -53,7 +53,7 @@ class DevelopmentMilestoneObjectiveTest {
         assertFalse(goal.contains("old-stop-diagnostic"));
         assertTrue(goal.contains("Original user request:\nrequested-capability"));
         assertTrue(goal.contains("task-criterion"));
-        assertTrue(goal.contains("Current milestone: task"));
+        assertTrue(goal.contains("Suggested next milestone: task"));
     }
 
     /** 构造包含当前范围和历史诊断的固定任务输入。 */

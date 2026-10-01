@@ -43,7 +43,7 @@ class BatchGenerationServiceTest {
         assertFalse(objective.getValue().contains("ordered business milestones"));
     }
 
-    /** 顺序模式也提供完整未来契约，信息量不再成为策略对照中的额外变量。 */
+    /** 任务只是建议，开发入口仍提供完整未来契约，不隐藏后续能力。 */
     @Test
     void includesFullProjectAndEveryMilestoneContract() {
         WorkspaceAgentRuntime runtime = mock(WorkspaceAgentRuntime.class);
@@ -69,7 +69,7 @@ class BatchGenerationServiceTest {
         assertTrue(objective.getValue().contains("/articles/{id}/comments"));
         assertTrue(objective.getValue().startsWith(DevelopmentMilestoneObjective.projectContext(data)));
         assertFalse(objective.getValue().contains("FutureVoteTest.java"));
-        assertTrue(objective.getValue().contains("Defer later endpoints"));
+        assertFalse(objective.getValue().contains("Defer later endpoints"));
     }
 
     /** 建议式保留同一完整目标，压缩重建也不能恢复顺序门禁。 */
@@ -78,8 +78,7 @@ class BatchGenerationServiceTest {
         var data = new SoftwareStudioWorkflowData("complete project");
         var tasks = List.of(new DevelopmentMilestoneState.Task("first", "first", List.of(), false, "", "", ""),
                 new DevelopmentMilestoneState.Task("second", "second", List.of(), false, "", "", ""));
-        data.milestoneState = new DevelopmentMilestoneState(2, tasks, 0, 0, "",
-                com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY, "");
+        data.milestoneState = new DevelopmentMilestoneState(3, tasks, 0, 0, "", "");
         String objective = DevelopmentMilestoneObjective.render(data);
         assertTrue(objective.startsWith(DevelopmentMilestoneObjective.projectContext(data)));
         assertTrue(objective.contains("combine tasks"));

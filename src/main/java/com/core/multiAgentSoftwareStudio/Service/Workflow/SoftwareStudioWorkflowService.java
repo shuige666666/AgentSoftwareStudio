@@ -79,16 +79,8 @@ public class SoftwareStudioWorkflowService {
     /** 基准入口在开发前绑定平台公开检查，普通生产请求保持未覆盖状态。 */
     public WorkflowExecutionResult generateProjectWithResult(String userRequest, String behaviorCheckId,
                                                               Consumer<String> eventListener) {
-        return generateProjectWithResult(userRequest, behaviorCheckId, null, eventListener);
-    }
-
-    /** 新项目可显式选择强制顺序；默认建议式，最终需求验收与检查绑定一致。 */
-    public WorkflowExecutionResult generateProjectWithResult(String userRequest, String behaviorCheckId,
-            com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy milestonePolicy,
-            Consumer<String> eventListener) {
         Consumer<String> logger = eventListener == null ? message -> { } : eventListener;
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData(userRequest);
-        if (milestonePolicy != null) data.milestonePolicy = milestonePolicy;
         data.behaviorCheckId = behaviorCheckId;
         llmUsageMetricsService.beginTask();
         try {
@@ -126,6 +118,11 @@ public class SoftwareStudioWorkflowService {
         llmUsageMetricsService.beginTask();
         try {
             logger.accept("Resuming development for " + projectId + " from saved workspace state.");
+            if (data.milestoneState != null
+                    && data.milestoneState.schemaVersion() < com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.CURRENT_SCHEMA_VERSION) {
+                logger.accept("Legacy development state is migrating to advisory milestones; progress, verified versions and budget are preserved. "
+                        + "Original state is backed up as " + DevelopmentMilestoneService.LEGACY_STATE_BACKUP + " before saving.");
+            }
             return executeDevelopment(data, logger);
         } catch (RuntimeException e) {
             throw new WorkflowExecutionFailure(data.projectPath, e);
@@ -139,10 +136,10 @@ public class SoftwareStudioWorkflowService {
                                                                         String expectedRequest,
                                                                         Consumer<String> eventListener) {
         return generateFromSavedPlanningWithResult(sourceProjectId, expectedRequest,
-                BenchmarkReplayMode.SAVED_MILESTONES, eventListener);
+                BenchmarkReplayMode.SAVED_PLAN, eventListener);
     }
 
-    /** 两种对照方式都复用同一上游设计，在全新脚手架上重建当前确定性任务计划。 */
+    /** 复用上游设计，可保留原任务建议或重建当前确定性任务计划。 */
     public WorkflowExecutionResult generateFromSavedPlanningWithResult(String sourceProjectId,
                                                                         String expectedRequest,
                                                                         BenchmarkReplayMode replayMode,
@@ -180,17 +177,12 @@ public class SoftwareStudioWorkflowService {
             } finally {
                 persistenceNodeService.persistPlanningArtifacts(data, CONTRACT, logger);
             }
-            if (replayMode != BenchmarkReplayMode.SAVED_MILESTONES) {
+            if (replayMode != BenchmarkReplayMode.SAVED_PLAN) {
                 data = slicePlanNodeService.execute(data, logger);
             }
             data = persistenceNodeService.persistPlanningArtifacts(data, SLICE_PLAN, logger);
             data = persistenceNodeService.persistPlanningArtifacts(data, GENERATION_PLAN, logger);
-            if (replayMode != BenchmarkReplayMode.CONTINUOUS) {
-                data.milestonePolicy = replayMode == BenchmarkReplayMode.ADVISORY_MILESTONES
-                        ? com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY
-                        : com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED;
-                milestoneService.initialize(data);
-            }
+            milestoneService.initialize(data);
             return executeDevelopment(data, logger);
         } catch (RuntimeException e) {
             throw new WorkflowExecutionFailure(data.projectPath, e);
@@ -217,15 +209,6 @@ public class SoftwareStudioWorkflowService {
                 milestoneService.recordFailure(data, "Development stopped: " + development.stopReason() + "\n"
                         + WorkspaceCheckpointFeedback.failureSummary(finalVerification));
             }
-        }
-        if (data.milestoneState != null && data.milestoneState.active()
-                && data.milestoneState.policy() == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED
-                && !data.milestoneState.allAccepted()) {
-            // 最终项目门禁通过也不能替代缺失的逐能力验证记录。
-            data.success = false;
-            data.validationWarnings.add("Business milestones remain unaccepted: "
-                    + data.milestoneState.tasks().stream().filter(task -> !task.accepted())
-                    .map(task -> task.id()).toList());
         }
         if (data.success && data.milestoneState != null && !data.milestoneState.active()
                 && data.sliceDeliveryPlan != null) {

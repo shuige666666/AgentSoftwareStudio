@@ -313,11 +313,10 @@ class WorkspaceToolRegistryTest {
         assertTrue(Files.readString(source, StandardCharsets.UTF_8).contains("mode = \"new\""));
     }
 
-    /** 显式强制模式按顺序接受 progress，全部接受后 final 才能结束。 */
+    /** 未知任务仍被拒绝；顺序选择只是可用方式，不再限制其他选择。 */
     @Test
-    void milestoneProgressControlsFinalCheckpoint() {
+    void milestoneProgressRejectsUnknownIdsAndPreservesHandoffFeedback() {
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("create then vote");
-        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED;
         data.projectPath = projectRoot.toString();
         ProjectContract empty = new ProjectContract(java.util.List.of(), java.util.List.of(),
                 java.util.List.of(), java.util.List.of());
@@ -339,10 +338,8 @@ class WorkspaceToolRegistryTest {
                         "snapshot", "report", null, null, true, java.util.List.of(), "", true, false));
 
         assertTrue(registry.execute("submit_checkpoint",
-                "{\"scope\":\"final\",\"summary\":\"done\"}", session).contains("MILESTONES_PENDING"));
-        assertTrue(registry.execute("submit_checkpoint",
-                "{\"scope\":\"progress\",\"summary\":\"wrong\",\"milestoneId\":\"vote\"}", session)
-                .contains("MILESTONE_OUT_OF_ORDER"));
+                "{\"scope\":\"progress\",\"summary\":\"wrong\",\"milestoneId\":\"unknown\"}", session)
+                .contains("INVALID_MILESTONE_SELECTION"));
         assertTrue(registry.execute("submit_checkpoint",
                 "{\"scope\":\"progress\",\"summary\":\"create\",\"milestoneId\":\"create\"}", session)
                 .contains("\"nextMilestone\":\"vote\""));
@@ -358,7 +355,6 @@ class WorkspaceToolRegistryTest {
     void advisoryAllowsMergedProgressAndFinalWithoutAcceptanceRecords() throws Exception {
         var data = new SoftwareStudioWorkflowData("three tasks");
         data.projectPath = projectRoot.toString();
-        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY;
         var empty = new ProjectContract(List.of(), List.of(), List.of(), List.of());
         data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of(
                 new DeliverySlice("a", "a", List.of(), List.of(), empty, List.of(), List.of()),

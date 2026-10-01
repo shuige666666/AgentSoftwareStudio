@@ -44,22 +44,16 @@ class SoftwareStudioWorkflowServiceTest {
         verify(fixture.checkpoint, never()).verifyCandidate(any(), any());
     }
 
-    /** 普通新项目采用建议式；入口显式选择强制模式时不被默认值覆盖。 */
+    /** 清理策略入口后，基准公开检查仍在开发之前绑定。 */
     @Test
-    void generationUsesDefaultPolicyAndAllowsExplicitOrderedPolicy() {
-        for (var policy : com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.values()) {
-            var fixture = fixture();
-            when(fixture.generation.generateProject(any(), any())).thenAnswer(invocation -> {
-                SoftwareStudioWorkflowData data = invocation.getArgument(0);
-                assertEquals(policy, data.milestonePolicy);
-                return run(false);
-            });
-            if (policy == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY) {
-                fixture.service.generateProjectWithResult("same requirement", message -> { });
-            } else {
-                fixture.service.generateProjectWithResult("same requirement", null, policy, message -> { });
-            }
-        }
+    void generationPreservesPublicBehaviorBinding() {
+        var fixture = fixture();
+        when(fixture.generation.generateProject(any(), any())).thenAnswer(invocation -> {
+            SoftwareStudioWorkflowData data = invocation.getArgument(0);
+            assertEquals("short-link-behavior-v1", data.behaviorCheckId);
+            return run(false);
+        });
+        fixture.service.generateProjectWithResult("same requirement", "short-link-behavior-v1", message -> { });
     }
 
     @Test
@@ -140,12 +134,10 @@ class SoftwareStudioWorkflowServiceTest {
         verify(fixture.generation, never()).generateProject(any(), any());
     }
 
-    /** 两种对照均重建当前切片；连续方式不发放逐任务状态。 */
+    /** 重放仅选择原任务或重建任务，两者都使用同一建议式开发链。 */
     @Test
-    void comparisonReplaysSameDesignWithSelectableDevelopmentProtocol() {
-        for (BenchmarkReplayMode mode : List.of(BenchmarkReplayMode.CURRENT_MILESTONES,
-                BenchmarkReplayMode.ADVISORY_MILESTONES,
-                BenchmarkReplayMode.CONTINUOUS)) {
+    void replaySelectsPlanningSourceWithoutChangingDevelopmentControl() {
+        for (BenchmarkReplayMode mode : BenchmarkReplayMode.values()) {
             Fixture fixture = fixture();
             when(fixture.resume.load("source-project"))
                     .thenReturn(new SoftwareStudioWorkflowData("same requirement"));
@@ -156,17 +148,12 @@ class SoftwareStudioWorkflowServiceTest {
 
             verify(fixture.planning, never()).requirements(any(), any());
             verify(fixture.planning, never()).design(any(), any());
-            verify(fixture.slicePlan).execute(any(), any());
-            if (mode == BenchmarkReplayMode.CONTINUOUS) {
-                verify(fixture.milestones, never()).initialize(any());
+            if (mode == BenchmarkReplayMode.SAVED_PLAN) {
+                verify(fixture.slicePlan, never()).execute(any(), any());
             } else {
-                ArgumentCaptor<SoftwareStudioWorkflowData> captured = ArgumentCaptor.forClass(SoftwareStudioWorkflowData.class);
-                verify(fixture.milestones).initialize(captured.capture());
-                assertEquals(mode == BenchmarkReplayMode.ADVISORY_MILESTONES
-                        ? com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY
-                        : com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED,
-                        captured.getValue().milestonePolicy);
+                verify(fixture.slicePlan).execute(any(), any());
             }
+            verify(fixture.milestones).initialize(any());
         }
     }
 
@@ -176,32 +163,55 @@ class SoftwareStudioWorkflowServiceTest {
                 2, 4, List.of(), "submit_checkpoint", "{}", "done");
     }
 
-    /** 外层最终门禁通过时，只有顺序策略仍要求逐项接受；建议式不能因此假失败。 */
+    /** 全项目最终门禁通过后，缺少逐项接受记录不能造成假失败。 */
     @Test
     void finalPassingCandidateMayHavePendingAdvisoryTasks() {
-        for (var policy : com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.values()) {
-            var fixture = fixture();
-            when(fixture.generation.generateProject(any(), any())).thenAnswer(invocation -> {
-                SoftwareStudioWorkflowData data = invocation.getArgument(0);
-                var tasks = List.of(new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.Task(
-                        "a", "a", List.of(), false, "", "", ""),
-                        new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.Task(
-                        "b", "b", List.of(), false, "", "", ""));
-                data.milestoneState = new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState(
-                        2, tasks, 0, 0, "", policy, "");
-                return run(false);
-            });
-            when(fixture.checkpoint.verifyCandidate(any(), any())).thenAnswer(invocation -> {
-                SoftwareStudioWorkflowData data = invocation.getArgument(0);
-                data.success = true;
-                var passed = mock(WorkspaceCheckpointService.CheckpointResult.class);
-                when(passed.allowCompletion()).thenReturn(true);
-                return passed;
-            });
-            var result = fixture.service.generateProjectWithResult("same requirement", message -> { });
-            assertEquals(policy == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY,
-                    result.platformSuccess());
-        }
+        var fixture = fixture();
+        when(fixture.generation.generateProject(any(), any())).thenAnswer(invocation -> {
+            SoftwareStudioWorkflowData data = invocation.getArgument(0);
+            var tasks = List.of(new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.Task(
+                    "a", "a", List.of(), false, "", "", ""),
+                    new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState.Task(
+                    "b", "b", List.of(), false, "", "", ""));
+            data.milestoneState = new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState(
+                    3, tasks, 0, 0, "", "");
+            return run(false);
+        });
+        when(fixture.checkpoint.verifyCandidate(any(), any())).thenAnswer(invocation -> {
+            SoftwareStudioWorkflowData data = invocation.getArgument(0);
+            data.success = true;
+            var passed = mock(WorkspaceCheckpointService.CheckpointResult.class);
+            when(passed.allowCompletion()).thenReturn(true);
+            return passed;
+        });
+        var result = fixture.service.generateProjectWithResult("same requirement", message -> { });
+        assertTrue(result.platformSuccess());
+    }
+
+    /** 旧状态续接明确告知迁移，仍复用规划、失败证据和此前累计额度。 */
+    @Test
+    void resumeAnnouncesLegacyMigrationWithoutResettingBudget() {
+        var fixture = fixture();
+        var saved = new SoftwareStudioWorkflowData("saved requirement");
+        saved.projectPath = "saved-project";
+        saved.developmentModelTurnsUsed = 17;
+        saved.developmentToolCallsUsed = 28;
+        saved.milestoneState = new com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestoneState(
+                2, List.of(), 17, 28, "missing route");
+        when(fixture.resume.load("saved-project")).thenReturn(saved);
+        when(fixture.generation.generateProject(any(), any())).thenAnswer(invocation -> {
+            assertSame(saved, invocation.getArgument(0));
+            assertEquals(17, saved.developmentModelTurnsUsed);
+            assertEquals(28, saved.developmentToolCallsUsed);
+            assertEquals("missing route", saved.milestoneState.lastFailure());
+            return run(false);
+        });
+        var messages = new java.util.ArrayList<String>();
+        fixture.service.resumeProjectWithResult("saved-project", messages::add);
+        assertTrue(messages.stream().anyMatch(message -> message.contains("migrating to advisory")
+                && message.contains(DevelopmentMilestoneService.LEGACY_STATE_BACKUP)));
+        verify(fixture.planning, never()).requirements(any(), any());
+        verify(fixture.scaffold, never()).bootstrap(any(), any());
     }
 
     private Fixture fixture() {
@@ -230,7 +240,7 @@ class SoftwareStudioWorkflowServiceTest {
         SoftwareStudioWorkflowService service = new SoftwareStudioWorkflowService(
                 planning, scaffold, slicePlan, milestones, resume, generation, persistence,
                 checkpoint, metrics, journal);
-        return new Fixture(service, generation, checkpoint, planning, slicePlan, resume, milestones);
+        return new Fixture(service, generation, checkpoint, planning, slicePlan, resume, milestones, scaffold);
     }
 
     private <T> T passthrough(Class<T> type) {
@@ -241,5 +251,5 @@ class SoftwareStudioWorkflowServiceTest {
     private record Fixture(SoftwareStudioWorkflowService service, BatchGenerationService generation,
                            WorkspaceCheckpointService checkpoint, PlanningNodeService planning,
                            SlicePlanNodeService slicePlan, DevelopmentResumeService resume,
-                           DevelopmentMilestoneService milestones) { }
+                           DevelopmentMilestoneService milestones, ProjectScaffoldService scaffold) { }
 }
