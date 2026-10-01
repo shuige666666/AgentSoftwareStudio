@@ -269,10 +269,11 @@ class WorkspaceToolRegistryTest {
         assertTrue(Files.readString(source, StandardCharsets.UTF_8).contains("mode = \"new\""));
     }
 
-    /** 多能力项目必须按顺序接受 progress，全部接受后 final 才能结束。 */
+    /** 显式强制模式按顺序接受 progress，全部接受后 final 才能结束。 */
     @Test
     void milestoneProgressControlsFinalCheckpoint() {
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData("create then vote");
+        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED;
         data.projectPath = projectRoot.toString();
         ProjectContract empty = new ProjectContract(java.util.List.of(), java.util.List.of(),
                 java.util.List.of(), java.util.List.of());

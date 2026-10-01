@@ -80,7 +80,8 @@ public class BenchmarkBehaviorEvaluator {
 
     public static boolean isBehaviorCase(String caseId) {
         return "url-shortener-behavior-v1".equals(caseId) || "poll-system-behavior-v1".equals(caseId)
-                || "blog-form-behavior-v1".equals(caseId);
+                || "blog-form-behavior-v1".equals(caseId) || "task-workflow-behavior-v1".equals(caseId)
+                || "poll-workflow-behavior-v1".equals(caseId) || "note-form-behavior-v1".equals(caseId);
     }
 
     /**
@@ -91,6 +92,9 @@ public class BenchmarkBehaviorEvaluator {
             return BenchmarkBehaviorResult.notApplicable();
         }
         if ("blog-form-behavior-v1".equals(caseId)) return new BlogBehaviorChecks(baseUri).evaluate();
+        if ("task-workflow-behavior-v1".equals(caseId)) return new TaskBehaviorChecks(baseUri).evaluate();
+        if ("poll-workflow-behavior-v1".equals(caseId)) return new PollWorkflowBehaviorChecks(baseUri).evaluate();
+        if ("note-form-behavior-v1".equals(caseId)) return new NoteFormBehaviorChecks(baseUri).evaluate();
         List<BenchmarkBehaviorFinding> findings = new ArrayList<>();
         if ("url-shortener-behavior-v1".equals(caseId)) {
             evaluateShortLinks(baseUri, findings);

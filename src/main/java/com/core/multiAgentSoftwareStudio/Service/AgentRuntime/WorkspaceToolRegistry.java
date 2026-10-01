@@ -143,8 +143,12 @@ public class WorkspaceToolRegistry {
                 -另一文件的旧内容
                 +另一文件的新内容
                 *** End Patch
-                整个多文件补丁只使用一对 Begin Patch / End Patch；End Patch 后不得再追加文件或引号。
+                整个多文件补丁只使用一对 Begin Patch / End Patch；End Patch 后不得再追加文件或正文内容。
+                以上是 patch 字段的字符串正文，工具参数仍须是完整 JSON；必须保留封装该字符串的结束引号和 JSON 的 }。
                 Update 的上下文行以空格开头，删除行以 - 开头，新增行以 + 开头；不需要填写行号。
+                每行前缀是额外一个字符，后面须原样保留源码缩进。源码有4个前导空格，作为上下文时共5个空格。
+                例如源码 "    return value;"，上下文写 "     return value;"，删除写 "-    return value;"。
+                右花括号等未修改行也需要上下文前缀；不能直接写无前缀的 }。
                 替换必须写出被删除的旧行；只有 + 的块表示插入，不会自动覆盖已有类或方法。
                 Add 使用 *** Add File: 路径，正文每行以 + 开头；Delete 使用 *** Delete File: 路径。
                 也兼容标准 unified diff，但不得混用两种格式。上下文不匹配时先读取当前文件再重做补丁。

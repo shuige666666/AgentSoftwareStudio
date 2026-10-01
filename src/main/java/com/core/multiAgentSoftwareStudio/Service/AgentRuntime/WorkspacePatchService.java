@@ -38,9 +38,7 @@ public class WorkspacePatchService {
         try {
             changes = prepare(patch, session, warnings);
         } catch (PatchException e) {
-            String guidance = "PATCH_FORMAT".equals(e.code)
-                    ? " No files were written. Use one *** Begin Patch, all file operations, then one *** End Patch."
-                    + " Do not end each file separately or append quotes; resend the complete patch." : "";
+            String guidance = "PATCH_FORMAT".equals(e.code) ? formatGuidance(e.getMessage()) : "";
             return new PatchResult(false, List.of(), e.path, e.code, e.getMessage() + guidance);
         }
         List<String> applied = new ArrayList<>();
@@ -68,6 +66,18 @@ public class WorkspacePatchService {
         String message = "Patch applied; file writes only, not compilation/test success.";
         if (!warnings.isEmpty()) message += " " + String.join(" ", warnings.stream().limit(3).toList());
         return new PatchResult(true, List.copyOf(applied), "", "", message);
+    }
+
+    /** 按实际格式错误给出修正方法，避免用包络提示误导正文前缀错误。 */
+    private String formatGuidance(String message) {
+        if (message.startsWith("Unknown hunk prefix:") || message.equals("Invalid unified diff hunk line")) {
+            return " No files were written. Every hunk line, including closing braces, needs one marker:"
+                    + " space for context, '-' for deletion, '+' for addition. Preserve source indentation AFTER the marker."
+                    + " A source line with 4 leading spaces needs 5 spaces when used as context.";
+        }
+        return " No files were written. Use one *** Begin Patch, all file operations, then one *** End Patch."
+                + " Do not end each file separately or append literal quotes to the PATCH BODY."
+                + " Close the enclosing tool-argument JSON string and object normally; resend the complete patch.";
     }
 
     private List<Change> prepare(String patch, WorkspaceAgentSession session, List<String> warnings) {
@@ -282,6 +292,20 @@ public class WorkspacePatchService {
 
     /** 给出最接近的上下文差异，帮助模型基于当前磁盘文件重新生成补丁。 */
     private String mismatchHint(List<String> lines, List<String> oldLines, int from) {
+        // 仅诊断缩进差异，仍由精确匹配决定是否允许写入，不自动模糊应用。
+        for (int start = from; start + oldLines.size() <= lines.size(); start++) {
+            boolean sameText = true;
+            for (int offset = 0; offset < oldLines.size(); offset++) {
+                if (!lines.get(start + offset).stripLeading().equals(oldLines.get(offset).stripLeading())) {
+                    sameText = false;
+                    break;
+                }
+            }
+            if (sameText) return "Context text matches near line " + (start + 1)
+                    + " only after ignoring leading whitespace. No files were written."
+                    + " Preserve source indentation after the single patch marker; 4 source spaces require 5 context spaces."
+                    + " Read the current file and correct the hunk; whitespace was not auto-adjusted.";
+        }
         int bestStart = -1;
         int bestMatched = 0;
         for (int start = from; start < lines.size(); start++) {

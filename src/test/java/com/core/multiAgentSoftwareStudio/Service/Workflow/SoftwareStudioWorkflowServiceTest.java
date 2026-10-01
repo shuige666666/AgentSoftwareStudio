@@ -42,6 +42,24 @@ class SoftwareStudioWorkflowServiceTest {
         verify(fixture.checkpoint, never()).verifyCandidate(any(), any());
     }
 
+    /** 普通新项目采用建议式；入口显式选择强制模式时不被默认值覆盖。 */
+    @Test
+    void generationUsesDefaultPolicyAndAllowsExplicitOrderedPolicy() {
+        for (var policy : com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.values()) {
+            var fixture = fixture();
+            when(fixture.generation.generateProject(any(), any())).thenAnswer(invocation -> {
+                SoftwareStudioWorkflowData data = invocation.getArgument(0);
+                assertEquals(policy, data.milestonePolicy);
+                return run(false);
+            });
+            if (policy == com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY) {
+                fixture.service.generateProjectWithResult("same requirement", message -> { });
+            } else {
+                fixture.service.generateProjectWithResult("same requirement", null, policy, message -> { });
+            }
+        }
+    }
+
     @Test
     void incompleteDevelopmentGetsOneIndependentFinalVerification() {
         Fixture fixture = fixture();

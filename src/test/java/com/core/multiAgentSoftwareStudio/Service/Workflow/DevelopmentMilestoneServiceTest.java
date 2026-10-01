@@ -25,6 +25,7 @@ class DevelopmentMilestoneServiceTest {
     void acceptsCurrentMilestoneAndCarriesPreviousContract() {
         var service = new DevelopmentMilestoneService(new ObjectMapper());
         var data = new SoftwareStudioWorkflowData("create and vote");
+        data.milestonePolicy = com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ORDERED;
         data.projectPath = root.toString();
         var create = new ApiEndpointContract("POST", "/polls", "", "", "PollController", "create");
         var vote = new ApiEndpointContract("POST", "/polls/{id}/votes", "", "", "PollController", "vote");
@@ -47,6 +48,22 @@ class DevelopmentMilestoneServiceTest {
         assertFalse(data.milestoneState.allAccepted());
         service.accept(data, "vote", checkpoint("PASSED"));
         assertTrue(data.milestoneState.allAccepted());
+    }
+
+    /** 新任务默认允许合并、调整顺序，并持久化策略供后续续接使用。 */
+    @Test
+    void newProjectDefaultsToAdvisoryAndPersistsItsPolicy() {
+        var service = new DevelopmentMilestoneService(new ObjectMapper());
+        var data = new SoftwareStudioWorkflowData("two related capabilities");
+        data.projectPath = root.toString();
+        data.sliceDeliveryPlan = new SliceDeliveryPlan(List.of(slice("a", empty()), slice("b", empty())), List.of(), "test");
+        service.initialize(data);
+
+        assertEquals(com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy.ADVISORY,
+                service.load(root).policy());
+        service.validateSelection(data, List.of("b", "a"));
+        service.acceptSelected(data, List.of("b", "a"), checkpoint("PASSED"));
+        assertTrue(service.load(root).allAccepted());
     }
 
     /** 失败的验证不能使能力状态前进。 */

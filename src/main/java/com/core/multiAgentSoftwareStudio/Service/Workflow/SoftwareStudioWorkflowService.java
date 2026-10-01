@@ -78,8 +78,16 @@ public class SoftwareStudioWorkflowService {
     /** 基准入口在开发前绑定平台公开检查，普通生产请求保持未覆盖状态。 */
     public WorkflowExecutionResult generateProjectWithResult(String userRequest, String behaviorCheckId,
                                                               Consumer<String> eventListener) {
+        return generateProjectWithResult(userRequest, behaviorCheckId, null, eventListener);
+    }
+
+    /** 新项目可显式选择强制顺序；默认建议式，最终需求验收与检查绑定一致。 */
+    public WorkflowExecutionResult generateProjectWithResult(String userRequest, String behaviorCheckId,
+            com.core.multiAgentSoftwareStudio.Model.Workflow.DevelopmentMilestonePolicy milestonePolicy,
+            Consumer<String> eventListener) {
         Consumer<String> logger = eventListener == null ? message -> { } : eventListener;
         SoftwareStudioWorkflowData data = new SoftwareStudioWorkflowData(userRequest);
+        if (milestonePolicy != null) data.milestonePolicy = milestonePolicy;
         data.behaviorCheckId = behaviorCheckId;
         llmUsageMetricsService.beginTask();
         try {

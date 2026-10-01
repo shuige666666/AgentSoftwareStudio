@@ -394,6 +394,39 @@ class WorkspacePatchServiceTest {
         }
     }
 
+    /** 真实轨迹中少了一个上下文空格：只诊断，不写入；正确保留缩进后可以应用。 */
+    @Test
+    void diagnosesMissingContextMarkerSpaceWithoutFuzzyWrites() throws Exception {
+        Path source = root.resolve("src/Example.java");
+        Files.createDirectories(source.getParent());
+        String original = "class Example {\n    int value = 1;\n}\n";
+        Files.writeString(source, original, StandardCharsets.UTF_8);
+        var session = session();
+        String bad = "*** Begin Patch\n*** Add File: src/Other.java\n+class Other {}\n"
+                + "*** Update File: src/Example.java\n@@\n    int value = 1;\n+    int second = 2;\n*** End Patch\n";
+        var rejected = service.apply(bad, session);
+        assertEquals("PATCH_CONTEXT_NOT_FOUND", rejected.error());
+        assertTrue(rejected.message().contains("only after ignoring leading whitespace"));
+        assertEquals(original, Files.readString(source));
+        assertFalse(Files.exists(root.resolve("src/Other.java")));
+        assertEquals(0, session.writeVersion());
+        assertTrue(service.apply(bad.replace("\n    int value", "\n     int value"), session).ok());
+        assertTrue(Files.readString(source).contains("    int second = 2;"));
+    }
+
+    /** 无前缀的右括号应收到正文修复提示，而不是被误导为 Begin/End 问题。 */
+    @Test
+    void explainsUnmarkedBraceInHunk() throws Exception {
+        Path source = root.resolve("src/Example.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class Example {\n}\n", StandardCharsets.UTF_8);
+        var rejected = service.apply("*** Begin Patch\n*** Update File: src/Example.java\n@@\n class Example {\n}\n*** End Patch\n", session());
+        assertEquals("PATCH_FORMAT", rejected.error());
+        assertTrue(rejected.message().contains("including closing braces"));
+        assertFalse(rejected.message().contains("Do not end each file separately"));
+        assertEquals("class Example {\n}\n", Files.readString(source));
+    }
+
     private WorkspaceAgentSession session() {
         return new WorkspaceAgentSession(root, WorkspaceAgentMode.DEVELOPMENT,
                 new SoftwareStudioWorkflowData("test"), message -> { }, Map.of(), Set.of());
