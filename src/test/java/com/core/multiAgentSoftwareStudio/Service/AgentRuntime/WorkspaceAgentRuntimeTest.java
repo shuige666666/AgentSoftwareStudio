@@ -562,6 +562,64 @@ class WorkspaceAgentRuntimeTest {
         verify(registry, times(1)).validateProgress(any());
     }
 
+    /** 模拟模型根据真实错误反馈重新提交；参数与补丁拒绝不结束会话，也不伪造验证通过。 */
+    @Test
+    void resubmitsAfterJsonAndEmptyHunkFailuresInTheSameDevelopmentSession() throws Exception {
+        var mapper = new ObjectMapper();
+        Path source = projectRoot.resolve("src/main/java/demo/App.java");
+        Files.createDirectories(source.getParent());
+        String original = "class App { int value = 1; }\n";
+        Files.writeString(source, original, StandardCharsets.UTF_8);
+        String patch = "*** Begin Patch\n*** Update File: src/main/java/demo/App.java\n@@\n"
+                + "-class App { int value = 1; }\n+class App { int value = 2; }\n@@\n*** End Patch\n";
+        String corrected = patch.replace("@@\n*** End Patch", "*** End Patch");
+        var registry = new WorkspaceToolRegistry(mapper, null,
+                new WorkspaceService(new SourceCodePathService()), null, new WorkspacePatchService(),
+                null, null, new com.core.multiAgentSoftwareStudio.Service.Workflow.DevelopmentMilestoneService(mapper));
+        List<List<ToolChatMessage>> histories = new ArrayList<>();
+        ToolCallingModel model = (messages, definitions) -> {
+            histories.add(List.copyOf(messages));
+            int turn = histories.size();
+            try {
+                if (turn == 1) return response("bad-json", "apply_patch", "{\"patch\":\"*** Begin Patch\\n");
+                ToolChatMessage feedback = messages.getLast();
+                assertEquals("tool", feedback.role());
+                var result = mapper.readTree(feedback.content());
+                if (turn == 2) {
+                    assertEquals("bad-json", feedback.toolCallId());
+                    assertEquals("TOOL_ARGUMENTS_INVALID_JSON", result.path("error").asText());
+                    assertEquals(original, Files.readString(source));
+                    return response("empty-hunk", "apply_patch", mapper.writeValueAsString(java.util.Map.of("patch", patch)));
+                }
+                if (turn == 3) {
+                    assertEquals("empty-hunk", feedback.toolCallId());
+                    assertEquals("PATCH_CONTEXT", result.path("error").asText());
+                    assertTrue(result.path("message").asText().contains("Remove the unused @@"));
+                    assertEquals(original, Files.readString(source));
+                    return response("corrected", "apply_patch", mapper.writeValueAsString(java.util.Map.of("patch", corrected)));
+                }
+                assertEquals(4, turn);
+                assertEquals("corrected", feedback.toolCallId());
+                assertTrue(result.path("ok").asBoolean());
+                assertEquals("class App { int value = 2; }\n", Files.readString(source));
+                // 本测试只检查编辑反馈链路；用正常停止工具结束，不能假装完成了最终验收。
+                return response("stop", "report_blocker", "{\"reason\":\"Fixed mechanism replay ended before validation\"}");
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException(e);
+            }
+        };
+        var data = new SoftwareStudioWorkflowData("Local mock feedback replay");
+        data.projectPath = projectRoot.toString();
+        var result = runtime(model, registry).runDetailed(data, WorkspaceAgentMode.DEVELOPMENT,
+                Set.of(), "Inspect and repair the current source", ignored -> {});
+        assertEquals(WorkspaceAgentStopReason.REPORTED_BLOCKER, result.stopReason());
+        assertEquals(false, result.completed());
+        assertEquals(false, data.success);
+        assertEquals(4, result.modelTurns());
+        assertEquals(4, result.toolCalls());
+        assertEquals(List.of("src/main/java/demo/App.java"), result.changedFiles());
+    }
+
     private WorkspaceAgentRuntime runtime(ToolCallingModel model, WorkspaceToolRegistry registry) {
         WorkspaceAgentAuditConfig auditConfig = new WorkspaceAgentAuditConfig();
         auditConfig.setEnabled(false);

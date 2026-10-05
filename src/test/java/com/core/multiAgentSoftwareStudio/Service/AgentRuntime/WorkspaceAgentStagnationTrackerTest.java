@@ -166,6 +166,60 @@ class WorkspaceAgentStagnationTrackerTest {
         assertTrue(regression.guidance().isBlank());
     }
 
+    /** 带空格和中文的每次独立日志路径，不应让交替重复读取伪装成新证据。 */
+    @Test
+    void alternatingReadsStopDespiteChangingWindowsLogPaths() {
+        var tracker = tracker();
+        var session = developmentSession();
+        for (int index = 0; index < 10; index++) {
+            int file = index % 2;
+            var call = new ToolCall("read-" + index, "bash",
+                    "{\"command\":\"cat src/File" + file + ".java\"}");
+            var result = diagnosticResult(index, "class File" + file + " {}", "");
+            var decision = tracker.observe(call, result, session);
+            if (index < 9) assertFalse(decision.stop());
+            else {
+                assertTrue(decision.stop());
+                assertTrue(decision.reason().contains("No new tool evidence"));
+            }
+        }
+    }
+
+    /** 新的真实诊断输出仍可继续推进，不能因日志去噪而被误判停滞。 */
+    @Test
+    void changingDiagnosticOutputRemainsNewEvidence() {
+        var tracker = tracker();
+        var session = developmentSession();
+        for (int index = 0; index < 12; index++) {
+            var call = new ToolCall("read-" + index, "bash",
+                    "{\"command\":\"cat src/File" + index % 2 + ".java\"}");
+            assertFalse(tracker.observe(call,
+                    diagnosticResult(index, "failure-code-" + index, ""), session).stop());
+        }
+    }
+
+    /** 只忽略工具执行元数据；嵌套报告中的同名路径仍可能提供新的诊断线索。 */
+    @Test
+    void changingNestedReportPathRemainsNewEvidence() {
+        var tracker = tracker();
+        var session = developmentSession();
+        for (int index = 0; index < 12; index++) {
+            var call = new ToolCall("read-" + index, "bash",
+                    "{\"command\":\"cat src/File" + index % 2 + ".java\"}");
+            assertFalse(tracker.observe(call,
+                    diagnosticResult(index, "same output", "failure-report-" + index + ".txt"), session).stop());
+        }
+    }
+
+    /** 构造普通 Shell 诊断的真实包装字段，避免只验证没有空格的短路径。 */
+    private String diagnosticResult(int index, String output, String nestedReportPath) {
+        var node = new ObjectMapper().createObjectNode().put("passed", true).put("exitCode", 0)
+                .put("durationMillis", index + 100).put("output", output)
+                .put("fullLogPath", "E:\\Study\\AI Project Study\\中文工程\\shell\\call-" + index + ".log");
+        if (!nestedReportPath.isBlank()) node.putObject("diagnostic").put("fullLogPath", nestedReportPath);
+        return node.toString();
+    }
+
     private WorkspaceAgentStagnationTracker tracker() {
         return new WorkspaceAgentStagnationTracker(new WorkspaceAgentLimitsConfig().getStagnation());
     }

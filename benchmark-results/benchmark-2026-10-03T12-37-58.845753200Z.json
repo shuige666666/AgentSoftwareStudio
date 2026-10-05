@@ -1,0 +1,207 @@
+{
+  "startedAt" : "2026-10-03T12:37:58.845753200Z",
+  "finishedAt" : "2026-10-03T12:51:30.733324700Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.8-max-0902",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "PlanningAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "url-shortener-behavior-v1" ],
+    "repetitions" : 1,
+    "repairBudget" : null,
+    "gitCommit" : "b3f97a0c2d066c24a6ca39ba84c2c4730df7d0c7",
+    "gitDirty" : true,
+    "workingTreeFingerprint" : "e3e9ee89d79d9c5dde14b4dd2d33c314bc1e3432d9225f8dcc93ee190248b8a8",
+    "requirementSha256" : {
+      "url-shortener-behavior-v1" : "d8271e7110f3f287b5b1ce1ba8f2eecacee43b75357a5e58e58019e799bf9f11"
+    },
+    "development" : {
+      "maxModelTurns" : 36,
+      "maxToolCalls" : 108,
+      "verificationProtocol" : "snapshot-build-all-tests-contract-final-v1"
+    },
+    "planningSourceProjectId" : null,
+    "replayMode" : "SAVED_PLAN"
+  },
+  "cases" : [ {
+    "caseId" : "url-shortener-behavior-v1",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Java_17_Spring_Boot_Short_Link_Service_20261003_204118",
+    "elapsedMillis" : 811670,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=COMPILATION ERROR : | /workspace/src/test/java/com/example/shortlink/ShortLinkServiceTest.java:[36,19] cannot find symbol | Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.11.0:testCompile (default-testCompile) on pr..."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "CONTRACT_GATES_PASSED",
+        "passed" : false,
+        "evidence" : "Final semantic contract gates were not executed."
+      } ]
+    },
+    "usage" : {
+      "calls" : 38,
+      "successfulCalls" : 38,
+      "failedCalls" : 0,
+      "durationMillis" : 626671,
+      "inputCacheHitTokens" : 76160,
+      "inputCacheMissTokens" : 344261,
+      "outputTokens" : 33819,
+      "totalTokens" : 454240,
+      "cacheMetricsAvailable" : true,
+      "finishReasonCounts" : {
+        "stop" : 2,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 36,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      },
+      "modelUsage" : {
+        "qwen3.8-max-0902" : {
+          "calls" : 2,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 0,
+          "inputCacheMissTokens" : 1894,
+          "outputTokens" : 18533,
+          "totalTokens" : 20427
+        },
+        "qwen3.7-flash" : {
+          "calls" : 36,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 76160,
+          "inputCacheMissTokens" : 342367,
+          "outputTokens" : 15286,
+          "totalTokens" : 433813
+        }
+      }
+    },
+    "attemptsUsed" : 1,
+    "finalFailureKind" : "TEST_COMPILE",
+    "validationWarningCount" : 2,
+    "verificationSummary" : {
+      "buildExitCode" : 0,
+      "testExitCode" : 1,
+      "buildPassed" : true,
+      "testPassed" : false,
+      "testsRun" : 0,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 5415,
+      "testDurationMillis" : 7462,
+      "primaryFailureKind" : "TEST_COMPILE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 8,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : {
+        "TEST_COMPILE" : 4
+      },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 1,
+        "acceptedSlices" : 0,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 0,
+        "sliceRepairSafetyLimit" : 0,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 0,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "",
+        "slicePolicyVersion" : "vertical-slice-v7",
+        "declaredProjectType" : "SPRING_BOOT",
+        "effectiveProjectType" : "SPRING_BOOT",
+        "projectProfileId" : "java17-spring-boot-3.2"
+      }
+    },
+    "workflowError" : null,
+    "behavior" : {
+      "status" : "NOT_RUN",
+      "findings" : [ ],
+      "reason" : "候选应用启动前退出：APPLICATION FAILED TO START *************************** Description: Parameter 0 of constructor in com.example.shortlink.service.ShortLinkService required a bean of type 'com.example.shortlink.repository.InMemoryShortLinkRepository' that could not be found. Action: Consider defining a bean of type 'com.example.shortlink.repository.InMemoryShortLinkRepository' in your configuration. [INFO] ------------------------------------------------------------------------ [INFO] BUILD FAILURE [INFO] ------------------------------------------------------------------------ [INFO] Total time: 9.797 s [INFO] Finished at: 2026-10-03T12:51:30Z [INFO] ------------------------------------------------------------------------ [ERROR] Failed to execute goal org.springframework.boot:spring-boot-maven-plugin:3.2.4:run (default-cli) on project java-17-spring-boot-short-link-service: Process terminated with exit code: 1 -> [Help 1] [ERROR] [ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch. [ERROR] Re-run Maven using the -X switch to enable full debug logging. [ERROR] [ERROR] For more information about the errors and possible solutions, please read the following articles: [ERR...；完整启动日志：E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\ai_generated_projects\\Java_17_Spring_Boot_Short_Link_Service_20261003_204118\\target\\behavior-startup-5813cd13-e226-4ec6-a582-a8785d5219d7.log"
+    }
+  } ],
+  "platformSuccessCount" : 0,
+  "independentQualityPassCount" : 0,
+  "falseSuccessCount" : 0,
+  "falseSuccessRate" : null,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-10-03T12-37-58.845753200Z.json",
+  "fullWorkflowSuccessRate" : 0.0
+}

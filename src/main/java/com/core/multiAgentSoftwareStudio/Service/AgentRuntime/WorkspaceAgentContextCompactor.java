@@ -12,10 +12,15 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** 按工作预算保留必要目标和真实证据，完整源码与工具审计仍以磁盘为准。 */
 final class WorkspaceAgentContextCompactor {
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Pattern SIMPLE_MAVEN_CHECK = Pattern.compile(
+            "(?:mvn|mvnw|\\./mvnw)(?:\\s+(?:-[^\\s;&|<>]+|compile|test|verify|package))+"
+                    + "(?:\\s+2>&1)?(?:\\s*\\|\\s*tail\\s+(?:-\\d+|-n\\s+\\d+))?\\s*");
+    static final String REJECTED_EDIT_PREFIX = "Historical rejected edit; complete call remains in audit. ";
     private final WorkspaceAgentLimitsConfig.ContextPolicy policy;
 
     WorkspaceAgentContextCompactor(WorkspaceAgentLimitsConfig.ContextPolicy policy) {
@@ -25,24 +30,29 @@ final class WorkspaceAgentContextCompactor {
     /** 只在全部工具响应配对完成后调用；正常压缩同时考虑窗口阈值与工作预算。 */
     Result compact(WorkspaceAgentSession session, String lastToolName, String lastToolResult,
                    int remainingModelTurns) {
-        return compact(session, lastToolName, lastToolResult, remainingModelTurns, false);
+        return compact(session, lastToolName, lastToolResult, remainingModelTurns, false, false);
     }
 
     /** 超时没有产生新工具调用，先移出冗余历史再在原全局预算内重试。 */
     Result compactForRetry(WorkspaceAgentSession session, String lastToolName, String lastToolResult,
                            int remainingModelTurns) {
-        return compact(session, lastToolName, lastToolResult, remainingModelTurns, true);
+        return compact(session, lastToolName, lastToolResult, remainingModelTurns, true, false);
+    }
+
+    /** 恢复操作会移出旧用户摘要，首请求前重建诊断，但不因续接清空可容纳的源码正文。 */
+    Result compactForResume(WorkspaceAgentSession session, int remainingModelTurns) {
+        return compact(session, "", "", remainingModelTurns, false, true);
     }
 
     /** 先压缩旧版本读取，再按完整轮次移出历史；不能用截断源码伪装成准确编辑上下文。 */
     private Result compact(WorkspaceAgentSession session, String lastToolName, String lastToolResult,
-                           int remainingModelTurns, boolean retry) {
+                           int remainingModelTurns, boolean retry, boolean resumed) {
         List<ToolChatMessage> messages = session.messages();
         int before = messages.size();
         long tokensBefore = estimatedTokens(messages);
         long trigger = Math.min(workingBudget(),
                 (long) policy.getMaxContextTokens() * policy.getCompactAtPercent() / 100);
-        if (messages.size() <= 2 || !retry && tokensBefore < trigger) {
+        if (messages.size() < 2 || !resumed && (messages.size() == 2 || !retry && tokensBefore < trigger)) {
             return Result.unchanged(before, tokensBefore, workingBudget());
         }
 
@@ -53,7 +63,7 @@ final class WorkspaceAgentContextCompactor {
             if ("assistant".equals(message.role())) assistantIndexes.add(index);
             message.toolCalls().forEach(call -> toolNames.put(call.id(), call.name()));
         }
-        if (assistantIndexes.isEmpty()) {
+        if (assistantIndexes.isEmpty() && !resumed) {
             return Result.unchanged(before, tokensBefore, workingBudget());
         }
 
@@ -70,18 +80,23 @@ final class WorkspaceAgentContextCompactor {
             pinned.add(messages.get(1));
         }
         pinned.add(ToolChatMessage.user(summary(session, lastToolName, lastToolResult, remainingModelTurns)));
+        String rejection = latestRejectedEdit(messages, toolNames);
+        if (rejection != null) pinned.add(ToolChatMessage.user(rejection));
 
         // 预算决定历史边界，最近轮数只作为正文保留优先级，不能提前丢掉仍能容纳的源码。
-        int start = assistantIndexes.getFirst();
-        List<ToolChatMessage> recent = new ArrayList<>(messages.subList(start, messages.size()));
+        List<ToolChatMessage> recent = assistantIndexes.isEmpty() ? new ArrayList<>()
+                : new ArrayList<>(messages.subList(assistantIndexes.getFirst(), messages.size()));
         omitSupersededReads(recent, toolNames);
         summarizePlatformValidation(recent);
+        summarizeMavenDiagnostics(recent, toolNames);
         // 重试时即使尚未达到预算，也移出已有的大段读取，避免再次原样发送超时请求。
         if (retry) omitAllReadBodies(recent, toolNames);
         while (!recent.isEmpty() && estimatedTokens(join(pinned, recent)) > workingBudget()) {
             if (omitOldReadMetadataRound(recent)) continue;
             // 验证失败已进入权威摘要，大报告整轮移出，避免先清空源码正文再丢掉同一报告。
             if (omitLargeCheckpointRound(recent)) continue;
+            // 没有落盘的失败编辑已保留诊断，不能让旧补丁参数优先挤出刚读到的修复源码。
+            if (omitRejectedEditRound(recent)) continue;
             // 先移出单个大读取的正文，保留同轮其他文件及真实工具配对。
             if (omitLargestReadBody(recent, toolNames)) continue;
             int next = -1;
@@ -109,7 +124,73 @@ final class WorkspaceAgentContextCompactor {
         messages.clear();
         messages.addAll(compacted);
         return new Result(true, before, messages.size(), tokensBefore, estimatedTokens(messages),
-                workingBudget(), retry ? "timeout_retry" : "context_budget");
+                workingBudget(), retry ? "timeout_retry" : resumed ? "resume_restore" : "context_budget");
+    }
+
+    /** 只归档可确认零写入的单工具编辑轮次；多工具和局部成功继续保留完整证据。 */
+    private boolean omitRejectedEditRound(List<ToolChatMessage> messages) {
+        for (int index = 0; index + 1 < messages.size(); index++) {
+            var request = messages.get(index);
+            var response = messages.get(index + 1);
+            if (!"assistant".equals(request.role()) || request.toolCalls().size() != 1
+                    || !"tool".equals(response.role())) continue;
+            var call = request.toolCalls().getFirst();
+            if (!call.id().equals(response.toolCallId())) continue;
+            try {
+                if (!zeroWriteRejection(call.name(), MAPPER.readTree(response.content()))) continue;
+                messages.subList(index, index + 2).clear();
+                return true;
+            } catch (Exception ignored) {
+                // 非标准响应无法证明没有写入，保持原始调用与结果。
+            }
+        }
+        return false;
+    }
+
+    /** 把最近真实拒绝保留为有界元信息；后续实际写入后不再固定旧拒绝。 */
+    private String latestRejectedEdit(List<ToolChatMessage> messages, Map<String, String> toolNames) {
+        String latest = null;
+        for (var message : messages) {
+            if ("user".equals(message.role()) && message.content().startsWith(REJECTED_EDIT_PREFIX)) {
+                latest = message.content();
+            } else if ("tool".equals(message.role())) {
+                try {
+                    var result = MAPPER.readTree(message.content());
+                    if (hasWrites(result)) latest = null;
+                    String tool = toolNames.get(message.toolCallId());
+                    if (!zeroWriteRejection(tool, result)) continue;
+                    var metadata = MAPPER.createObjectNode().put("tool", tool);
+                    for (String field : List.of("error", "failedPath", "message")) {
+                        if (result.has(field)) metadata.set(field, result.get(field));
+                    }
+                    latest = REJECTED_EDIT_PREFIX + bounded(metadata.toString());
+                } catch (Exception ignored) {
+                    // 非标准结果不产生归档诊断，也不能抹掉已确认的失败。
+                }
+            }
+        }
+        return latest;
+    }
+
+    /** 以真实工具返回的写入列表判定变化，不把失败状态误当作没有副作用。 */
+    private boolean hasWrites(com.fasterxml.jackson.databind.JsonNode result) {
+        if (result == null) return false;
+        var applied = result.path("applied");
+        return result.path("changedFiles").isArray() && !result.path("changedFiles").isEmpty()
+                || applied.isArray() && !applied.isEmpty() || applied.isNumber() && applied.asInt() > 0;
+    }
+
+    /** 只确认编辑预检拒绝或整组回退完成；执行异常的未知副作用不能靠猜测归档。 */
+    private boolean zeroWriteRejection(String tool, com.fasterxml.jackson.databind.JsonNode result) {
+        if (!("apply_patch".equals(tool) || "apply_edits".equals(tool)) || result == null
+                || !result.isObject() || result.path("error").asText().isBlank() || hasWrites(result)) return false;
+        String error = result.path("error").asText();
+        if ("TOOL_ARGUMENTS_INVALID_JSON".equals(error)) return true;
+        if ("apply_patch".equals(tool)) {
+            return !result.path("ok").asBoolean(true) && result.path("applied").isArray();
+        }
+        return Set.of("STALE_FILE", "EDIT_NOT_UNIQUE", "EMPTY_FILE", "NO_EDITS", "DUPLICATE_FILE_EDIT").contains(error)
+                || result.path("rollbackComplete").asBoolean() && result.path("changedFiles").isArray();
     }
 
     /** 按版本和行范围移出重复或失效正文，保留可用片段及真实读取元信息。 */
@@ -273,6 +354,41 @@ final class WorkspaceAgentContextCompactor {
         return false;
     }
 
+    /** 已有失败摘要和完整日志的Maven输出先去重，给当前准确源码保留预算。 */
+    private void summarizeMavenDiagnostics(List<ToolChatMessage> messages, Map<String, String> toolNames) {
+        for (int index = 0; index < messages.size(); index++) {
+            var message = messages.get(index);
+            if (!"tool".equals(message.role()) || !"bash".equals(toolNames.get(message.toolCallId()))) continue;
+            String metadata = mavenDiagnosticMetadata(message.content());
+            if (metadata != null) messages.set(index, ToolChatMessage.tool(message.toolCallId(), metadata));
+        }
+    }
+
+    /** 只省略可追溯的纯诊断stdout；写入、混合命令或环境阻塞仍保留原响应。 */
+    private String mavenDiagnosticMetadata(String content) {
+        try {
+            var parsed = MAPPER.readTree(content);
+            if (!(parsed instanceof ObjectNode result) || !result.has("passed") || result.path("passed").asBoolean(true)
+                    || !result.path("changedFiles").isArray() || !result.path("changedFiles").isEmpty()
+                    || !result.has("timedOut") || result.path("timedOut").asBoolean()
+                    || !result.has("infrastructureError") || !result.path("infrastructureError").asText("").isBlank()
+                    || !result.path("exitCode").isInt() || Set.of(126, 127).contains(result.path("exitCode").asInt())
+                    || result.path("fullLogPath").asText().isBlank() || result.path("output").asText().isBlank()
+                    || result.path("output").asText().contains("unable to create native thread")) return null;
+            if (result.path("failureHighlights").asText().isBlank() && result.path("testFailureEvidence").asText().isBlank()) return null;
+            String command = result.path("command").asText().trim();
+            if (!SIMPLE_MAVEN_CHECK.matcher(command).matches()
+                    || java.util.Arrays.stream(command.split("\\s+"))
+                    .noneMatch(Set.of("compile", "test", "verify", "package")::contains)) return null;
+            result.remove("output");
+            result.put("outputOmitted", true);
+            result.put("historyNote", "Maven stdout omitted; failure diagnostics remain here and full output remains at fullLogPath and in audit.");
+            return result.toString();
+        } catch (Exception ignored) {
+            return null; // 非标准工具结果不能证明诊断完整，保留真实响应。
+        }
+    }
+
     /** 大报告的检查细节沿用失败摘要，版本、状态和报告路径保留真实字段。 */
     private String checkpointMetadata(String content) {
         try {
@@ -360,6 +476,7 @@ final class WorkspaceAgentContextCompactor {
                         + "; fix unresolved failures, rerun tests and submit the current checkpoint.\n"
                 : "- remaining model turns: " + remainingModelTurns + "\n";
         String latestResult = "submit_checkpoint".equals(lastToolName) ? checkpointMetadata(lastToolResult) : null;
+        if (latestResult == null && "bash".equals(lastToolName)) latestResult = mavenDiagnosticMetadata(lastToolResult);
         if (latestResult == null) latestResult = isRead(lastToolName) ? withoutReadBodies(lastToolResult) : lastToolResult;
         return """
                 Platform context checkpoint (authoritative state; omitted tool details remain on disk):
@@ -369,6 +486,7 @@ final class WorkspaceAgentContextCompactor {
                 - latest compile current: %s
                 - latest tests current: %s
                 - latest contract validation current: %s
+                %s\
                 - unresolved verification failure from write version %d:
                 %s
                 - latest tool: %s
@@ -379,9 +497,27 @@ final class WorkspaceAgentContextCompactor {
                 Use read_planning for the complete public contract and read_files line ranges for exact source.
                 """.formatted(session.mode(), session.changedFiles(), session.writeVersion(),
                 session.compileCurrent(), session.testsCurrent(), session.contractCurrent(),
+                checkpointOverview(session),
                 session.unresolvedFailureVersion(), failureSummary(session),
                 lastToolName == null ? "" : lastToolName,
                 bounded(latestResult), closingReminder);
+    }
+
+    /** 同版本状态对照只保留受检事实；后续写入明确使旧快照成为历史证据。 */
+    private String checkpointOverview(WorkspaceAgentSession session) {
+        var check = session.checkpointObservation();
+        if (check == null) return "";
+        return "- last official snapshot check (evidence only; limited to recorded scope):\n"
+                + "sourceHash=" + check.sourceHash() + " writeVersion=" + check.writeVersion()
+                + " currentWriteVersion=" + (check.writeVersion() == session.writeVersion())
+                + " scope=" + check.scope() + " overall=" + check.status()
+                + " build=" + check.buildStatus() + " tests=" + check.testStatus()
+                + " testsRun=" + (check.testSummaryPresent() ? check.testsRun() : "UNKNOWN")
+                + " failures=" + (check.testSummaryPresent() ? check.failures() : "UNKNOWN")
+                + " errors=" + (check.testSummaryPresent() ? check.errors() : "UNKNOWN")
+                + " skipped=" + (check.testSummaryPresent() ? check.skipped() : "UNKNOWN") + "\n"
+                + "independent behavior=" + check.behaviorStatus() + " passed=" + check.behaviorPassed()
+                + " unresolved=" + check.behaviorUnresolved() + " report=" + check.reportPath() + "\n";
     }
 
     /** 摘要使用有界首尾证据，完整诊断仍在原工具日志中。 */
@@ -389,14 +525,13 @@ final class WorkspaceAgentContextCompactor {
         return bounded(value, policy.getMaxLatestToolResultChars());
     }
 
-    /** 自测与独立业务失败各保留一部分预算，防止一个长报告完全遮住另一类失败。 */
+    /** 自测、完整验收与独立业务诊断均有摘要预算，避免长日志遮住其他失败。 */
     private String failureSummary(WorkspaceAgentSession session) {
-        String source = session.sourceVerificationFailure();
-        String behavior = session.behaviorVerificationFailure();
-        if (source.isBlank()) return bounded(behavior);
-        if (behavior.isBlank()) return bounded(source);
+        var failures = session.verificationFailures();
+        if (failures.isEmpty()) return "";
         int limit = policy.getMaxLatestToolResultChars();
-        return bounded(source, limit / 2) + "\n" + bounded(behavior, limit - limit / 2);
+        return failures.stream().map(failure -> bounded(failure, limit / failures.size()))
+                .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     /** 按本类诊断的预算保留首尾事实，不把省略内容表述为已完整交付。 */

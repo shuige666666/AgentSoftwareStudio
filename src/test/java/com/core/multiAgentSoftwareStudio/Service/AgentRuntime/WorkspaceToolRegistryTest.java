@@ -41,6 +41,198 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class WorkspaceToolRegistryTest {
+    /** 同文件替换按请求顺序预检，全部沿用组开始时哈希，最终只写一次。 */
+    @Test
+    void exactEditsStageMultipleReplacementsInOneFile() throws Exception {
+        Path source = projectRoot.resolve("src/main/java/demo/App.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class App { int first = 0; int second = 0; }\n", StandardCharsets.UTF_8);
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, registry.snapshotWorkspace(projectRoot));
+        String hash = objectMapper.readTree(registry.execute("read_files",
+                "{\"paths\":[\"src/main/java/demo/App.java\"]}", session)).at("/files/0/sha256").asText();
+        var edits = List.of(
+                Map.of("path", "src/main/java/demo/App.java", "expectedHash", hash, "oldText", "first = 0", "newText", "first = 1"),
+                Map.of("path", "src/main/java/demo/App.java", "expectedHash", hash, "oldText", "second = 0", "newText", "second = 2"),
+                Map.of("path", "src/main/java/demo/App.java", "expectedHash", hash, "oldText", "first = 1", "newText", "first = 3"));
+        var result = objectMapper.readTree(registry.execute("apply_edits", objectMapper.writeValueAsString(Map.of("edits", edits)), session));
+        assertEquals(1, result.path("applied").asInt(), result.toString());
+        assertEquals("class App { int first = 3; int second = 2; }\n", Files.readString(source));
+        assertEquals(1, session.writeVersion());
+    }
+
+    /** 组内旧哈希或非唯一文本失败时，先前暂存的替换不能提前落盘。 */
+    @Test
+    void sameFilePreflightFailureWritesNothing() throws Exception {
+        Path source = projectRoot.resolve("src/main/java/demo/App.java");
+        Files.createDirectories(source.getParent());
+        String original = "class App { int first = 0; int second = 0; }\n";
+        Files.writeString(source, original, StandardCharsets.UTF_8);
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, registry.snapshotWorkspace(projectRoot));
+        String hash = objectMapper.readTree(registry.execute("read_files",
+                "{\"paths\":[\"src/main/java/demo/App.java\"]}", session)).at("/files/0/sha256").asText();
+        for (String secondHash : List.of(hash, "old-hash")) {
+            var edits = List.of(
+                    Map.of("path", "src/main/java/demo/App.java", "expectedHash", hash, "oldText", "first = 0", "newText", "first = 1"),
+                    Map.of("path", "src/main/java/demo/App.java", "expectedHash", secondHash, "oldText", "int", "newText", "long"));
+            String result = registry.execute("apply_edits", objectMapper.writeValueAsString(Map.of("edits", edits)), session);
+            assertTrue(result.contains(secondHash.equals(hash) ? "EDIT_NOT_UNIQUE" : "STALE_FILE"), result);
+            assertEquals(original, Files.readString(source));
+            assertEquals(0, session.writeVersion());
+        }
+    }
+
+    /** 精确编辑可避开新增补丁的行前缀，但 JSON、旧哈希和受保护路径仍必须校验。 */
+    @Test
+    void developmentCanRecoverFromAddPatchFormatUsingExactEdits() throws Exception {
+        Path source = projectRoot.resolve("src/main/java/demo/App.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class App { int value = 1; }\n", StandardCharsets.UTF_8);
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, registry.snapshotWorkspace(projectRoot));
+        assertTrue(registry.definitions(WorkspaceAgentMode.DEVELOPMENT).stream()
+                .anyMatch(def -> def.name().equals("apply_edits")));
+        String rejected = registry.execute("apply_patch", objectMapper.writeValueAsString(Map.of("patch",
+                "*** Begin Patch\n*** Add File: README.md\n+# Demo\n\n+Run mvn test\n*** End Patch\n")), session);
+        assertTrue(rejected.contains("PATCH_FORMAT"));
+        assertFalse(Files.exists(projectRoot.resolve("README.md")));
+        var current = objectMapper.readTree(registry.execute("read_files",
+                "{\"paths\":[\"src/main/java/demo/App.java\"]}", session)).at("/files/0");
+        String hash = current.path("sha256").asText();
+        var edits = List.of(Map.of("path", "README.md", "expectedHash", "", "oldText", "",
+                        "newText", "# Demo\n\nRun `mvn test`.\n"),
+                Map.of("path", "src/main/java/demo/App.java", "expectedHash", hash,
+                        "oldText", "value = 1", "newText", "value = 2"));
+        var result = objectMapper.readTree(registry.execute("apply_edits",
+                objectMapper.writeValueAsString(Map.of("edits", edits)), session));
+        assertEquals(2, result.path("applied").asInt(), result.toString());
+        assertEquals("# Demo\n\nRun `mvn test`.\n", Files.readString(projectRoot.resolve("README.md")));
+        assertTrue(Files.readString(source).contains("value = 2"));
+        assertEquals(2, session.writeVersion());
+        assertFalse(session.completed());
+
+        String stale = registry.execute("apply_edits", objectMapper.writeValueAsString(Map.of("edits", edits)), session);
+        assertTrue(stale.contains("STALE_FILE"));
+        String malformed = registry.execute("apply_edits", "{\"edits\":[", session);
+        assertTrue(malformed.contains("TOOL_ARGUMENTS_INVALID_JSON"));
+        String protectedWrite = registry.execute("apply_edits", objectMapper.writeValueAsString(Map.of("edits", List.of(
+                Map.of("path", ".software-studio/contract.json", "expectedHash", "", "oldText", "", "newText", "{}")))), session);
+        assertTrue(protectedWrite.contains("TOOL_EXECUTION_FAILED"));
+        assertEquals(2, session.writeVersion());
+        assertFalse(Files.exists(projectRoot.resolve(".software-studio/contract.json")));
+    }
+
+    /** 后续文件无法写入时只撤销本组编辑，不能回退本会话之前的有效修改。 */
+    @Test
+    void exactEditIoFailurePreservesEarlierSessionChanges() throws Exception {
+        Path source = projectRoot.resolve("src/main/java/demo/App.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class App { int value = 1; }\n", StandardCharsets.UTF_8);
+        Files.writeString(projectRoot.resolve("src/blocked.txt"), "parent is a file", StandardCharsets.UTF_8);
+        var session = session(WorkspaceAgentMode.DEVELOPMENT,
+                Map.of("src/main/java/demo/App.java", "class App { int value = 0; }\n"));
+        session.recordWrite("src/main/java/demo/App.java");
+        String hash = objectMapper.readTree(registry.execute("read_files",
+                "{\"paths\":[\"src/main/java/demo/App.java\"]}", session)).at("/files/0/sha256").asText();
+        var result = objectMapper.readTree(registry.execute("apply_edits", objectMapper.writeValueAsString(Map.of("edits", List.of(
+                Map.of("path", "src/main/java/demo/App.java", "expectedHash", hash, "oldText", "value = 1", "newText", "value = 2"),
+                Map.of("path", "src/blocked.txt/Child.java", "expectedHash", "", "oldText", "", "newText", "class Child {}")))), session));
+        assertEquals("TOOL_EXECUTION_FAILED", result.path("error").asText());
+        assertTrue(result.path("rollbackComplete").asBoolean(), result.toString());
+        assertTrue(Files.readString(source).contains("value = 1"));
+        assertEquals("parent is a file", Files.readString(projectRoot.resolve("src/blocked.txt")));
+        assertEquals(1, session.writeVersion());
+    }
+
+    /** 文档与业务检查分别更新：业务绿色不能代替交付说明的复验。 */
+    @Test
+    void progressDoesNotClearFinalDocumentationFailure() {
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, Map.of());
+        var behaviorPassed = com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult.fromFindings(List.of(
+                new com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorFinding("create", true, "HTTP 201")));
+        when(checkpointService.verify(any(), eq("final"), anyString())).thenReturn(
+                new WorkspaceCheckpointService.CheckpointResult("final", "FAILED", "docs-hash", "snapshot", "report",
+                        null, null, true, List.of(), "Delivery documentation: README.md is missing", false, false,
+                        behaviorPassed, "Delivery documentation: README.md is missing"));
+        registry.execute("submit_checkpoint", "{\"scope\":\"final\"}", session);
+        session.recordTestsPassed();
+        when(checkpointService.verify(any(), eq("progress"), anyString())).thenReturn(
+                new WorkspaceCheckpointService.CheckpointResult("progress", "PASSED", "code-hash", "snapshot", "report",
+                        null, null, true, List.of(), "", false, false, behaviorPassed));
+        registry.validateProgress(session);
+        assertTrue(session.finalVerificationFailure().contains("README.md"));
+        assertTrue(session.finalVerificationFailure().contains("docs-hash"));
+        assertTrue(session.behaviorVerificationFailure().isBlank());
+        assertFalse(session.completed());
+    }
+
+    /** progress 与普通自测没有覆盖完整契约，不能清除尚未复验的 final 失败。 */
+    @Test
+    void retainsFinalContractFailureUntilAnotherFinalCheckpoint() {
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, Map.of());
+        when(checkpointService.verify(any(), eq("final"), anyString())).thenReturn(
+                new WorkspaceCheckpointService.CheckpointResult("final", "FAILED", "full-hash", "snapshot", "report",
+                        null, null, false, List.of("Required endpoint /api/items is missing"),
+                        "Required endpoint /api/items is missing", false, false));
+        registry.execute("submit_checkpoint", "{\"scope\":\"final\"}", session);
+        session.recordTestsPassed();
+        session.recordWrite("src/main/java/ItemController.java");
+        when(checkpointService.verify(any(), eq("progress"), anyString())).thenReturn(
+                new WorkspaceCheckpointService.CheckpointResult("progress", "PASSED", "progress-hash", "snapshot", "report",
+                        null, null, true, List.of(), "", false, false));
+        String progress = registry.validateProgress(session);
+        assertTrue(session.unresolvedVerificationFailure().contains("/api/items"));
+        session.messages().add(com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage.system("system"));
+        session.messages().add(com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage.user("objective"));
+        session.messages().add(com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage.assistant("inspecting", List.of()));
+        session.messages().add(com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage.user(progress));
+        var policy = new com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentLimitsConfig().getContext();
+        policy.setCompactAtPercent(1);
+        policy.setMaxContextTokens(2000);
+        policy.setMaxWorkingContextTokens(2000);
+        new WorkspaceAgentContextCompactor(policy).compact(session, "read_files", "{}", 6);
+        assertTrue(session.messages().get(2).content().contains("/api/items"));
+        assertTrue(session.messages().get(2).content().contains("full-hash"));
+        assertFalse(session.completed());
+
+        when(checkpointService.verify(any(), eq("final"), anyString())).thenReturn(
+                new WorkspaceCheckpointService.CheckpointResult("final", "PASSED", "fixed-hash", "snapshot", "report",
+                        null, null, true, List.of(), "", true, false));
+        registry.execute("submit_checkpoint", "{\"scope\":\"final\"}", session);
+        assertFalse(session.unresolvedVerificationFailure().contains("/api/items"));
+        assertTrue(session.completed());
+    }
+
+    /** 启动失败跨过普通自测和上下文压缩仍可见，下一次业务验证更新后不保留旧原因。 */
+    @Test
+    void keepsCurrentStartupFailureAcrossSelfTestsAndCompaction() {
+        var session = session(WorkspaceAgentMode.DEVELOPMENT, Map.of());
+        var notStarted = com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult.notRun(
+                "required a bean of type 'demo.Service' that could not be found");
+        when(checkpointService.verify(any(), eq("progress"), anyString())).thenReturn(
+                new WorkspaceCheckpointService.CheckpointResult("progress", "FAILED", "startup-hash", "snapshot", "report",
+                        null, null, false, List.of(), "wrapper".repeat(3000), false, false, notStarted));
+        String response = registry.validateProgress(session);
+        session.recordTestsPassed();
+        assertTrue(session.behaviorVerificationFailure().contains("demo.Service"));
+        session.messages().add(com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage.system("system"));
+        session.messages().add(com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage.user("objective"));
+        session.messages().add(com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage.assistant("inspecting", List.of()));
+        session.messages().add(com.core.multiAgentSoftwareStudio.Model.Tool.ToolChatMessage.user(response));
+        var policy = new com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(2000);
+        new WorkspaceAgentContextCompactor(policy).compact(session, "read_files", "{}", 6);
+        assertTrue(session.messages().get(2).content().contains("status=NOT_RUN"));
+        assertTrue(session.messages().get(2).content().contains("demo.Service"));
+
+        when(checkpointService.verify(any(), eq("progress"), anyString())).thenReturn(
+                new WorkspaceCheckpointService.CheckpointResult("progress", "FAILED", "next-hash", "snapshot", "report",
+                        null, null, false, List.of(), "compile failed", false, false,
+                        com.core.multiAgentSoftwareStudio.Model.Benchmark.BenchmarkBehaviorResult.notRun("production build failed")));
+        registry.validateProgress(session);
+        assertFalse(session.behaviorVerificationFailure().contains("demo.Service"));
+        assertTrue(session.behaviorVerificationFailure().contains("next-hash"));
+        assertFalse(session.completed());
+    }
+
     /** 回放真实的短参数失败：修好 JSON 仍须检查补丁边界，只有显式重提完整补丁才落盘。 */
     @Test
     void replaysSavedMalformedArgumentsAndRequiresAnExplicitValidResubmission() throws Exception {
@@ -393,6 +585,7 @@ class WorkspaceToolRegistryTest {
         Files.createDirectories(source.getParent());
         Files.writeString(source, "class App {}\n", StandardCharsets.UTF_8);
         Files.writeString(projectRoot.resolve("pom.xml"), "<project/>\n", StandardCharsets.UTF_8);
+        Files.writeString(projectRoot.resolve("README.md"), "Run: mvn spring-boot:run\nTest: mvn test\n", StandardCharsets.UTF_8);
         DockerSandboxService sandbox = mock(DockerSandboxService.class);
         when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp -DskipTests compile")))
                 .thenReturn(new SandboxExecutionResult("compile", 0, "BUILD SUCCESS", 10, false, null));

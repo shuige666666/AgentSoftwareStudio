@@ -48,10 +48,18 @@ public class WorkspaceCheckpointService {
                                    VerificationStepResult test, boolean contractPassed,
                                    List<String> contractBlockers, String failureOutput,
                                    boolean allowCompletion, boolean reusedVerification,
-                                   BenchmarkBehaviorResult behavior) {
+                                   BenchmarkBehaviorResult behavior, String deliveryFailure) {
         public CheckpointResult {
             // 兼容此前保存的 checkpoint；没有行为字段不能被解释为业务通过。
             behavior = behavior == null ? BenchmarkBehaviorResult.notApplicable() : behavior;
+            deliveryFailure = deliveryFailure == null ? "" : deliveryFailure;
+        }
+        public CheckpointResult(String scope, String status, String sourceHash, String snapshotPath,
+                                String reportPath, VerificationStepResult build, VerificationStepResult test,
+                                boolean contractPassed, List<String> contractBlockers, String failureOutput,
+                                boolean allowCompletion, boolean reusedVerification, BenchmarkBehaviorResult behavior) {
+            this(scope, status, sourceHash, snapshotPath, reportPath, build, test, contractPassed,
+                    contractBlockers, failureOutput, allowCompletion, reusedVerification, behavior, "");
         }
         public CheckpointResult(String scope, String status, String sourceHash, String snapshotPath,
                                 String reportPath, VerificationStepResult build, VerificationStepResult test,
@@ -100,11 +108,21 @@ public class WorkspaceCheckpointService {
                                             Consumer<String> logger) {
         WorkspaceAgentSession session = new WorkspaceAgentSession(Path.of(data.projectPath),
                 WorkspaceAgentMode.DEVELOPMENT, data, logger, Map.of(), Set.of());
-        return verify(session, "final", "Final verification after development session stopped");
+        CheckpointResult result = verify(session, "final", "Final verification after development session stopped");
+        try {
+            // 只给仍与受检快照一致的候选补存诊断；不恢复验证通过状态或自动接受任务。
+            if (result.sourceHash().equals(fingerprint(session.projectRoot()))) {
+                WorkspaceDevelopmentContext.saveFinalVerification(session, result,
+                        WorkspaceToolRegistry.snapshot(session.projectRoot()));
+            }
+        } catch (Exception e) {
+            session.logger().accept("   Unable to save final verification for resume: " + e.getMessage());
+        }
+        return result;
     }
 
     /**
-     * progress 只检查构建与已有测试；final 再检查契约，并且仅最终通过允许结束开发。
+     * progress 只检查构建与已有测试；final 再检查契约及交付说明，仅最终通过允许结束开发。
      */
     public CheckpointResult verify(WorkspaceAgentSession session, String scope, String summary) {
         return verify(session, scope, summary, null);
@@ -203,8 +221,10 @@ public class WorkspaceCheckpointService {
             boolean behaviorRequired = finalScope && checkId != null && !checkId.isBlank();
             boolean sameSource = hash.equals(fingerprint(root));
             if (!sameSource) blockers = concat(blockers, "Candidate changed during isolated verification");
+            // 根目录运行说明是既定交付资料；只验收本次冻结版本，不阻断中途 progress。
+            String deliveryFailure = finalScope ? deliveryDocumentationFailure(source) : "";
             boolean passed = build.passed() && test.passed() && contractPassed && sameSource
-                    && (!behaviorRequired || behavior.passed());
+                    && (!behaviorRequired || behavior.passed()) && deliveryFailure.isBlank();
             boolean allowCompletion = finalScope && passed;
             if (behaviorRequired) {
                 // 修复后重新验收只展示当前版本的业务结论，避免保留旧版本的失败警告。
@@ -230,13 +250,14 @@ public class WorkspaceCheckpointService {
                 String evidence = SurefireFailureFeedback.read(verificationWork, Map.of());
                 if (!evidence.isBlank()) failureOutput = evidence + "\n" + failureOutput;
             }
+            if (!deliveryFailure.isBlank()) failureOutput += "\n" + deliveryFailure;
             if (!behavior.passed() && !"NOT_APPLICABLE".equals(behavior.status())) {
                 failureOutput += "\nPublic behavior checks (sourceHash=" + hash + "): "
                         + mapper.writeValueAsString(behavior);
             }
             CheckpointResult result = new CheckpointResult(scope, status, hash, source.toString(),
                     reportDirectory.resolve("checkpoint.json").toString(), build, test, contractPassed,
-                    blockers.stream().limit(12).toList(), failureOutput, allowCompletion, reuse, behavior);
+                    blockers.stream().limit(12).toList(), failureOutput, allowCompletion, reuse, behavior, deliveryFailure);
             session.workflowData().lastCheckpointHash = hash;
             session.workflowData().lastCheckpointSnapshotPath = result.snapshotPath();
             session.workflowData().lastCheckpointReportPath = result.reportPath();
@@ -249,6 +270,31 @@ public class WorkspaceCheckpointService {
     }
 
     private record CheckpointRecord(String completedAt, String summary, CheckpointResult result) { }
+
+    /** 核对必需说明和实际引用的 Wrapper 文件；其他内容仍需交付质量评审。 */
+    private static String deliveryDocumentationFailure(Path source) throws IOException {
+        Path readme = source.resolve("README.md");
+        String text = Files.isRegularFile(readme) ? Files.readString(readme, StandardCharsets.UTF_8) : "";
+        if (text.isBlank()) {
+            return "Delivery documentation: README.md is missing or blank. Add project-root README.md with actual "
+                    + "environment/configuration requirements, run and test commands, core usage steps and known limitations, "
+                    + "then submit the final checkpoint again. Mark unverified instructions clearly.";
+        }
+        var commands = java.util.regex.Pattern.compile("(?m)(?:^\\s*(?:[$>]\\s*)?|`)((?:\\./|\\.\\\\)?mvnw(?:\\.cmd|\\.bat)?)(?=\\s)")
+                .matcher(text);
+        while (commands.find()) {
+            String command = commands.group(1);
+            String script = command.replaceFirst("^\\.[/\\\\]", "");
+            // 已发生的交付问题：README 给出 Wrapper 命令，但生成工程没有对应启动文件。
+            if (!Files.isRegularFile(source.resolve(script))
+                    || !Files.isRegularFile(source.resolve(".mvn/wrapper/maven-wrapper.properties"))) {
+                return "Delivery documentation: README.md invokes " + command
+                        + " but the required wrapper script or .mvn/wrapper/maven-wrapper.properties is missing. "
+                        + "Use the actual installed Maven commands or provide a complete wrapper, then re-submit final.";
+            }
+        }
+        return "";
+    }
 
     /** 核对最近接受的快照哈希后恢复受管源码；先备份当前候选，不触碰平台元数据。 */
     public RestoreResult restoreLatestAccepted(WorkspaceAgentSession session) {
@@ -441,7 +487,8 @@ public class WorkspaceCheckpointService {
     private boolean included(Path relative) {
         String path = relative.toString().replace('\\', '/');
         return (path.startsWith("src/") || path.equals("pom.xml") || path.equals("README.md")
-                || path.equals(".gitignore"))
+                || path.equals(".gitignore") || path.equals("mvnw") || path.equals("mvnw.cmd")
+                || path.equals("mvnw.bat") || path.equals(".mvn/wrapper/maven-wrapper.properties"))
                 && !path.contains("/target/") && !path.contains("/node_modules/")
                 && !path.endsWith(".class") && !path.endsWith(".jar");
     }

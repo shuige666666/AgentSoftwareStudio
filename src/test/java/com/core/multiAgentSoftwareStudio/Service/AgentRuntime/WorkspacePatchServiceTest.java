@@ -462,6 +462,77 @@ class WorkspacePatchServiceTest {
         assertEquals("class Example {\n}\n", Files.readString(source));
     }
 
+    /** 真实续接中的尾随空 @@ 必须指出块位置，预检失败不能留下前面文件的修改。 */
+    @Test
+    void explainsEmptyHunkBeforeNextFileWithoutPartialWrites() throws Exception {
+        Path source = root.resolve("src/Example.java");
+        Files.createDirectories(source.getParent());
+        String original = "public class Example {\n    int value = 1;\n}\n";
+        Files.writeString(source, original, StandardCharsets.UTF_8);
+        var session = session();
+        String patch = "*** Begin Patch\n*** Add File: README.md\n+Ready\n"
+                + "*** Update File: src/Example.java\n@@\n-    int value = 1;\n+    int value = 2;\n@@\n"
+                + "*** Add File: src/Other.java\n+class Other {}\n*** End Patch\n";
+
+        var rejected = service.apply(patch, session);
+        assertEquals("PATCH_CONTEXT", rejected.error());
+        assertTrue(rejected.message().contains("Empty @@ hunk at normalized patch line 8"), rejected.message());
+        assertTrue(rejected.message().contains("Remove the unused @@"));
+        assertTrue(rejected.message().contains("No files were written"));
+        assertEquals(original, Files.readString(source));
+        assertFalse(Files.exists(root.resolve("README.md")));
+        assertFalse(Files.exists(root.resolve("src/Other.java")));
+        assertEquals(0, session.writeVersion());
+
+        // 模拟重新提交明确修正的完整补丁；工具自身不猜测或丢弃失败块。
+        var corrected = service.apply(patch.replace("@@\n*** Add File: src/Other.java",
+                "*** Add File: src/Other.java"), session);
+        assertTrue(corrected.ok(), corrected.message());
+        assertTrue(Files.readString(source).contains("int value = 2"));
+        assertTrue(compiles(source));
+    }
+
+    /** 只有新增行的 Update 不能猜插入位置，反馈要求准确锚点并保留原文件。 */
+    @Test
+    void distinguishesUnanchoredInsertionFromEmptyHunk() throws Exception {
+        Path source = root.resolve("src/Example.java");
+        Files.createDirectories(source.getParent());
+        String original = "public class Example {}\n";
+        Files.writeString(source, original, StandardCharsets.UTF_8);
+        var session = session();
+        var rejected = service.apply("*** Begin Patch\n*** Update File: src/Example.java\n@@\n"
+                + "+@Deprecated\n*** End Patch\n", session);
+        assertEquals("PATCH_CONTEXT", rejected.error());
+        assertTrue(rejected.message().contains("no existing source lines"), rejected.message());
+        assertTrue(rejected.message().contains("exact unchanged context line"));
+        assertFalse(rejected.message().contains("Remove the unused @@"));
+        assertEquals(original, Files.readString(source));
+        assertEquals(0, session.writeVersion());
+    }
+
+    /** 多文件操作头前误加空格应收到文法诊断，原子预检仍拒绝所有落盘。 */
+    @Test
+    void diagnosesPrefixedFileHeaderWithoutReinterpretingIt() throws Exception {
+        Files.createDirectories(root.resolve("src"));
+        Files.writeString(root.resolve("src/A.java"), "class A { int value = 1; }\n", StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("src/B.java"), "class B { int value = 1; }\n", StandardCharsets.UTF_8);
+        String bad = "*** Begin Patch\n*** Update File: src/A.java\n@@\n"
+                + "-class A { int value = 1; }\n+class A { int value = 2; }\n"
+                + " *** Update File: src/B.java\n@@\n-class B { int value = 1; }\n"
+                + "+class B { int value = 2; }\n*** End Patch\n";
+        var session = session();
+        var rejected = service.apply(bad, session);
+        assertEquals("PATCH_CONTEXT_NOT_FOUND", rejected.error());
+        assertTrue(rejected.message().contains("File operation headers have no hunk prefix"), rejected.message());
+        assertTrue(rejected.message().contains("src/B.java"));
+        assertEquals(0, session.writeVersion());
+        assertTrue(Files.readString(root.resolve("src/A.java")).contains("value = 1"));
+        assertTrue(Files.readString(root.resolve("src/B.java")).contains("value = 1"));
+        assertTrue(service.apply(bad.replace("\n *** Update File:", "\n*** Update File:"), session).ok());
+        assertTrue(compiles(root.resolve("src/A.java")));
+        assertTrue(compiles(root.resolve("src/B.java")));
+    }
+
     private WorkspaceAgentSession session() {
         return new WorkspaceAgentSession(root, WorkspaceAgentMode.DEVELOPMENT,
                 new SoftwareStudioWorkflowData("test"), message -> { }, Map.of(), Set.of());

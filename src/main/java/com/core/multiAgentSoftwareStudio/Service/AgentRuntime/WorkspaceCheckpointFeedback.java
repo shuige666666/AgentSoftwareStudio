@@ -9,6 +9,41 @@ public final class WorkspaceCheckpointFeedback {
     private static final Pattern EXPECTED_STATUS = Pattern.compile("^\\s*(\\d{3})\\b");
     private WorkspaceCheckpointFeedback() { }
 
+    /** 工具内验收与会话外最终验收使用相同的诊断范围，普通绿色不能清除未覆盖的失败。 */
+    static void record(WorkspaceAgentSession session, WorkspaceCheckpointService.CheckpointResult result) {
+        recordObservation(session, result);
+        if ("final".equals(result.scope())) {
+            String finding = finalFindings(result);
+            session.recordFinalFeedback(finding.isBlank() ? "" : "Final contract/delivery last checked at writeVersion="
+                    + session.writeVersion() + " sourceHash=" + result.sourceHash() + " report=" + result.reportPath()
+                    + "; re-check final after edits.\n" + finding);
+        }
+        if (!"NOT_APPLICABLE".equals(result.behavior().status())) {
+            session.recordBehaviorFeedback(result.behavior().passed() ? "" :
+                    behaviorFailures(result.behavior(), result.sourceHash(), result.reportPath()));
+        }
+        if ("PASSED".equals(result.status()) || result.build() != null && result.test() != null
+                && result.build().passed() && result.test().passed()) {
+            session.clearVerificationFailure();
+        } else if (!"BLOCKED".equals(result.status()) && !result.failureOutput().isBlank()) {
+            session.recordVerificationFailure("checkpoint " + result.scope() + ": " + result.failureOutput());
+        }
+    }
+
+    /** 保留同一正式快照的状态对照，不重复成功响应正文，也不改变失败生命周期。 */
+    private static void recordObservation(WorkspaceAgentSession session, WorkspaceCheckpointService.CheckpointResult result) {
+        var testSummary = result.test() == null
+                ? com.core.multiAgentSoftwareStudio.Model.Workflow.TestSummary.empty() : result.test().testSummary();
+        int behaviorPassed = (int) result.behavior().findings().stream().filter(finding -> finding.passed()).count();
+        session.recordCheckpointObservation(new WorkspaceAgentSession.CheckpointObservation(session.writeVersion(),
+                result.sourceHash(), result.scope(), result.status(),
+                result.build() == null ? "NOT_RUN" : result.build().status().name(),
+                result.test() == null ? "NOT_RUN" : result.test().status().name(),
+                testSummary.summaryPresent(), testSummary.testsRun(), testSummary.failures(), testSummary.errors(), testSummary.skipped(),
+                result.behavior().status(), behaviorPassed, result.behavior().findings().size() - behaviorPassed,
+                result.reportPath()));
+    }
+
     /** 保存最终失败的真实验证证据，避免续接状态只剩额度停止；完整报告仍由路径定位。 */
     public static String failureSummary(WorkspaceCheckpointService.CheckpointResult result) {
         String source = result.failureOutput();
@@ -20,7 +55,15 @@ public final class WorkspaceCheckpointFeedback {
         if (behavior.length() > 4_000) behavior = behavior.substring(0, 4_000) + "\n[remaining findings retained in report]";
         return "Final verification sourceHash=" + result.sourceHash() + " build=" + result.build().status()
                 + " tests=" + result.test().status() + " contractPassed=" + result.contractPassed()
-                + " report=" + result.reportPath() + "\n" + source + "\n" + behavior;
+                + " report=" + result.reportPath() + "\n" + source + "\n" + finalFindings(result) + "\n" + behavior;
+    }
+
+    /** 完整验收诊断单独取结构化字段，避免被前面的构建长日志截掉。 */
+    static String finalFindings(WorkspaceCheckpointService.CheckpointResult result) {
+        String contract = result.contractPassed() ? "" : "Full contract: " + String.join("\n", result.contractBlockers());
+        String findings = (contract + "\n" + result.deliveryFailure()).trim();
+        return findings.length() <= 4_000 ? findings : findings.substring(0, 4_000)
+                + "\n[remaining final findings retained in report]";
     }
 
     /** 摘要只展开失败和阻塞项，避免成功响应的 HTML 挤掉真正需要修复的请求。 */
@@ -30,6 +73,10 @@ public final class WorkspaceCheckpointFeedback {
                 .append(" passed=").append(result.findings().stream().filter(finding -> finding.passed()).count())
                 .append(" unresolved=").append(result.findings().stream().filter(finding -> !finding.passed()).count())
                 .append(" report=").append(reportPath).append('\n');
+        // 未启动或环境阻塞没有逐项判卷，具体原因仍须进入续接与压缩摘要。
+        if (!"NOT_APPLICABLE".equals(result.status()) && result.reason() != null && !result.reason().isBlank()) {
+            feedback.append("reason=").append(result.reason()).append('\n');
+        }
         result.findings().stream().filter(finding -> !finding.passed()).forEach(finding ->
                 feedback.append("- ").append(finding.behavior()).append(" [").append(finding.status())
                         .append("] request=").append(finding.request()).append(" expected=").append(finding.expected())

@@ -58,14 +58,15 @@ public class BenchmarkBehaviorEvaluator {
             long deadline = System.nanoTime() + STARTUP_TIMEOUT.toNanos();
             while (System.nanoTime() < deadline) {
                 if (!sandbox.isContainerRunning(containerId)) {
-                    return BenchmarkBehaviorResult.notRun("候选应用启动前退出：" + concise(sandbox.getContainerLogs(containerId)));
+                    return BenchmarkBehaviorResult.notRun(startupFailure(projectPath, "候选应用启动前退出：", containerId));
                 }
                 if (STARTED.matcher(sandbox.getContainerLogs(containerId)).find()) {
-                    return evaluateAt(caseId, URI.create("http://127.0.0.1:" + port));
+                    var result = evaluateAt(caseId, URI.create("http://127.0.0.1:" + port));
+                    return retainRequestFailure(projectPath, containerId, result);
                 }
                 Thread.sleep(1_000);
             }
-            return BenchmarkBehaviorResult.notRun("等待候选应用启动超时：" + concise(sandbox.getContainerLogs(containerId)));
+            return BenchmarkBehaviorResult.notRun(startupFailure(projectPath, "等待候选应用启动超时：", containerId));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return BenchmarkBehaviorResult.environmentError("行为验收被中断");
@@ -82,6 +83,71 @@ public class BenchmarkBehaviorEvaluator {
         return "url-shortener-behavior-v1".equals(caseId) || "poll-system-behavior-v1".equals(caseId)
                 || "blog-form-behavior-v1".equals(caseId) || "task-workflow-behavior-v1".equals(caseId)
                 || "poll-workflow-behavior-v1".equals(caseId) || "note-form-behavior-v1".equals(caseId);
+    }
+
+    /** 失败的服务端响应保留请求期异常；取证故障不能把原业务失败改成环境失败。 */
+    private BenchmarkBehaviorResult retainRequestFailure(String projectPath, String containerId,
+                                                         BenchmarkBehaviorResult result) {
+        boolean failedServerResponse = result.findings().stream().anyMatch(finding -> !finding.passed()
+                && finding.evidence() != null && finding.evidence().startsWith("HTTP 5"));
+        if (!failedServerResponse) return result;
+        String originalReason = result.reason() == null || result.reason().isBlank() ? "" : result.reason() + "\n";
+        try {
+            String logs = sandbox.getContainerLogs(containerId);
+            java.nio.file.Path directory = java.nio.file.Path.of(projectPath).toAbsolutePath().resolve("target");
+            java.nio.file.Files.createDirectories(directory);
+            java.nio.file.Path evidence = directory.resolve("behavior-runtime-" + java.util.UUID.randomUUID() + ".log");
+            java.nio.file.Files.writeString(evidence, logs == null ? "" : logs, java.nio.charset.StandardCharsets.UTF_8);
+            String reason = "Request-time application log after failed HTTP 5xx checks: " + requestFailureSummary(logs)
+                    + "; full log=" + evidence;
+            return new BenchmarkBehaviorResult(result.status(), result.findings(), originalReason + reason);
+        } catch (Exception e) {
+            return new BenchmarkBehaviorResult(result.status(), result.findings(),
+                    originalReason + "Request-time log unavailable; original HTTP findings retained: " + concise(e.getMessage()));
+        }
+    }
+
+    /** 聚合日志仅作为定位线索，保留不同异常消息，不假定它们与每个失败请求逐一对应。 */
+    static String requestFailureSummary(String logs) {
+        if (logs == null || logs.isBlank()) return "no application log returned";
+        var causes = logs.lines().filter(line -> line.contains("Exception:") || line.contains("Caused by:"))
+                .map(String::strip).distinct().toList();
+        String selected = causes.isEmpty() ? logs
+                : String.join(" | ", causes.subList(Math.max(0, causes.size() - 3), causes.size()));
+        String text = selected.replaceAll("\\s+", " ").trim();
+        return text.length() <= 1200 ? text : text.substring(0, 600) + " ... " + text.substring(text.length() - 595);
+    }
+
+    /** 容器移除前保存完整启动证据，诊断写入失败也不能覆盖原来的启动结果。 */
+    private String startupFailure(String projectPath, String prefix, String containerId) {
+        String logs = sandbox.getContainerLogs(containerId);
+        String reason = prefix + startupFailureSummary(logs);
+        try {
+            java.nio.file.Path directory = java.nio.file.Path.of(projectPath).toAbsolutePath().resolve("target");
+            java.nio.file.Files.createDirectories(directory);
+            java.nio.file.Path evidence = directory.resolve("behavior-startup-" + java.util.UUID.randomUUID() + ".log");
+            java.nio.file.Files.writeString(evidence, logs == null ? "" : logs, java.nio.charset.StandardCharsets.UTF_8);
+            return reason + "；完整启动日志：" + evidence;
+        } catch (IOException e) {
+            return reason + "；完整启动日志未保存：" + concise(e.getMessage());
+        }
+    }
+
+    /** 优先展示 Spring 失败分析或底层异常，避免 Maven 横幅挤掉需要修复的类型与原因。 */
+    static String startupFailureSummary(String logs) {
+        if (logs == null || logs.isBlank()) return "未返回启动日志";
+        int failure = logs.lastIndexOf("APPLICATION FAILED TO START");
+        String selected;
+        if (failure >= 0) {
+            selected = logs.substring(failure);
+        } else {
+            // 通用 Java 异常保留最后的原因链；没有异常特征时保留日志首尾供继续诊断。
+            List<String> causes = logs.lines().filter(line -> line.contains("Caused by:")).toList();
+            if (!causes.isEmpty()) selected = String.join(" | ", causes.subList(Math.max(0, causes.size() - 3), causes.size()));
+            else selected = logs.length() <= 1200 ? logs : logs.substring(0, 300) + " ... " + logs.substring(logs.length() - 895);
+        }
+        String oneLine = selected.replaceAll("\\s+", " ").trim();
+        return oneLine.length() <= 1200 ? oneLine : oneLine.substring(0, 1200) + "...";
     }
 
     /**

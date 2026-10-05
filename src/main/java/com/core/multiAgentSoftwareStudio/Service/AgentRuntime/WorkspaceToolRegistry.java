@@ -89,7 +89,7 @@ public class WorkspaceToolRegistry {
     public List<ToolDefinition> definitions(WorkspaceAgentMode mode) {
         if (mode != WorkspaceAgentMode.DEVELOPMENT) return definitions();
         return List.of("list_files", "search_code", "read_files", "read_planning", "get_current_diff",
-                        "bash", "apply_patch", "submit_checkpoint", "restore_checkpoint", "report_blocker")
+                        "bash", "apply_patch", "apply_edits", "submit_checkpoint", "restore_checkpoint", "report_blocker")
                 .stream().map(name -> tools.get(name).definition()).toList();
     }
 
@@ -134,7 +134,7 @@ public class WorkspaceToolRegistry {
                 readFilesSchema(), this::readFiles);
         register("read_planning", "只读获取完整需求、设计、公开契约和规划。document 使用列出的元数据文件名；可按 startLine/endLine 定位，读取不会改变规划或验收约定。",
                 readPlanningSchema(), this::readPlanning);
-        register("apply_edits", "原子应用一组精确文本替换；每个文件限一项，并携带 read_files 返回的 expectedHash。",
+        register("apply_edits", "精确应用相关文件的文本替换，无补丁行前缀。同文件可有多项，按数组顺序在内存替换，均用本组开始时 read_files 返回的完整 SHA-256 作为 expectedHash；oldText 在当时暂存正文中必须唯一，newText 是实际替换正文。新增文件首项用空 expectedHash 与空 oldText，newText 为完整文件；空哈希不能覆盖已有文件。保留原始缩进和换行，参数仍须是完整 JSON。所有编辑先校验，每文件最终只写一次，写入失败只撤销本组编辑。",
                 applyEditsSchema(), this::applyEdits);
         register("apply_patch", """
                 首选源码写入工具，一次可编辑多个相关文件。推荐使用以下格式（路径相对项目根目录）：
@@ -161,7 +161,7 @@ public class WorkspaceToolRegistry {
                 返回实际落盘文件及提示；ok 只表示写入成功，仍须编译和测试。
                 """,
                 objectSchema("patch", "string", "true"), this::applyPatch);
-        register("bash", "在断网非 root 持久容器中运行编译、测试和诊断命令；预装 Java 17 和 Maven，可直接运行 java、jar、mvn。Maven 只读依赖仓库为 /usr/share/maven/ref/repository，不是 ~/.m2；不预装 Python 或 unzip。使用 ./mvnw 前须确认项目中有该脚本。常规源码修改使用 apply_patch。cwd 可用 . 或 /workspace 表示项目根目录，超时毫秒数可选。",
+        register("bash", "在断网非 root 持久容器中运行编译、测试和诊断命令；预装 Java 17 和 Maven，可直接运行 java、jar、mvn。Maven 只读依赖仓库为 /usr/share/maven/ref/repository，不是 ~/.m2；不预装 Python 或 unzip。使用 ./mvnw 前须确认项目中有该脚本。常规源码修改使用 apply_patch 或 apply_edits。cwd 可用 . 或 /workspace 表示项目根目录，超时毫秒数可选。",
                 objectSchema("command", "string", "true", "cwd", "string", "false",
                         "timeoutMillis", "integer", "false"), this::bash);
         register("submit_checkpoint", "冻结当前源码，在独立副本执行完整编译和全量已有测试；编译通过时返回已绑定的公开行为检查。progress 的业务失败作为修复反馈；final 必须通过完整契约及已绑定业务检查。未覆盖项不代表业务通过。",
@@ -206,7 +206,7 @@ public class WorkspaceToolRegistry {
         try (Stream<Path> stream = Files.walk(session.projectRoot())) {
             stream.filter(Files::isRegularFile)
                     .map(path -> normalize(session.projectRoot().relativize(path)))
-                    .filter(this::isReadableProjectFile)
+                    .filter(WorkspaceToolRegistry::isReadableProjectFile)
                     .sorted()
                     .forEach(result::add);
         } catch (IOException e) {
@@ -327,21 +327,22 @@ public class WorkspaceToolRegistry {
      * 先在内存中验证所有编辑，再逐个原子替换，避免跨文件修改只落盘一半。
      */
     private String applyEdits(JsonNode arguments, WorkspaceAgentSession session) {
-        List<PreparedEdit> prepared = new ArrayList<>();
-        java.util.LinkedHashSet<String> editedPaths = new java.util.LinkedHashSet<>();
+        Map<String, PreparedEdit> staged = new LinkedHashMap<>();
         for (JsonNode edit : arguments.path("edits")) {
             String relative = normalizeRelative(edit.path("path").asText(), session);
-            if (!editedPaths.add(relative)) {
-                return jsonError("DUPLICATE_FILE_EDIT", "Combine replacements into one edit per file: " + relative);
-            }
             assertWritable(relative, session);
             Path path = resolveInsideRoot(session, relative);
             String expectedHash = edit.path("expectedHash").asText("");
             String oldText = edit.path("oldText").asText("");
             String newText = edit.path("newText").asText("");
             try {
-                String current = Files.exists(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
-                if (!expectedHash.equals(sha256(current))) {
+                PreparedEdit previous = staged.get(relative);
+                String original = previous != null ? previous.before()
+                        : Files.exists(path) ? Files.readString(path, StandardCharsets.UTF_8) : null;
+                String current = previous != null ? previous.content() : original == null ? "" : original;
+                // 同文件所有替换共用初始哈希；后续替换只检查暂存正文，不要求模型预测新哈希。
+                if (original == null ? !expectedHash.isEmpty() || previous == null && !oldText.isEmpty()
+                        : !expectedHash.equals(sha256(original))) {
                     return jsonError("STALE_FILE", "Hash changed; read the file again: " + relative);
                 }
                 String updated;
@@ -357,23 +358,39 @@ public class WorkspaceToolRegistry {
                 if (updated.isBlank()) {
                     return jsonError("EMPTY_FILE", "Refusing to write a blank file: " + relative);
                 }
-                prepared.add(new PreparedEdit(relative, path, updated));
+                staged.put(relative, new PreparedEdit(relative, path, updated, original));
             } catch (IOException e) {
                 throw new IllegalStateException("Unable to prepare edit for " + relative, e);
             }
         }
-        if (prepared.isEmpty()) {
+        if (staged.isEmpty()) {
             return jsonError("NO_EDITS", "At least one edit is required");
         }
+        List<PreparedEdit> prepared = new ArrayList<>(staged.values());
+        List<PreparedEdit> written = new ArrayList<>();
         try {
             for (PreparedEdit edit : prepared) {
                 atomicWrite(edit.path(), edit.content());
-                session.recordWrite(edit.relativePath());
+                written.add(edit);
             }
         } catch (IOException e) {
-            restoreBaseline(session);
-            throw new IllegalStateException("Atomic edit set failed and was rolled back", e);
+            // 本组失败不能抹掉先前成功编辑；回退不了的路径明确报告为当前磁盘变更。
+            ObjectNode failure = objectMapper.createObjectNode();
+            failure.put("ok", false).put("error", "TOOL_EXECUTION_FAILED").put("message", e.getMessage());
+            ArrayNode changed = failure.putArray("changedFiles");
+            for (PreparedEdit edit : written.reversed()) {
+                try {
+                    if (edit.before() == null) Files.deleteIfExists(edit.path());
+                    else atomicWrite(edit.path(), edit.before());
+                } catch (IOException rollbackFailure) {
+                    session.recordWrite(edit.relativePath());
+                    changed.add(edit.relativePath());
+                }
+            }
+            failure.put("rollbackComplete", changed.isEmpty());
+            return failure.toString();
         }
+        prepared.forEach(edit -> session.recordWrite(edit.relativePath()));
         ObjectNode result = objectMapper.createObjectNode();
         result.put("applied", prepared.size());
         ArrayNode changed = result.putArray("changedFiles");
@@ -558,15 +575,7 @@ public class WorkspaceToolRegistry {
     /** 正式快照的失败或通过同样更新压缩摘要，避免只记住最后一次文件读取。 */
     private void recordCheckpointFeedback(WorkspaceAgentSession session,
                                           WorkspaceCheckpointService.CheckpointResult result) {
-        if ("PASS".equals(result.behavior().status()) || "FAIL".equals(result.behavior().status())) {
-            session.recordBehaviorFeedback(result.behavior().passed() ? "" :
-                    WorkspaceCheckpointFeedback.behaviorFailures(result.behavior(), result.sourceHash(), result.reportPath()));
-        }
-        if ("PASSED".equals(result.status())) {
-            session.clearVerificationFailure();
-        } else if (!"BLOCKED".equals(result.status()) && !result.failureOutput().isBlank()) {
-            session.recordVerificationFailure("checkpoint " + result.scope() + ": " + result.failureOutput());
-        }
+        WorkspaceCheckpointFeedback.record(session, result);
     }
 
     /** 平台主动验证只交付版本化证据，不自动接受任务或宣布交付。 */
@@ -712,7 +721,7 @@ public class WorkspaceToolRegistry {
     private void assertWritable(String path, WorkspaceAgentSession session) {
         String normalized = normalize(Path.of(path));
         boolean pathAllowed = session.allowedWritePaths().isEmpty()
-                || session.allowedWritePaths().stream().map(this::normalizeText).anyMatch(normalized::equals);
+                || session.allowedWritePaths().stream().map(WorkspaceToolRegistry::normalizeText).anyMatch(normalized::equals);
         boolean scopeAllowed = switch (session.mode()) {
             case DEVELOPMENT -> normalized.startsWith("src/") || normalized.equals("pom.xml")
                     || normalized.equals("README.md") || normalized.equals(".gitignore");
@@ -731,6 +740,14 @@ public class WorkspaceToolRegistry {
         Path resolved = session.projectRoot().resolve(relative).normalize();
         if (!resolved.startsWith(session.projectRoot()) || relative.contains(".git")) {
             throw new IllegalArgumentException("Path escapes the candidate workspace: " + relative);
+        }
+        Path current = session.projectRoot();
+        if (Files.isSymbolicLink(current)) throw new IllegalArgumentException("Linked project root is not allowed");
+        for (Path part : session.projectRoot().relativize(resolved)) {
+            current = current.resolve(part);
+            if (Files.isSymbolicLink(current)) {
+                throw new IllegalArgumentException("Linked project path is not allowed: " + relative);
+            }
         }
         return resolved;
     }
@@ -765,12 +782,14 @@ public class WorkspaceToolRegistry {
         return result.toString();
     }
 
-    private Map<String, String> snapshot(Path root) {
+    /** 会话保存与外层验收共用同一文件范围，续接摘要不能采用不同的源码指纹。 */
+    static Map<String, String> snapshot(Path root) {
         Map<String, String> files = new LinkedHashMap<>();
         try (Stream<Path> stream = Files.walk(root)) {
             for (Path path : stream.filter(Files::isRegularFile).toList()) {
                 String relative = normalize(root.relativize(path));
                 if (isReadableProjectFile(relative)) {
+                    if (Files.isSymbolicLink(path)) throw new IOException("Linked project file is not allowed: " + relative);
                     files.put(relative, Files.readString(path, StandardCharsets.UTF_8));
                 }
             }
@@ -813,14 +832,19 @@ public class WorkspaceToolRegistry {
         }
     }
 
+    /** 临时文件由平台创建，避免候选预置同名链接改变实际写入目标。 */
     private void atomicWrite(Path target, String content) throws IOException {
         Files.createDirectories(target.getParent() == null ? target.toAbsolutePath().getParent() : target.getParent());
-        Path temp = target.resolveSibling(target.getFileName() + ".tool-agent-tmp");
-        Files.writeString(temp, content, StandardCharsets.UTF_8);
+        Path temp = Files.createTempFile(target.getParent(), ".tool-agent-", ".tmp");
         try {
-            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            Files.writeString(temp, content, StandardCharsets.UTF_8);
+            try {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
         }
     }
 
@@ -903,7 +927,7 @@ public class WorkspaceToolRegistry {
         }
     }
 
-    private boolean isReadableProjectFile(String path) {
+    private static boolean isReadableProjectFile(String path) {
         String normalized = normalizeText(path);
         return !normalized.startsWith("target/")
                 && !normalized.startsWith(".git/")
@@ -922,8 +946,8 @@ public class WorkspaceToolRegistry {
         return path.matches(regex);
     }
 
-    private String normalize(Path path) { return normalizeText(path.toString()); }
-    private String normalizeText(String path) { return path.replace('\\', '/'); }
+    private static String normalize(Path path) { return normalizeText(path.toString()); }
+    private static String normalizeText(String path) { return path.replace('\\', '/'); }
     private String limit(String value, int maximum) {
         if (value == null || value.length() <= maximum) return value == null ? "" : value;
         return value.substring(0, maximum) + "\n...[truncated]";
@@ -937,5 +961,5 @@ public class WorkspaceToolRegistry {
     }
     private int lineCount(String value) { return value == null || value.isEmpty() ? 0 : value.split("\\R", -1).length; }
 
-    private record PreparedEdit(String relativePath, Path path, String content) { }
+    private record PreparedEdit(String relativePath, Path path, String content, String before) { }
 }

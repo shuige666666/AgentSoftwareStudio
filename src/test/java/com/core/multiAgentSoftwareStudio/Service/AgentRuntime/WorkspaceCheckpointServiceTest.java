@@ -14,6 +14,7 @@ import com.core.multiAgentSoftwareStudio.Service.Workflow.VerificationResultServ
 import com.core.multiAgentSoftwareStudio.Service.Workspace.WorkspaceService;
 import com.core.multiAgentSoftwareStudio.Tool.DockerSandboxService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -38,6 +39,103 @@ import static org.mockito.Mockito.when;
 
 class WorkspaceCheckpointServiceTest {
     @TempDir Path root;
+
+    /** 既有用例提供交付说明，避免文档缺失掩盖各自需要验证的失败原因。 */
+    @BeforeEach
+    void writeDeliveryDocumentation() throws Exception {
+        Files.writeString(root.resolve("README.md"), "# Demo\nRun: mvn spring-boot:run\nTest: mvn test\n", StandardCharsets.UTF_8);
+    }
+
+    /** README 中实际调用的 Wrapper 必须随工程交付；普通 Maven 命令和完整 Wrapper 均可通过。 */
+    @Test
+    void checksDocumentedWrapperCommandsAgainstSnapshotFiles() throws Exception {
+        Files.writeString(root.resolve("pom.xml"), "<project/>");
+        var sandbox = mock(DockerSandboxService.class);
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp -DskipTests compile")))
+                .thenReturn(new SandboxExecutionResult("compile", 0, "BUILD SUCCESS", 1, false, null));
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp test")))
+                .thenReturn(new SandboxExecutionResult("test", 0, "Tests run: 1, Failures: 0, Errors: 0, Skipped: 0", 1, false, null));
+        var profiles = mock(ProjectProfileService.class);
+        when(profiles.evaluate(any(), any(), any(), any())).thenReturn(ProjectQualityPolicyResult.empty());
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectProfile = ProjectProfile.java17SpringBoot();
+        var session = new WorkspaceAgentSession(root, WorkspaceAgentMode.DEVELOPMENT,
+                data, ignored -> {}, Map.of(), Set.of());
+        var service = new WorkspaceCheckpointService(sandbox, new VerificationResultService(), profiles,
+                new WorkspaceService(new SourceCodePathService()), new RunJournalService(), new ObjectMapper());
+        assertTrue(service.verify(session, "final", "installed Maven").allowCompletion());
+        Files.writeString(root.resolve("README.md"), "# Demo\n```bash\n./mvnw test\n```\n", StandardCharsets.UTF_8);
+        assertTrue(service.verify(session, "progress", "still developing").deliveryFailure().isBlank());
+        var missing = service.verify(session, "final", "wrapper commands");
+        assertFalse(missing.allowCompletion());
+        assertTrue(missing.deliveryFailure().contains("./mvnw"));
+        assertTrue(missing.contractPassed());
+        Files.writeString(root.resolve("mvnw"), "#!/bin/sh\n");
+        assertFalse(service.verify(session, "final", "incomplete wrapper").allowCompletion());
+        Files.createDirectories(root.resolve(".mvn/wrapper"));
+        Files.writeString(root.resolve(".mvn/wrapper/maven-wrapper.properties"), "distributionUrl=test\n");
+        assertTrue(service.verify(session, "final", "complete wrapper files").allowCompletion());
+        // Windows 命令也必须使用实际交付的脚本，不能借用 Unix 文件名。
+        Files.writeString(root.resolve("README.md"), "```powershell\n.\\mvnw.cmd test\n```\n", StandardCharsets.UTF_8);
+        var windowsMissing = service.verify(session, "final", "Windows wrapper");
+        assertFalse(windowsMissing.allowCompletion());
+        assertTrue(windowsMissing.deliveryFailure().contains("mvnw.cmd"));
+        Files.writeString(root.resolve("mvnw.cmd"), "@echo off\n");
+        assertTrue(service.verify(session, "final", "Windows files").allowCompletion());
+        var mapper = new ObjectMapper();
+        var legacyJson = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.valueToTree(missing);
+        legacyJson.remove("deliveryFailure");
+        var legacy = mapper.treeToValue(legacyJson, WorkspaceCheckpointService.CheckpointResult.class);
+        assertTrue(legacy.deliveryFailure().isBlank());
+    }
+
+    /** 中途绿色可继续开发；缺失或空白说明不能交付，补齐后按新源码版本验收。 */
+    @Test
+    void finalRequiresDocumentationWithoutChangingFunctionalResultsOrBudget() throws Exception {
+        Files.delete(root.resolve("README.md"));
+        Files.writeString(root.resolve("pom.xml"), "<project/>");
+        var sandbox = mock(DockerSandboxService.class);
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp -DskipTests compile")))
+                .thenReturn(new SandboxExecutionResult("compile", 0, "BUILD SUCCESS", 1, false, null));
+        when(sandbox.runCheckpointMaven(any(), eq("mvn -o -B -ntp test")))
+                .thenReturn(new SandboxExecutionResult("test", 0, "Tests run: 1, Failures: 0, Errors: 0, Skipped: 0", 1, false, null));
+        var profiles = mock(ProjectProfileService.class);
+        when(profiles.evaluate(any(), any(), any(), any())).thenReturn(ProjectQualityPolicyResult.empty());
+        var data = new SoftwareStudioWorkflowData("demo");
+        data.projectPath = root.toString();
+        data.projectProfile = ProjectProfile.java17SpringBoot();
+        data.developmentModelTurnsUsed = 15;
+        data.developmentToolCallsUsed = 15;
+        var session = new WorkspaceAgentSession(root, WorkspaceAgentMode.DEVELOPMENT, data, message -> { }, Map.of(), Set.of());
+        var service = new WorkspaceCheckpointService(sandbox, new VerificationResultService(), profiles,
+                new WorkspaceService(new SourceCodePathService()), new RunJournalService(), new ObjectMapper());
+
+        var progress = service.verify(session, "progress", "green code");
+        assertEquals("PASSED", progress.status());
+        var missing = service.verify(session, "final", "ready");
+        assertEquals("FAILED", missing.status());
+        assertFalse(missing.allowCompletion());
+        assertTrue(missing.build().passed());
+        assertTrue(missing.test().passed());
+        assertTrue(missing.contractPassed());
+        assertTrue(missing.contractBlockers().isEmpty());
+        assertTrue(missing.reusedVerification());
+        assertTrue(WorkspaceCheckpointFeedback.failureSummary(missing).contains("README.md is missing or blank"));
+        assertFalse(session.finalCheckpointPassed());
+        assertFalse(data.success);
+
+        Files.writeString(root.resolve("README.md"), " \n\t", StandardCharsets.UTF_8);
+        var blank = service.verify(session, "final", "blank readme");
+        assertFalse(blank.allowCompletion());
+        assertNotEquals(missing.sourceHash(), blank.sourceHash());
+        writeDeliveryDocumentation();
+        var documented = service.verify(session, "final", "documented");
+        assertTrue(documented.allowCompletion());
+        assertNotEquals(blank.sourceHash(), documented.sourceHash());
+        assertTrue(session.finalCheckpointPassed());
+        assertEquals(15, data.developmentModelTurnsUsed);
+        assertEquals(15, data.developmentToolCallsUsed);
+    }
 
     /** 自测绿色不能掩盖 HTTP 失败；progress 提供反馈，final 必须通过独立检查。 */
     @Test

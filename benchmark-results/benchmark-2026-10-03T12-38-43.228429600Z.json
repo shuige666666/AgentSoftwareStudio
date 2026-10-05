@@ -1,0 +1,375 @@
+{
+  "startedAt" : "2026-10-03T12:38:43.228429600Z",
+  "finishedAt" : "2026-10-03T12:58:10.289836600Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.8-max-0902",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "PlanningAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "blog-form-behavior-v1" ],
+    "repetitions" : 1,
+    "repairBudget" : null,
+    "gitCommit" : "b3f97a0c2d066c24a6ca39ba84c2c4730df7d0c7",
+    "gitDirty" : true,
+    "workingTreeFingerprint" : "e3e9ee89d79d9c5dde14b4dd2d33c314bc1e3432d9225f8dcc93ee190248b8a8",
+    "requirementSha256" : {
+      "blog-form-behavior-v1" : "41094bd826d429f92514167e6d4ac14e7c2fe39180ab2f678edad8fabbc08ad7"
+    },
+    "development" : {
+      "maxModelTurns" : 36,
+      "maxToolCalls" : 108,
+      "verificationProtocol" : "snapshot-build-all-tests-contract-final-v1"
+    },
+    "planningSourceProjectId" : null,
+    "replayMode" : "SAVED_PLAN"
+  },
+  "cases" : [ {
+    "caseId" : "blog-form-behavior-v1",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\java17-spring-boot-blog_20261003_204218",
+    "elapsedMillis" : 1166814,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "CONTRACT_GATES_PASSED",
+        "passed" : false,
+        "evidence" : "Final semantic contract gates contain 4 blocker(s): [NOT_FOUND_EXCEPTION_MAPPING, CONTRACT_VALIDATION]"
+      }, {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : true,
+        "evidence" : "Generated tests executed and reported zero failures and errors."
+      } ]
+    },
+    "usage" : {
+      "calls" : 38,
+      "successfulCalls" : 37,
+      "failedCalls" : 1,
+      "durationMillis" : 996532,
+      "inputCacheHitTokens" : 102400,
+      "inputCacheMissTokens" : 330206,
+      "outputTokens" : 36444,
+      "totalTokens" : 469050,
+      "cacheMetricsAvailable" : true,
+      "finishReasonCounts" : {
+        "stop" : 2,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 35,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 1,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      },
+      "modelUsage" : {
+        "qwen3.7-flash" : {
+          "calls" : 36,
+          "failedCalls" : 1,
+          "inputCacheHitTokens" : 102400,
+          "inputCacheMissTokens" : 327545,
+          "outputTokens" : 10830,
+          "totalTokens" : 440775
+        },
+        "qwen3.8-max-0902" : {
+          "calls" : 2,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 0,
+          "inputCacheMissTokens" : 2661,
+          "outputTokens" : 25614,
+          "totalTokens" : 28275
+        }
+      }
+    },
+    "attemptsUsed" : 1,
+    "finalFailureKind" : "UNKNOWN",
+    "validationWarningCount" : 2,
+    "verificationSummary" : {
+      "buildExitCode" : 0,
+      "testExitCode" : 0,
+      "buildPassed" : true,
+      "testPassed" : true,
+      "testsRun" : 1,
+      "failures" : 0,
+      "errors" : 0,
+      "buildDurationMillis" : 5850,
+      "testDurationMillis" : 14917,
+      "primaryFailureKind" : "NONE"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 5,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : {
+        "MAIN_COMPILE" : 1
+      },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 1,
+        "acceptedSlices" : 0,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 0,
+        "sliceRepairSafetyLimit" : 0,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 0,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "",
+        "slicePolicyVersion" : "vertical-slice-v7",
+        "declaredProjectType" : "SPRING_BOOT",
+        "effectiveProjectType" : "SPRING_BOOT",
+        "projectProfileId" : "java17-spring-boot-3.2"
+      }
+    },
+    "workflowError" : null,
+    "behavior" : {
+      "status" : "FAIL",
+      "findings" : [ {
+        "behavior" : "list-page",
+        "passed" : false,
+        "evidence" : "HTTP 500; Location=; body={\"timestamp\":\"2026-10-03T12:58:04.776+00:00\",\"status\":500,\"error\":\"Internal Server Error\",\"path\":\"/articles\"}",
+        "status" : "FAIL",
+        "request" : "GET /articles",
+        "expected" : "200; 可使用的列表 HTML"
+      }, {
+        "behavior" : "create-form",
+        "passed" : false,
+        "evidence" : "HTTP 500; Location=; body={\"timestamp\":\"2026-10-03T12:58:04.913+00:00\",\"status\":500,\"error\":\"Internal Server Error\",\"path\":\"/articles/new\"}",
+        "status" : "FAIL",
+        "request" : "GET /articles/new",
+        "expected" : "200; title/content 表单字段"
+      }, {
+        "behavior" : "create-redirect",
+        "passed" : true,
+        "evidence" : "HTTP 302; Location=http://127.0.0.1:2075/articles; body=",
+        "status" : "PASS",
+        "request" : "POST /articles; form=content=UniqueAlphaContent&title=Acceptance+Alpha",
+        "expected" : "302/303; Location=/articles"
+      }, {
+        "behavior" : "created-visible",
+        "passed" : false,
+        "evidence" : "HTTP 500; Location=; body={\"timestamp\":\"2026-10-03T12:58:04.926+00:00\",\"status\":500,\"error\":\"Internal Server Error\",\"path\":\"/articles\"}",
+        "status" : "FAIL",
+        "request" : "GET /articles",
+        "expected" : "200; 显示新文章标题"
+      }, {
+        "behavior" : "detail-content-comment-form",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "GET /articles/__unresolved__",
+        "expected" : "200; 文章内容及 nickname 评论表单"
+      }, {
+        "behavior" : "edit-prefilled",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "GET /articles/__unresolved__/edit",
+        "expected" : "200; 编辑表单预填标题和内容"
+      }, {
+        "behavior" : "update-redirect",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "POST /articles/__unresolved__",
+        "expected" : "302/303; Location=/articles/__unresolved__"
+      }, {
+        "behavior" : "updated-persisted",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "GET /articles/__unresolved__",
+        "expected" : "200; 修改已保存且旧内容消失"
+      }, {
+        "behavior" : "comment-redirect",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "POST /articles/__unresolved__/comments",
+        "expected" : "302/303; Location=/articles/__unresolved__"
+      }, {
+        "behavior" : "comment-persisted",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "GET /articles/__unresolved__",
+        "expected" : "200; 评论内容和昵称已保存"
+      }, {
+        "behavior" : "search-match",
+        "passed" : false,
+        "evidence" : "Blocked by updated-persisted",
+        "status" : "BLOCKED",
+        "request" : "GET /articles?keyword=UniqueBetaContent",
+        "expected" : "200; 按内容搜索命中修改后的文章"
+      }, {
+        "behavior" : "search-excludes",
+        "passed" : false,
+        "evidence" : "Blocked by updated-persisted",
+        "status" : "BLOCKED",
+        "request" : "GET /articles?keyword=AbsentSearchToken",
+        "expected" : "200; 无匹配时排除已有文章"
+      }, {
+        "behavior" : "invalid-create-400",
+        "passed" : false,
+        "evidence" : "HTTP 500; Location=; body={\"timestamp\":\"2026-10-03T12:58:04.945+00:00\",\"status\":500,\"error\":\"Internal Server Error\",\"path\":\"/articles\"}",
+        "status" : "FAIL",
+        "request" : "POST /articles; form=content=&title=bad",
+        "expected" : "400; 保留创建表单"
+      }, {
+        "behavior" : "invalid-update-400",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "POST /articles/__unresolved__",
+        "expected" : "400; 非法修改被拒绝"
+      }, {
+        "behavior" : "invalid-update-preserves-state",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "GET /articles/__unresolved__",
+        "expected" : "200; 非法修改不改变原内容"
+      }, {
+        "behavior" : "invalid-comment-400",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "POST /articles/__unresolved__/comments",
+        "expected" : "400; 非法昵称或评论内容被拒绝"
+      }, {
+        "behavior" : "missing-GET-/articles/99999999",
+        "passed" : false,
+        "evidence" : "Blocked by detail-content-comment-form",
+        "status" : "BLOCKED",
+        "request" : "GET /articles/99999999",
+        "expected" : "404; 不存在的文章"
+      }, {
+        "behavior" : "missing-GET-/articles/99999999/edit",
+        "passed" : false,
+        "evidence" : "Blocked by edit-prefilled",
+        "status" : "BLOCKED",
+        "request" : "GET /articles/99999999/edit",
+        "expected" : "404; 不存在的文章"
+      }, {
+        "behavior" : "missing-POST-/articles/99999999",
+        "passed" : false,
+        "evidence" : "Blocked by update-redirect",
+        "status" : "BLOCKED",
+        "request" : "POST /articles/99999999; form=content=Valid+missing+content&nickname=Reviewer&title=Valid+title",
+        "expected" : "404; 不存在的文章"
+      }, {
+        "behavior" : "missing-POST-/articles/99999999/delete",
+        "passed" : false,
+        "evidence" : "Blocked by delete-redirect",
+        "status" : "BLOCKED",
+        "request" : "POST /articles/99999999/delete; form=content=Valid+missing+content&nickname=Reviewer&title=Valid+title",
+        "expected" : "404; 不存在的文章"
+      }, {
+        "behavior" : "missing-POST-/articles/99999999/comments",
+        "passed" : false,
+        "evidence" : "Blocked by comment-redirect",
+        "status" : "BLOCKED",
+        "request" : "POST /articles/99999999/comments; form=content=Valid+missing+content&nickname=Reviewer&title=Valid+title",
+        "expected" : "404; 不存在的文章"
+      }, {
+        "behavior" : "delete-redirect",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "POST /articles/__unresolved__/delete",
+        "expected" : "302/303; Location=/articles"
+      }, {
+        "behavior" : "delete-effective",
+        "passed" : false,
+        "evidence" : "Blocked by created-visible/文章链接",
+        "status" : "BLOCKED",
+        "request" : "GET /articles/__unresolved__",
+        "expected" : "404; 已删除文章不可查询"
+      }, {
+        "behavior" : "deleted-not-listed",
+        "passed" : false,
+        "evidence" : "Blocked by delete-redirect",
+        "status" : "BLOCKED",
+        "request" : "GET /articles",
+        "expected" : "200; 已删除文章不再列出"
+      } ],
+      "reason" : null
+    }
+  } ],
+  "platformSuccessCount" : 0,
+  "independentQualityPassCount" : 0,
+  "falseSuccessCount" : 0,
+  "falseSuccessRate" : null,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-10-03T12-38-43.228429600Z.json",
+  "fullWorkflowSuccessRate" : 0.0
+}

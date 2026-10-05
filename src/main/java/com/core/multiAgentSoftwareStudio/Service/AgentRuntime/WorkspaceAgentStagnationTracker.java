@@ -4,6 +4,7 @@ import com.core.multiAgentSoftwareStudio.Config.WorkspaceAgentLimitsConfig;
 import com.core.multiAgentSoftwareStudio.Model.Tool.ToolCall;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -190,7 +191,20 @@ final class WorkspaceAgentStagnationTracker {
         return BUILD_GOAL.matcher(args).find() ? "build" : "";
     }
 
+    /** 比较真实工具证据，忽略每次执行独立生成的日志位置和耗时。 */
     private String normalizeResult(String value) {
+        try {
+            JsonNode node = JSON.readTree(value);
+            if (node instanceof ObjectNode object) {
+                // Windows 路径含空格时文本正则无法完整去噪；只移除顶层执行元数据。
+                object.remove("fullLogPath");
+                object.remove("durationMillis");
+                object.remove("elapsedMillis");
+                value = object.toString();
+            }
+        } catch (Exception ignored) {
+            // 原始错误摘要不一定是 JSON，继续使用既有文本归一化。
+        }
         return normalize(value)
                 .replaceAll("[a-z]:/[^\\s\\\"]+", "<path>")
                 .replaceAll("\\d{4}-\\d{2}-\\d{2}[t ][0-9:.]+(?:z|[+-][0-9:]+)?", "<timestamp>")

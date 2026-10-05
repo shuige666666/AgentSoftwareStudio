@@ -144,6 +144,7 @@ public class WorkspacePatchService {
                         if (!lines[index].startsWith("@@")) {
                             throw failure(relative, "PATCH_FORMAT", "Update block needs an @@ context hunk");
                         }
+                        int hunkLine = index + 1;
                         index++;
                         List<String> oldLines = new ArrayList<>();
                         List<String> newLines = new ArrayList<>();
@@ -160,7 +161,9 @@ public class WorkspacePatchService {
                                 throw failure(relative, "PATCH_FORMAT", "Unknown hunk prefix: " + prefix);
                             }
                         }
-                        if (oldLines.isEmpty()) throw failure(relative, "PATCH_CONTEXT", "Update hunk needs matching context");
+                        // 区分误写的空块和缺少插入锚点，不能靠猜测位置或忽略块来执行补丁。
+                        if (oldLines.isEmpty()) throw failure(relative, "PATCH_CONTEXT",
+                                missingContextHint(hunkLine, newLines.isEmpty()));
                         int location = uniqueMatch(updated, oldLines, cursor, relative);
                         updated.subList(location, location + oldLines.size()).clear();
                         updated.addAll(location, newLines);
@@ -184,6 +187,18 @@ public class WorkspacePatchService {
             if (!lines[tail].isBlank()) throw failure("", "PATCH_FORMAT", "Unexpected content after patch end");
         }
         return List.copyOf(changes.values());
+    }
+
+    /** 指出失败块和完整重提方式；预检失败时前面的文件也没有落盘。 */
+    private String missingContextHint(int hunkLine, boolean empty) {
+        String cause = empty
+                ? "Empty @@ hunk at normalized patch line " + hunkLine + ". Remove the unused @@; "
+                    + "the preceding hunk ends at the next file operation or *** End Patch."
+                : "Update hunk at normalized patch line " + hunkLine + " has no existing source lines. "
+                    + "For insertion, include an exact unchanged context line with a space marker at the intended location; "
+                    + "for replacement, include the old lines with '-' markers.";
+        return cause + " No files were written. Read the current file if needed and resend the complete corrected patch; "
+                + "do not rewrite the whole file or use Add File for an existing file.";
     }
 
     /** 明确的原生文件操作片段只补外围标记，不改变正文或猜测应删除的源码。 */
@@ -301,6 +316,16 @@ public class WorkspacePatchService {
 
     /** 给出最接近的上下文差异，帮助模型基于当前磁盘文件重新生成补丁。 */
     private String mismatchHint(List<String> lines, List<String> oldLines, int from) {
+        // 多文件补丁把操作头误加了上下文空格时，仍拒绝匹配，但说明应修正文法而不是重读源码。
+        for (String line : oldLines) {
+            String marker = line.stripLeading();
+            if (marker.startsWith("*** Update File: ") || marker.startsWith("*** Add File: ")
+                    || marker.startsWith("*** Delete File: ")) {
+                return "A file operation header was included in unmatched hunk context: `" + briefLine(marker)
+                        + "`. File operation headers have no hunk prefix or leading spaces; start them directly with '***'. "
+                        + "No files were written. Resend the complete patch with unprefixed file headers and exact source context.";
+            }
+        }
         // 仅诊断缩进差异，仍由精确匹配决定是否允许写入，不自动模糊应用。
         for (int start = from; start + oldLines.size() <= lines.size(); start++) {
             boolean sameText = true;

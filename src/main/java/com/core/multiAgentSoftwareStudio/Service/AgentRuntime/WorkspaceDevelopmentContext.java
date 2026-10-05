@@ -21,19 +21,44 @@ final class WorkspaceDevelopmentContext {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String FILE = ".software-studio/development-context.json";
     record Saved(int schemaVersion, String sourceHash, int modelTurns, int toolCalls,
-                 List<ToolChatMessage> messages) { }
+                 List<ToolChatMessage> messages, WorkspaceAgentSession.VerificationFeedback verificationFeedback) { }
 
     /** 保存前预算整理由运行时完成；不完整工具轮次不能成为下一次的恢复材料。 */
     static void save(WorkspaceAgentSession session, Map<String, String> files) throws Exception {
         List<ToolChatMessage> history = session.messages().size() <= 2 ? List.of()
                 : List.copyOf(session.messages().subList(2, session.messages().size()));
         if (!paired(history)) return;
+        write(session.projectRoot(), new Saved(2, fingerprint(files), session.modelTurns(), session.toolCalls(),
+                history, session.verificationFeedback()));
+    }
+
+    /** 外层 final 晚于会话保存，补存同源码诊断；失效历史不能随新失败一同恢复。 */
+    static void saveFinalVerification(WorkspaceAgentSession session,
+                                      WorkspaceCheckpointService.CheckpointResult result,
+                                      Map<String, String> files) throws Exception {
         Path target = safeFile(session.projectRoot());
+        String hash = fingerprint(files);
+        List<ToolChatMessage> history = List.of();
+        if (Files.isRegularFile(target)) {
+            Saved saved = MAPPER.readValue(Files.readString(target, StandardCharsets.UTF_8), Saved.class);
+            if (matches(saved, session, hash)) {
+                history = saved.messages();
+                session.restoreVerificationFeedback(saved.verificationFeedback());
+            }
+        }
+        session.recordCheckpoint(result.sourceHash(), "PASSED".equals(result.status()), true);
+        WorkspaceCheckpointFeedback.record(session, result);
+        write(session.projectRoot(), new Saved(2, hash, session.modelTurns(), session.toolCalls(),
+                history, session.verificationFeedback()));
+    }
+
+    /** 诊断补存和正常会话保存都原子替换元数据，不能留下半份恢复材料。 */
+    private static void write(Path root, Saved saved) throws Exception {
+        Path target = safeFile(root);
         Files.createDirectories(target.getParent());
         Path temporary = Files.createTempFile(target.getParent(), ".context-", ".tmp");
         try {
-            Files.writeString(temporary, MAPPER.writeValueAsString(new Saved(1, fingerprint(files),
-                    session.modelTurns(), session.toolCalls(), history)), StandardCharsets.UTF_8);
+            Files.writeString(temporary, MAPPER.writeValueAsString(saved), StandardCharsets.UTF_8);
             Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
         } finally { Files.deleteIfExists(temporary); }
     }
@@ -43,10 +68,7 @@ final class WorkspaceDevelopmentContext {
         Path file = safeFile(session.projectRoot());
         if (!Files.isRegularFile(file)) return 0;
         Saved saved = MAPPER.readValue(Files.readString(file, StandardCharsets.UTF_8), Saved.class);
-        if (saved.schemaVersion() != 1 || saved.modelTurns() != session.modelTurns()
-                || saved.toolCalls() != session.toolCalls()
-                || !saved.sourceHash().equals(fingerprint(session.baselineFiles()))
-                || !paired(saved.messages())) return 0;
+        if (!matches(saved, session, fingerprint(session.baselineFiles()))) return 0;
         Map<String, String> tools = new HashMap<>();
         List<ToolChatMessage> restored = new ArrayList<>();
         for (ToolChatMessage message : saved.messages()) {
@@ -63,11 +85,22 @@ final class WorkspaceDevelopmentContext {
                     }
                 }
                 restored.add(ToolChatMessage.tool(message.toolCallId(), MAPPER.writeValueAsString(result)));
-            } else if (!"user".equals(message.role())) restored.add(message);
+            } else if (!"user".equals(message.role())
+                    || message.content().startsWith(WorkspaceAgentContextCompactor.REJECTED_EDIT_PREFIX)) restored.add(message);
             // 历史目标、收尾提醒和自动验证由当前目标与新验证替代，避免恢复过期任务说明。
+            // 同源码零写入拒绝是编辑恢复证据，不能随已归档的大补丁一起丢失。
         }
+        // v1 没有受保护的诊断字段，仍可只读恢复历史；v2 在源码与预算一致后恢复失败范围。
+        session.restoreVerificationFeedback(saved.verificationFeedback());
         session.messages().addAll(restored);
         return restored.size();
+    }
+
+    /** 同一候选与累计预算才可沿用历史；新验收不会为旧上下文重发额度。 */
+    private static boolean matches(Saved saved, WorkspaceAgentSession session, String hash) {
+        return (saved.schemaVersion() == 1 || saved.schemaVersion() == 2)
+                && saved.modelTurns() == session.modelTurns() && saved.toolCalls() == session.toolCalls()
+                && hash.equals(saved.sourceHash()) && paired(saved.messages());
     }
 
     /** 工具调用必须按轮完整响应；任何残留调用都不能带入新请求。 */

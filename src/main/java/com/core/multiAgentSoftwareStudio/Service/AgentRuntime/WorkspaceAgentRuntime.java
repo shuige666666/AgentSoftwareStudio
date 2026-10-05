@@ -86,9 +86,12 @@ public class WorkspaceAgentRuntime {
         String systemPrompt = systemPrompt(mode);
         session.messages().add(ToolChatMessage.system(systemPrompt));
         session.messages().add(ToolChatMessage.user(objective));
+        boolean restoredContext = false;
         if (mode == WorkspaceAgentMode.DEVELOPMENT && session.modelTurns() > 0) {
             try {
                 int restored = WorkspaceDevelopmentContext.restore(session);
+                restoredContext = restored > 0 || !session.verificationFailures().isEmpty()
+                        || session.checkpointObservation() != null;
                 logger.accept("   Restored development context messages: " + restored + "; cumulative budget retained.");
             } catch (Exception e) {
                 logger.accept("   Development context unavailable; current goal and disk source retained: " + e.getMessage());
@@ -107,6 +110,9 @@ public class WorkspaceAgentRuntime {
         boolean retriedTimeout = false;
 
         try {
+            // 续接诊断来自同源码持久化状态，不能等到窗口超阈值或再次验收才首次送达。
+            if (restoredContext) recordCompaction(contextCompactor.compactForResume(session,
+                    maxModelTurns > 0 ? Math.max(0, maxModelTurns - session.modelTurns()) : -1), auditSession, session);
             for (int turn = session.modelTurns() + 1; maxModelTurns <= 0 || turn <= maxModelTurns; turn++) {
                 logger.accept("   Tool model turn " + turn + "/" + limitLabel(maxModelTurns) + ".");
                 boolean closing = maxModelTurns > 0 && turn == Math.max(1,
@@ -385,8 +391,8 @@ public class WorkspaceAgentRuntime {
                     You are DevelopmentAgent, continuing one project in its real workspace.
                     You may edit production code, frontend files, development tests, pom.xml and README.md.
                     Keep every required user behavior and the public contract. Never edit platform acceptance assets.
-                    Use list_files/search_code/read_files to inspect the workspace. Prefer one apply_patch call for
-                    several related source files instead of spending one model turn per file. Use bash for builds,
+                    Use list_files/search_code/read_files to inspect the workspace. Use apply_patch for related-file
+                    diffs, or apply_edits for exact replacements/new files without patch line prefixes. Use bash for builds,
                     tests and diagnosis. If a patch reports a context mismatch, read the current file and rebase
                     the patch; do not switch to repeated one-file shell writes.
                     After a coherent production/test edit, compile and run the relevant tests before further refactoring.

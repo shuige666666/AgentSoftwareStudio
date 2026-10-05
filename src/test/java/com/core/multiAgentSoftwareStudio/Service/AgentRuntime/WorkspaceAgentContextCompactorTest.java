@@ -22,6 +22,91 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorkspaceAgentContextCompactorTest {
+    /** 被拒大补丁没有写入价值，预算不足时应先归档，给重新读取的准确正文留空间。 */
+    @Test
+    void archivesZeroWriteRejectionBeforeCurrentRead() throws Exception {
+        var session = contextSession();
+        addRound(session, "rejected", "apply_patch", "rejected-patch-body".repeat(850),
+                "{\"ok\":false,\"applied\":[],\"failedPath\":\"App.java\","
+                        + "\"error\":\"PATCH_CONTEXT_NOT_FOUND\",\"message\":\"expected old annotation, found current annotation\"}");
+        String source = "current-source-for-repair\n".repeat(260);
+        addRound(session, "source", "read_files", "{}", range(1, 260, "current", source.replace("\n", "\\n")));
+        addRound(session, "dto", "read_files", "{}", "{\"files\":[{\"path\":\"Dto.java\",\"sha256\":\"dto\",\"content\":\"small dto\"}]}");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(8_000);
+        var compacted = new WorkspaceAgentContextCompactor(policy).compact(session, "read_files",
+                session.messages().getLast().content(), 8);
+        assertTrue(compacted.withinWorkingBudget());
+        assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("current-source-for-repair")));
+        assertFalse(session.messages().stream().flatMap(message -> message.toolCalls().stream())
+                .anyMatch(call -> call.id().equals("rejected")));
+        assertTrue(session.messages().stream().anyMatch(message -> message.content().contains("PATCH_CONTEXT_NOT_FOUND")));
+        assertEquals(0, session.writeVersion());
+        assertPairs(session.messages());
+    }
+
+    /** 归档后诊断仍能跨再次压缩和同源码续接；不恢复旧目标或重新执行失败编辑。 */
+    @Test
+    void preservesRejectionAcrossCompactionAndResume() throws Exception {
+        var session = contextSession();
+        addRound(session, "bad", "apply_patch", "rejected-large-patch".repeat(1_000),
+                "{\"ok\":false,\"applied\":[],\"error\":\"PATCH_CONTEXT_NOT_FOUND\",\"failedPath\":\"App.java\",\"message\":\"read current annotation\"}");
+        addRound(session, "read", "read_files", "{}", range(1, 1, "current", "current source"));
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(2_000);
+        var compactor = new WorkspaceAgentContextCompactor(policy);
+        compactor.compact(session, "read_files", session.messages().getLast().content(), 8);
+        compactor.compactForRetry(session, "read_files", session.messages().getLast().content(), 7);
+        WorkspaceDevelopmentContext.save(session, Map.of());
+        var restored = contextSession();
+        WorkspaceDevelopmentContext.restore(restored);
+        assertTrue(restored.messages().stream().anyMatch(message -> message.content().contains("PATCH_CONTEXT_NOT_FOUND")));
+        assertFalse(restored.messages().stream().flatMap(message -> message.toolCalls().stream())
+                .anyMatch(call -> call.id().equals("bad")));
+        assertPairs(restored.messages());
+    }
+
+    /** 部分写入或多工具混合轮次不能冒充零写入拒绝，必须保留原始执行配对。 */
+    @Test
+    void doesNotArchivePartialOrMixedEdits() {
+        var session = contextSession();
+        addRound(session, "partial", "apply_patch", "partial patch",
+                "{\"ok\":false,\"applied\":[\"App.java\"],\"error\":\"WRITE_FAILED\"}");
+        session.messages().add(ToolChatMessage.assistant("", List.of(
+                new ToolCall("mixed-edit", "apply_patch", "mixed patch"),
+                new ToolCall("mixed-read", "read_files", "{}"))));
+        session.messages().add(ToolChatMessage.tool("mixed-edit", "{\"ok\":false,\"applied\":[],\"error\":\"PATCH_FORMAT\"}"));
+        session.messages().add(ToolChatMessage.tool("mixed-read", "{\"files\":[]}"));
+        addRound(session, "bad", "apply_edits", "invalid-large-edit".repeat(2_000),
+                "{\"ok\":false,\"error\":\"STALE_FILE\",\"message\":\"read current file\"}");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(2_000);
+        new WorkspaceAgentContextCompactor(policy).compact(session, "apply_edits",
+                session.messages().getLast().content(), 5);
+        Set<String> ids = session.messages().stream().flatMap(message -> message.toolCalls().stream())
+                .map(ToolCall::id).collect(java.util.stream.Collectors.toSet());
+        assertTrue(ids.containsAll(Set.of("partial", "mixed-edit", "mixed-read")));
+        assertFalse(ids.contains("bad"));
+        assertPairs(session.messages());
+    }
+
+    /** 后续真实写入改变候选后，不再把历史编辑拒绝作为当前恢复诊断重复固定。 */
+    @Test
+    void dropsArchivedRejectionAfterNewWrites() {
+        var session = contextSession();
+        addRound(session, "bad", "apply_patch", "rejected-patch".repeat(2_000),
+                "{\"ok\":false,\"applied\":[],\"error\":\"PATCH_CONTEXT_NOT_FOUND\"}");
+        var policy = new WorkspaceAgentLimitsConfig().getContext();
+        policy.setMaxWorkingContextTokens(2_000);
+        var compactor = new WorkspaceAgentContextCompactor(policy);
+        compactor.compact(session, "apply_patch", session.messages().getLast().content(), 6);
+        addRound(session, "fixed", "apply_edits", "{}", "{\"applied\":1,\"changedFiles\":[\"App.java\"]}");
+        session.recordWrite("App.java");
+        compactor.compactForRetry(session, "apply_edits", session.messages().getLast().content(), 5);
+        assertFalse(session.messages().stream().anyMatch(message -> message.content().contains("PATCH_CONTEXT_NOT_FOUND")));
+        assertPairs(session.messages());
+    }
+
     /** 单任务压缩同样保留初始失败，收到新验证后用当前失败替代旧中断证据。 */
     @Test
     void singleTaskCompactionReplacesSavedFailureWithCurrentEvidence() {

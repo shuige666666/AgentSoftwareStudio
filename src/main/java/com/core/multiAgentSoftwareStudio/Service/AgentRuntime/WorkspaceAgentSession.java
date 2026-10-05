@@ -42,10 +42,13 @@ public final class WorkspaceAgentSession {
     private int unresolvedFailureVersion = -1;
     private String unresolvedBehaviorFailure = "";
     private int behaviorFailureVersion = -1;
+    private String unresolvedFinalFailure = "";
+    private int finalFailureVersion = -1;
     private int lastWriteTurn;
     private int lastValidationTurn;
     private int lastValidatedVersion = -1;
     private int automaticChecks;
+    private CheckpointObservation checkpointObservation;
 
     public WorkspaceAgentSession(
             Path projectRoot,
@@ -142,15 +145,67 @@ public final class WorkspaceAgentSession {
     }
 
     public String unresolvedVerificationFailure() {
-        return unresolvedVerificationFailure + (unresolvedBehaviorFailure.isBlank() ? "" : "\n" + unresolvedBehaviorFailure);
+        return String.join("\n", verificationFailures());
     }
     /** 单独提供源码验证失败，压缩时不能与业务失败共用一个首尾截断窗口。 */
     public String sourceVerificationFailure() { return unresolvedVerificationFailure; }
 
     /** 单独提供独立业务失败，普通自测通过不会清除这份诊断。 */
     public String behaviorVerificationFailure() { return unresolvedBehaviorFailure; }
+    public String finalVerificationFailure() { return unresolvedFinalFailure; }
+    CheckpointObservation checkpointObservation() { return checkpointObservation; }
+
+    /** 保存正式快照的各范围结论；只作诊断对照，不恢复验收通过或完成状态。 */
+    void recordCheckpointObservation(CheckpointObservation observation) {
+        checkpointObservation = observation;
+    }
     public int unresolvedFailureVersion() {
-        return unresolvedVerificationFailure.isBlank() ? behaviorFailureVersion : unresolvedFailureVersion;
+        return Math.max(unresolvedFailureVersion, Math.max(behaviorFailureVersion, finalFailureVersion));
+    }
+
+    /** 完整契约和交付资料只由下一次 final 复验更新，中途绿色不能代表这些问题已解决。 */
+    public void recordFinalFeedback(String failure) {
+        unresolvedFinalFailure = failure == null ? "" : failure;
+        finalFailureVersion = unresolvedFinalFailure.isBlank() ? -1 : writeVersion;
+    }
+
+    /** 各类诊断分别进入摘要，避免某一份长日志遮住其他验收范围。 */
+    public List<String> verificationFailures() {
+        return java.util.stream.Stream.of(unresolvedVerificationFailure, unresolvedFinalFailure, unresolvedBehaviorFailure)
+                .filter(value -> !value.isBlank()).toList();
+    }
+
+    /** 记录各检查实际覆盖的快照和范围，成功业务仅代表本次已执行的有限检查。 */
+    record CheckpointObservation(int writeVersion, String sourceHash, String scope, String status,
+                                 String buildStatus, String testStatus, boolean testSummaryPresent,
+                                 int testsRun, int failures, int errors, int skipped,
+                                 String behaviorStatus, int behaviorPassed, int behaviorUnresolved,
+                                 String reportPath) { }
+
+    /** 续接保留诊断和受检事实；通过状态仍由新会话的实际复验确定。 */
+    record VerificationFeedback(int writeVersion, String checkpointHash, String sourceFailure, int sourceVersion,
+                                String finalFailure, int finalVersion, String behaviorFailure, int behaviorVersion,
+                                CheckpointObservation checkpointObservation) { }
+
+    VerificationFeedback verificationFeedback() {
+        return new VerificationFeedback(writeVersion, lastCheckpointHash, unresolvedVerificationFailure,
+                unresolvedFailureVersion, unresolvedFinalFailure, finalFailureVersion,
+                unresolvedBehaviorFailure, behaviorFailureVersion, checkpointObservation);
+    }
+
+    /** 源码和预算指纹校验由调用方负责，此处仅恢复未完成的诊断。 */
+    void restoreVerificationFeedback(VerificationFeedback feedback) {
+        if (feedback == null) return;
+        writeVersion = feedback.writeVersion();
+        lastCheckpointHash = feedback.checkpointHash();
+        unresolvedVerificationFailure = feedback.sourceFailure();
+        unresolvedFailureVersion = feedback.sourceVersion();
+        unresolvedFinalFailure = feedback.finalFailure();
+        finalFailureVersion = feedback.finalVersion();
+        unresolvedBehaviorFailure = feedback.behaviorFailure();
+        behaviorFailureVersion = feedback.behaviorVersion();
+        // 旧v2缺少这项可选事实；不能凭缺字段编造历史绿色。
+        checkpointObservation = feedback.checkpointObservation();
     }
 
     /** 业务失败只能由下一次独立行为检查更新，生成测试绿色不能清除它。 */

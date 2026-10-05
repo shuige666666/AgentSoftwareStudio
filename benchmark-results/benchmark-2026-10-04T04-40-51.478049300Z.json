@@ -1,0 +1,256 @@
+{
+  "startedAt" : "2026-10-04T04:40:51.478049300Z",
+  "finishedAt" : "2026-10-04T04:46:41.088230400Z",
+  "models" : {
+    "coderModel" : {
+      "requestedName" : "qwen3.7-flash",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.1,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 240,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    },
+    "logicModel" : {
+      "requestedName" : "qwen3.8-max-0902",
+      "reportedName" : null,
+      "provider" : "dashscope.aliyuncs.com",
+      "baseUrl" : "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature" : 0.4,
+      "maxOutputTokens" : 8192,
+      "timeoutSeconds" : 480,
+      "jsonOutputEnabled" : true,
+      "revision" : "unknown",
+      "manualReleaseLabel" : null
+    }
+  },
+  "agentModelAssignments" : [ {
+    "agent" : "PlanningAgent",
+    "modelRef" : "logicModel"
+  }, {
+    "agent" : "WorkspaceAgentRuntime",
+    "modelRef" : "coderModel"
+  } ],
+  "benchmarkConfig" : {
+    "caseIds" : [ "poll-system-behavior-v1" ],
+    "repetitions" : 1,
+    "repairBudget" : null,
+    "gitCommit" : "b3f97a0c2d066c24a6ca39ba84c2c4730df7d0c7",
+    "gitDirty" : true,
+    "workingTreeFingerprint" : "777739ec16f132d94468dc52134bbb8cb6bbf2139d5e2f21833bb2e553774671",
+    "requirementSha256" : {
+      "poll-system-behavior-v1" : "14bd21fbe2c229b855365018a6b8e83afeed3c63c42da3d6ac0185717da46527"
+    },
+    "development" : {
+      "maxModelTurns" : 36,
+      "maxToolCalls" : 108,
+      "verificationProtocol" : "snapshot-build-all-tests-contract-final-v1"
+    },
+    "planningSourceProjectId" : "Java_17_Spring_Boot_在线投票系统_20261003_210249",
+    "replayMode" : "SAVED_PLAN"
+  },
+  "cases" : [ {
+    "caseId" : "poll-system-behavior-v1",
+    "repetitionIndex" : 1,
+    "repetitionCount" : 1,
+    "platformSuccess" : false,
+    "independentQualityPassed" : false,
+    "manualVerdict" : "NOT_REVIEWED",
+    "projectPath" : "ai_generated_projects\\Java_17_Spring_Boot_在线投票系统_20261004_124051",
+    "elapsedMillis" : 349392,
+    "quality" : {
+      "passed" : false,
+      "findings" : [ {
+        "gate" : "HAS_TEST_SOURCE",
+        "passed" : true,
+        "evidence" : "Generated test source exists."
+      }, {
+        "gate" : "HAS_SPRING_CONTEXT_TEST",
+        "passed" : true,
+        "evidence" : "Generated Spring context test exists."
+      }, {
+        "gate" : "CONTRACT_GATES_PASSED",
+        "passed" : false,
+        "evidence" : "Final semantic contract gates were not executed."
+      }, {
+        "gate" : "NO_PLACEHOLDER_SOURCE",
+        "passed" : true,
+        "evidence" : "No known placeholder source was found."
+      }, {
+        "gate" : "TESTS_EXECUTED_AND_GREEN",
+        "passed" : false,
+        "evidence" : "Tests must execute and report Failures: 0 plus Errors: 0; output=Tests run: 14, Failures: 0, Errors: 6, Skipped: 0, Time elapsed: 5.905 s <<< FAILURE! -- in com.example.voting.api.PollApiTest | com.example.voting.api.PollApiTest.results_newPoll_allCountsZero -- Time elapsed: 1.963 s <<< ERROR! | com.exam..."
+      } ]
+    },
+    "usage" : {
+      "calls" : 36,
+      "successfulCalls" : 36,
+      "failedCalls" : 0,
+      "durationMillis" : 199980,
+      "inputCacheHitTokens" : 82816,
+      "inputCacheMissTokens" : 335798,
+      "outputTokens" : 19713,
+      "totalTokens" : 438327,
+      "cacheMetricsAvailable" : true,
+      "finishReasonCounts" : {
+        "stop" : 0,
+        "length" : 0,
+        "contentFilter" : 0,
+        "toolCalls" : 36,
+        "other" : 0
+      },
+      "failureCounts" : {
+        "timeout" : 0,
+        "httpError" : 0,
+        "interrupted" : 0,
+        "responseParseError" : 0,
+        "providerError" : 0,
+        "unknown" : 0
+      },
+      "outputValidationCounts" : {
+        "emptyContent" : 0,
+        "jsonParseError" : 0,
+        "schemaValidationError" : 0
+      },
+      "modelUsage" : {
+        "qwen3.7-flash" : {
+          "calls" : 36,
+          "failedCalls" : 0,
+          "inputCacheHitTokens" : 82816,
+          "inputCacheMissTokens" : 335798,
+          "outputTokens" : 19713,
+          "totalTokens" : 438327
+        }
+      }
+    },
+    "attemptsUsed" : 1,
+    "finalFailureKind" : "TEST_ASSERTION",
+    "validationWarningCount" : 1,
+    "verificationSummary" : {
+      "buildExitCode" : 0,
+      "testExitCode" : 1,
+      "buildPassed" : true,
+      "testPassed" : false,
+      "testsRun" : 15,
+      "failures" : 0,
+      "errors" : 6,
+      "buildDurationMillis" : 5502,
+      "testDurationMillis" : 15681,
+      "primaryFailureKind" : "TEST_ASSERTION"
+    },
+    "runSummary" : {
+      "preflightChecks" : 0,
+      "verificationSteps" : 5,
+      "repairAttempts" : 0,
+      "normalizedFileChanges" : 0,
+      "repeatedFailureStops" : 0,
+      "noChangeStops" : 0,
+      "failureCounts" : {
+        "TEST_ASSERTION" : 2,
+        "MAIN_COMPILE" : 1
+      },
+      "repairTargetCounts" : { },
+      "failedGateCounts" : { },
+      "sliceDelivery" : {
+        "plannedSlices" : 1,
+        "acceptedSlices" : 0,
+        "firstPassAcceptedSlices" : 0,
+        "regressionFailures" : 0,
+        "repairRollbackCount" : 0,
+        "repeatedRegressionStopCount" : 0,
+        "repairBudgetUsed" : 0,
+        "repairBudgetLimit" : 0,
+        "sliceRepairSafetyLimit" : 0,
+        "finalVerificationReserve" : 0,
+        "finalRepairCount" : 0,
+        "finalReserveBorrowed" : false,
+        "sliceRepairCounts" : { },
+        "budgetExhaustedAt" : null,
+        "repairStoppedAt" : "",
+        "repairStopReason" : "",
+        "generatedTestFiles" : 0,
+        "admittedTestFiles" : 0,
+        "acceptedTestFiles" : 0,
+        "skippedFutureTypeTests" : 0,
+        "skippedFutureResourceTests" : 0,
+        "skippedAcceptedTestFiles" : 0,
+        "budgetPolicyVersion" : "",
+        "slicePolicyVersion" : "vertical-slice-v7",
+        "declaredProjectType" : "SPRING_BOOT",
+        "effectiveProjectType" : "SPRING_BOOT",
+        "projectProfileId" : "java17-spring-boot-3.2"
+      }
+    },
+    "workflowError" : null,
+    "behavior" : {
+      "status" : "PASS",
+      "findings" : [ {
+        "behavior" : "poll.create",
+        "passed" : true,
+        "evidence" : "HTTP 201, Location=, body={\"id\":\"09ba32a5-475e-4346-b14c-f61c48e46879\"}",
+        "status" : "PASS",
+        "request" : "POST /api/polls; 输入见公开检查约定",
+        "expected" : "POST /api/polls {question:选项测试,options:[A,B]}: 201; id 非空"
+      }, {
+        "behavior" : "poll.initial",
+        "passed" : true,
+        "evidence" : "HTTP 200, Location=, body={\"id\":\"09ba32a5-475e-4346-b14c-f61c48e46879\",\"question\":\"选项测试\",\"counts\":{\"A\":0,\"B\":0}}",
+        "status" : "PASS",
+        "request" : "GET /api/polls/09ba32a5-475e-4346-b14c-f61c48e46879/results",
+        "expected" : "GET /api/polls/{id}/results: 200; counts={A:0,B:0}"
+      }, {
+        "behavior" : "poll.vote.first",
+        "passed" : true,
+        "evidence" : "HTTP 200, Location=, body={\"pollId\":\"09ba32a5-475e-4346-b14c-f61c48e46879\",\"voterId\":\"alice\",\"option\":\"A\",\"optionCount\":1}",
+        "status" : "PASS",
+        "request" : "POST /api/polls/09ba32a5-475e-4346-b14c-f61c48e46879/votes; 输入见公开检查约定",
+        "expected" : "POST /api/polls/{id}/votes {voterId:alice,option:A}: 200 或 201"
+      }, {
+        "behavior" : "poll.result.first",
+        "passed" : true,
+        "evidence" : "HTTP 200, Location=, body={\"id\":\"09ba32a5-475e-4346-b14c-f61c48e46879\",\"question\":\"选项测试\",\"counts\":{\"A\":1,\"B\":0}}",
+        "status" : "PASS",
+        "request" : "GET /api/polls/09ba32a5-475e-4346-b14c-f61c48e46879/results",
+        "expected" : "GET results: 200; counts={A:1,B:0}"
+      }, {
+        "behavior" : "poll.vote.duplicate",
+        "passed" : true,
+        "evidence" : "HTTP 409, Location=, body={\"status\":409,\"code\":\"DUPLICATE_VOTE\",\"message\":\"Voter already voted: alice\"}",
+        "status" : "PASS",
+        "request" : "POST /api/polls/09ba32a5-475e-4346-b14c-f61c48e46879/votes; 输入见公开检查约定",
+        "expected" : "POST votes {voterId:alice,option:B}: 409; 不增加票数"
+      }, {
+        "behavior" : "poll.result.afterDuplicate",
+        "passed" : true,
+        "evidence" : "HTTP 200, Location=, body={\"id\":\"09ba32a5-475e-4346-b14c-f61c48e46879\",\"question\":\"选项测试\",\"counts\":{\"A\":1,\"B\":0}}",
+        "status" : "PASS",
+        "request" : "GET /api/polls/09ba32a5-475e-4346-b14c-f61c48e46879/results",
+        "expected" : "GET results: 200; counts={A:1,B:0}"
+      }, {
+        "behavior" : "poll.vote.second",
+        "passed" : true,
+        "evidence" : "HTTP 200, Location=, body={\"pollId\":\"09ba32a5-475e-4346-b14c-f61c48e46879\",\"voterId\":\"bob\",\"option\":\"B\",\"optionCount\":1}",
+        "status" : "PASS",
+        "request" : "POST /api/polls/09ba32a5-475e-4346-b14c-f61c48e46879/votes; 输入见公开检查约定",
+        "expected" : "POST votes {voterId:bob,option:B}: 200 或 201"
+      }, {
+        "behavior" : "poll.result.final",
+        "passed" : true,
+        "evidence" : "HTTP 200, Location=, body={\"id\":\"09ba32a5-475e-4346-b14c-f61c48e46879\",\"question\":\"选项测试\",\"counts\":{\"A\":1,\"B\":1}}",
+        "status" : "PASS",
+        "request" : "GET /api/polls/09ba32a5-475e-4346-b14c-f61c48e46879/results",
+        "expected" : "GET results: 200; counts={A:1,B:1}"
+      } ],
+      "reason" : null
+    }
+  } ],
+  "platformSuccessCount" : 0,
+  "independentQualityPassCount" : 0,
+  "falseSuccessCount" : 0,
+  "falseSuccessRate" : null,
+  "reportPath" : "E:\\Study\\AI Project Study\\前期的小项目学习\\SoftwareStudio-5\\benchmark-results\\benchmark-2026-10-04T04-40-51.478049300Z.json",
+  "fullWorkflowSuccessRate" : 0.0
+}

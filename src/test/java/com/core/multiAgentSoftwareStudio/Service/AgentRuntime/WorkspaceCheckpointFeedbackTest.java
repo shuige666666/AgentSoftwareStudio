@@ -9,6 +9,25 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class WorkspaceCheckpointFeedbackTest {
+    /** 没有 HTTP 判卷条目时，保存续接状态仍须保留当前源码的启动失败原因。 */
+    @Test
+    void finalFailureSummaryRetainsStartupReasonWithoutFindings() {
+        var behavior = BenchmarkBehaviorResult.notRun("required a bean of type 'demo.Service' that could not be found; full log=target/startup.log");
+        var checkpoint = new WorkspaceCheckpointService.CheckpointResult("final", "FAILED", "startup-hash", "snapshot", "report.json",
+                com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult.notRun(
+                        com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStage.BUILD),
+                com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStepResult.notRun(
+                        com.core.multiAgentSoftwareStudio.Model.Workflow.VerificationStage.TEST),
+                false, List.of(), "test wrapper\nPublic behavior checks (sourceHash=startup-hash): raw-json", false, false, behavior);
+        String summary = WorkspaceCheckpointFeedback.failureSummary(checkpoint);
+        assertTrue(summary.contains("status=NOT_RUN"));
+        assertTrue(summary.contains("required a bean of type 'demo.Service'"));
+        assertTrue(summary.contains("full log=target/startup.log"));
+        assertFalse(summary.contains("raw-json"));
+        assertTrue(WorkspaceCheckpointFeedback.behaviorFailures(BenchmarkBehaviorResult.environmentError("Docker unavailable"),
+                "env-hash", "report.json").contains("reason=Docker unavailable"));
+    }
+
     /** 保存状态时保留底层原因和失败请求，去掉重复的完整业务正文并控制体积。 */
     @Test
     void finalFailureSummaryRetainsActionableEvidenceWithoutDuplicatingRawBehavior() {
