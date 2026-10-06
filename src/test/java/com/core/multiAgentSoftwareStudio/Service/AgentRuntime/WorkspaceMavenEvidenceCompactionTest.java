@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -22,10 +24,11 @@ class WorkspaceMavenEvidenceCompactionTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     /** 历史stdout可由日志入口追溯，保留错误、配对和当前准确正文。 */
-    @Test
-    void archivesDuplicateMavenOutputBeforeEvictingCurrentSource() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"mvn test 2>&1 | tail -80", "mvn clean test -q 2>&1"})
+    void archivesDuplicateMavenOutputBeforeEvictingCurrentSource(String command) throws Exception {
         var session = session();
-        var failure = failure("mvn test 2>&1 | tail -80");
+        var failure = failure(command);
         String original = failure.toString();
         addRound(session, "test", "bash", original);
         String source = "current editable source\n".repeat(160);
@@ -55,13 +58,18 @@ class WorkspaceMavenEvidenceCompactionTest {
     /** 混合命令、写入、环境阻塞和诊断缺失继续保留原响应，避免隐藏未知副作用。 */
     @Test
     void preservesOutputsWithoutCompleteSourceFailureEvidence() {
-        for (String kind : List.of("write", "mixed", "timeout", "infrastructure", "native-thread", "missing-command",
+        for (String kind : List.of("write", "clean-write", "mixed", "clean-only", "timeout", "infrastructure", "native-thread", "missing-command",
                 "missing-log", "missing-evidence", "missing-writes", "passed", "cat")) {
             var session = session();
             var result = failure("mvn test");
             switch (kind) {
                 case "write" -> result.withArray("changedFiles").add("src/App.java");
+                case "clean-write" -> {
+                    result.put("command", "mvn clean test");
+                    result.withArray("changedFiles").add("src/App.java");
+                }
                 case "mixed" -> result.put("command", "mvn test; cat src/App.java");
+                case "clean-only" -> result.put("command", "mvn clean");
                 case "timeout" -> result.put("timedOut", true);
                 case "infrastructure" -> result.put("infrastructureError", "Docker unavailable");
                 case "native-thread" -> result.put("output", "unable to create native thread");

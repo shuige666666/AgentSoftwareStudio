@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
 final class WorkspaceAgentContextCompactor {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Pattern SIMPLE_MAVEN_CHECK = Pattern.compile(
-            "(?:mvn|mvnw|\\./mvnw)(?:\\s+(?:-[^\\s;&|<>]+|compile|test|verify|package))+"
+            "(?:mvn|mvnw|\\./mvnw)(?:\\s+(?:-[^\\s;&|<>]+|clean|compile|test|verify|package))+"
                     + "(?:\\s+2>&1)?(?:\\s*\\|\\s*tail\\s+(?:-\\d+|-n\\s+\\d+))?\\s*");
     static final String REJECTED_EDIT_PREFIX = "Historical rejected edit; complete call remains in audit. ";
     private final WorkspaceAgentLimitsConfig.ContextPolicy policy;
@@ -377,6 +377,7 @@ final class WorkspaceAgentContextCompactor {
                     || result.path("output").asText().contains("unable to create native thread")) return null;
             if (result.path("failureHighlights").asText().isBlank() && result.path("testFailureEvidence").asText().isBlank()) return null;
             String command = result.path("command").asText().trim();
+            // clean test 同样可以复用已有诊断；单独 clean 没有验证阶段，仍保留原输出。
             if (!SIMPLE_MAVEN_CHECK.matcher(command).matches()
                     || java.util.Arrays.stream(command.split("\\s+"))
                     .noneMatch(Set.of("compile", "test", "verify", "package")::contains)) return null;
