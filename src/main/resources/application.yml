@@ -60,8 +60,8 @@ studio:
   agent-runtime:
     # 连续开发会话的轮次和工具上限；正式验证失败由同一会话继续修复。
     development:
-      max-model-turns: 36
-      max-tool-calls: 108
+      max-model-turns: 72
+      max-tool-calls: 128
     implement:
       max-model-turns: 24
       max-tool-calls: 72
