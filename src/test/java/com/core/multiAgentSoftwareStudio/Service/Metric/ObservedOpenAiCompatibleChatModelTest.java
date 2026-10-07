@@ -222,6 +222,7 @@ class ObservedOpenAiCompatibleChatModelTest {
                 objectMapper,
                 new LlmUsageMetricsService(),
                 aiProvider,
-                jsonOutputEnabled);
+                jsonOutputEnabled,
+                false);
     }
 }

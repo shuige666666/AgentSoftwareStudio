@@ -57,6 +57,9 @@ studio:
   ai:
     # 可选：deepseek-direct、alibaba-bailian、generic-openai；前两者读取各自的缓存命中字段。
     provider: alibaba-bailian
+    # true 允许一次模型响应返回多个工具调用；false 保持单工具响应，修改后需重启应用。
+    # 仅控制工具请求的 parallel_tool_calls 参数，工具执行仍按顺序进行。
+    parallel-tool-calls: true
   agent-runtime:
     # 连续开发会话的轮次和工具上限；正式验证失败由同一会话继续修复。
     development:

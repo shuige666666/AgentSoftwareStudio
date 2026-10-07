@@ -46,6 +46,7 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
     private final LlmUsageMetricsService metricsService;
     private final AiProvider aiProvider;
     private final boolean jsonOutputEnabled;
+    private final boolean parallelToolCallsEnabled;
     private final HttpClient httpClient;
 
     public ObservedOpenAiCompatibleChatModel(String apiKey,
@@ -57,7 +58,8 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
                                              ObjectMapper objectMapper,
                                              LlmUsageMetricsService metricsService,
                                              AiProvider aiProvider,
-                                             boolean jsonOutputEnabled) {
+                                             boolean jsonOutputEnabled,
+                                             boolean parallelToolCallsEnabled) {
         this.apiKey = apiKey;
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.modelName = modelName;
@@ -68,6 +70,7 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
         this.metricsService = metricsService;
         this.aiProvider = aiProvider;
         this.jsonOutputEnabled = jsonOutputEnabled;
+        this.parallelToolCallsEnabled = parallelToolCallsEnabled;
         this.httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
     }
 
@@ -212,7 +215,8 @@ public class ObservedOpenAiCompatibleChatModel implements ChatLanguageModel, Too
         root.put("temperature", temperature);
         root.put("max_tokens", maxTokens);
         root.put("tool_choice", "auto");
-        root.put("parallel_tool_calls", false);
+        // 允许模型在一次响应中返回多个工具调用；实际工具仍由运行时按序执行。
+        root.put("parallel_tool_calls", parallelToolCallsEnabled);
 
         ArrayNode messageNodes = root.putArray("messages");
         for (ToolChatMessage message : messages == null ? List.<ToolChatMessage>of() : messages) {

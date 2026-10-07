@@ -53,7 +53,8 @@ public class AiConfig {
                         @Value("${spring.ai.openai.base-url}") String baseUrl, // 读取你配置文件里的 BaseUrl
                         ObjectMapper objectMapper,
                         LlmUsageMetricsService metricsService,
-                        AiProvider aiProvider
+                        AiProvider aiProvider,
+                        @Value("${studio.ai.parallel-tool-calls:false}") boolean parallelToolCallsEnabled
         ) {
 
                 return new ObservedOpenAiCompatibleChatModel(
@@ -66,7 +67,8 @@ public class AiConfig {
                                 objectMapper,
                                 metricsService,
                                 aiProvider,
-                                CODER_MODEL_JSON_OUTPUT_ENABLED);
+                                CODER_MODEL_JSON_OUTPUT_ENABLED,
+                                parallelToolCallsEnabled);
         }
 
         @Bean(name = LOGIC_MODEL_BEAN_NAME)
@@ -74,7 +76,8 @@ public class AiConfig {
                         @Value("${spring.ai.openai.base-url}") String baseUrl,
                         ObjectMapper objectMapper,
                         LlmUsageMetricsService metricsService,
-                        AiProvider aiProvider) {
+                        AiProvider aiProvider,
+                        @Value("${studio.ai.parallel-tool-calls:false}") boolean parallelToolCallsEnabled) {
                 return new ObservedOpenAiCompatibleChatModel(
                                 apiKey,
                                 baseUrl,
@@ -85,7 +88,8 @@ public class AiConfig {
                                 objectMapper,
                                 metricsService,
                                 aiProvider,
-                                LOGIC_MODEL_JSON_OUTPUT_ENABLED);
+                                LOGIC_MODEL_JSON_OUTPUT_ENABLED,
+                                parallelToolCallsEnabled);
         }
 
         /**
